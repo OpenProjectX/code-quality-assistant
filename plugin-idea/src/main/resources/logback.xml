@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="30 seconds">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Properties
+         ═══════════════════════════════════════════════════════════════ -->
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}" />
+    <property name="APP_NAME" value="${APP_NAME:-application}" />
+    <property name="MAX_HISTORY" value="${LOG_MAX_HISTORY:-30}" />
+    <property name="MAX_SIZE" value="${LOG_MAX_SIZE:-100MB}" />
+    <property name="TOTAL_CAP" value="${LOG_TOTAL_CAP:-3GB}" />
+
+    <!-- Color patterns -->
+    <property name="CONSOLE_PATTERN"
+              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5level){highlight} %clr(---){faint} %clr([%15.15thread]){magenta} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n%xException" />
+
+    <property name="FILE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %-40.40logger{39} - [%X{traceId:-}/%X{spanId:-}] %msg%n%xException" />
+
+    <property name="JSON_PATTERN"
+              value='{"@timestamp":"%d{ISO8601}","level":"%level","thread":"%thread","logger":"%logger","traceId":"%X{traceId:-}","spanId":"%X{spanId:-}","message":"%msg"}%n' />
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Custom Color Conversion Rule
+         ═══════════════════════════════════════════════════════════════ -->
+    <conversionRule conversionWord="clr"
+                    converterClass="ch.qos.logback.classic.pattern.color.HighlightingCompositeConverter" />
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Console Appender (colored output)
+         ═══════════════════════════════════════════════════════════════ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>DEBUG</level>
+        </filter>
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Rolling File Appender (general logs)
+         ═══════════════════════════════════════════════════════════════ -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}.log</file>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${MAX_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_CAP}</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+    </appender>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Error-only File Appender
+         ═══════════════════════════════════════════════════════════════ -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${MAX_SIZE}</maxFileSize>
+            <maxHistory>90</maxHistory>
+            <totalSizeCap>${TOTAL_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         JSON Appender (structured logging for log aggregators)
+         ═══════════════════════════════════════════════════════════════ -->
+    <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-json.log</file>
+        <encoder>
+            <pattern>${JSON_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/${APP_NAME}-json.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${MAX_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_CAP}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Async Wrappers (non-blocking I/O for file appenders)
+         ═══════════════════════════════════════════════════════════════ -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="FILE" />
+    </appender>
+
+    <appender name="ASYNC_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>256</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <includeCallerData>true</includeCallerData>
+        <appender-ref ref="ERROR_FILE" />
+    </appender>
+
+    <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>10</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="JSON_FILE" />
+    </appender>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Logger Tuning
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Framework noise reduction -->
+    <logger name="org.apache.kafka"            level="WARN"  />
+    <logger name="org.apache.zookeeper"        level="WARN"  />
+    <logger name="org.apache.spark"            level="WARN"  />
+    <logger name="org.hibernate.SQL"           level="DEBUG" />
+    <logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="TRACE" />
+    <logger name="org.springframework"         level="INFO"  />
+    <logger name="org.springframework.web"     level="DEBUG" />
+    <logger name="io.netty"                    level="WARN"  />
+    <logger name="io.grpc"                     level="INFO"  />
+    <logger name="com.zaxxer.hikari"           level="INFO"  />
+    <logger name="liquibase"                   level="INFO"  />
+
+    <!-- OpenTelemetry / tracing -->
+    <logger name="io.opentelemetry"            level="INFO"  />
+    <logger name="io.opentelemetry.exporter"   level="WARN"  />
+
+    <!-- Application-level fine tuning -->
+    <logger name="com.yourcompany.service"     level="DEBUG" additivity="false">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="ASYNC_FILE" />
+        <appender-ref ref="ASYNC_ERROR" />
+    </logger>
+
+    <logger name="com.yourcompany.repository"  level="TRACE" additivity="false">
+        <appender-ref ref="ASYNC_FILE" />
+        <appender-ref ref="ASYNC_ERROR" />
+    </logger>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Root Logger
+         ═══════════════════════════════════════════════════════════════ -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="ASYNC_FILE" />
+        <appender-ref ref="ASYNC_ERROR" />
+        <appender-ref ref="ASYNC_JSON" />
+    </root>
+
+</configuration>

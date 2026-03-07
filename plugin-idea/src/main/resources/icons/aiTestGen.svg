@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="16"
+     height="16"
+     viewBox="0 0 16 16"
+     fill="none">
+
+    <!-- Speech bubble -->
+    <rect x="1.5"
+          y="2"
+          width="13"
+          height="9"
+          rx="2"
+          fill="#4C8BF5"/>
+
+    <!-- Bubble tail -->
+    <path d="M5 11 L5 14 L7.5 11 Z"
+          fill="#4C8BF5"/>
+
+    <!-- AI text -->
+    <text x="8"
+          y="8.5"
+          text-anchor="middle"
+          font-family="Inter, Roboto, Arial"
+          font-size="5"
+          font-weight="700"
+          fill="white"
+          dominant-baseline="middle">
+        AI
+    </text>
+
+</svg>
