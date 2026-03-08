@@ -29,6 +29,7 @@ class GenerateTestsService(private val project: Project) {
             contractText = contractText,
             framework = ui.framework,
             baseUrl = ui.baseUrl,
+            location = ui.location,
             packageName = packageName,
             className = ui.className,
             outputNotes = ui.notes
@@ -39,7 +40,15 @@ class GenerateTestsService(private val project: Project) {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val code = kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
-                writeGenerated(project, file, ui.framework, ui.location, ui.className, code)
+                writeGenerated(
+                    project = project,
+                    contractFile = file,
+                    framework = ui.framework,
+                    location = ui.location,
+                    packageName = packageName,
+                    cls = ui.className,
+                    code = code
+                )
             } catch (e: Exception) {
                 log.error("Test generation failed:", e)
                 Notifications.error(project, "Test generation failed:", e.message ?: e.toString())
@@ -52,17 +61,18 @@ class GenerateTestsService(private val project: Project) {
         contractFile: VirtualFile,
         framework: Framework,
         location: String,
+        packageName: String?,
         cls: String,
         code: String
     ) {
         val projectRoot = project.guessProjectDir()
             ?: throw IllegalStateException("Cannot resolve project root")
 
-        val normalizedLocation = location
-            .trim()
-            .replace('\\', '/')
-            .removePrefix("/")
-            .removeSuffix("/")
+        val normalizedLocation = resolveOutputLocation(
+            framework = framework,
+            location = location,
+            packageName = packageName
+        )
 
         val fileName = when (framework) {
             Framework.REST_ASSURED -> "$cls.java"
@@ -95,4 +105,36 @@ class GenerateTestsService(private val project: Project) {
             file = createdFile
         )
     }
+
+    private fun resolveOutputLocation(
+        framework: Framework,
+        location: String,
+        packageName: String?
+    ): String {
+        val normalizedLocation = normalizePath(location)
+
+        return when (framework) {
+            Framework.REST_ASSURED -> {
+                val packagePath = packageName
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.replace('.', '/')
+                    ?.replace('\\', '/')
+                    ?.trim('/')
+
+                listOfNotNull(
+                    normalizedLocation.takeIf { it.isNotBlank() },
+                    packagePath?.takeIf { it.isNotBlank() }
+                ).joinToString("/")
+            }
+
+            Framework.KARATE -> normalizedLocation
+        }
+    }
+
+    private fun normalizePath(path: String): String =
+        path.trim()
+            .replace('\\', '/')
+            .removePrefix("/")
+            .removeSuffix("/")
 }
