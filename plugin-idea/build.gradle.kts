@@ -13,16 +13,41 @@ repositories {
 
 val isCi: Boolean by gradle.extra
 
-//intellij {
-//    version.set("2024.3") // pick your target
-//    type.set("IC")
-//    plugins.set(listOf("yaml")) // YAML support; OpenAPI plugin is separate, but YAML is baseline
-//}
+val buildPluginZip by tasks.registering(Zip::class) {
+    group = "build"
+    description = "Builds the IntelliJ plugin distribution as ZIP"
+
+    archiveBaseName.set(project.name)
+    archiveVersion.set(project.version.toString())
+    archiveExtension.set("zip")
+    destinationDirectory.set(layout.buildDirectory.dir("distributions"))
+
+    from({
+        zipTree(tasks.named("buildPlugin").get().outputs.files.singleFile)
+    })
+
+    dependsOn(tasks.named("buildPluginJar"))
+}
 
 tasks {
     patchPluginXml {
         sinceBuild.set("243")
         untilBuild.set("253.*")
+    }
+
+    buildPlugin {
+        archiveExtension.set("jar")
+    }
+
+    register("buildPluginJar") {
+        group = "build"
+        description = "Builds the IntelliJ plugin distribution as JAR"
+        dependsOn(buildPlugin)
+    }
+
+    assemble {
+        dependsOn(buildPlugin)
+        dependsOn(buildPluginZip)
     }
 }
 
@@ -48,7 +73,7 @@ dependencies {
 
 publishing {
     publications {
-        create<MavenPublication>("pluginZip") {
+        create<MavenPublication>("pluginDistribution") {
             groupId = project.group.toString()
             artifactId = "ai-test-plugin"
             version = project.version.toString()
@@ -57,9 +82,14 @@ publishing {
                 extension = "jar"
             }
 
+            artifact(buildPluginZip) {
+                classifier = "plugin"
+                extension = "zip"
+            }
+
             pom {
                 name.set("AI Test Plugin")
-                description.set("IntelliJ IDEA plugin ZIP distribution")
+                description.set("IntelliJ IDEA plugin distribution")
                 url.set("https://github.com/OpenProjectX/ai-test-plugin")
 
                 licenses {
@@ -85,10 +115,6 @@ publishing {
             }
         }
     }
-
-//    repositories {
-//        mavenLocal()
-//    }
 }
 
 signing {
@@ -98,8 +124,6 @@ signing {
         val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
 
         useInMemoryPgpKeys(keyText, keyPass)
-
-        sign(publishing.publications["pluginZip"])
+        sign(publishing.publications["pluginDistribution"])
     }
-
 }
