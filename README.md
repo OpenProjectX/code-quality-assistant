@@ -7,7 +7,8 @@
 [![Version](https://img.shields.io/badge/Version-0.1.3-orange)](https://github.com/OpenProjectX/ai-test-plugin/releases)
 
 *Contract-driven test generation powered by AI*
-<video src="https://github.com/OpenProjectX/ai-test-plugin/blob/main/doc/usage.mp4" controls width="600"></video>
+
+![Usage Demo](doc/usage.gif)
 
 </div>
 
