@@ -17,31 +17,29 @@ class GenerateTestsService(private val project: Project) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun generate(ui: GenerateTestsDialog.UiResult, file: VirtualFile, contractText: String) {
-        val framework = when (ui.frameworkIndex) {
-            0 -> Framework.REST_ASSURED
-            else -> Framework.KARATE
-        }
-
-        // Load settings from IDE settings or project config file (you wanted user code config)
-        val settings = LlmSettingsLoader.load(project) // implement: read from .idea or project file
+        val settings = LlmSettingsLoader.load(project)
         val provider = LlmProviderFactory.create(settings)
+
+        val packageName = when (val frameworkConfig = ui.frameworkConfig) {
+            is FrameworkUiConfig.RestAssured -> frameworkConfig.packageName
+            FrameworkUiConfig.None -> null
+        }
 
         val req = GenerationRequest(
             contractText = contractText,
-            framework = framework,
+            framework = ui.framework,
             baseUrl = ui.baseUrl,
-            packageName = ui.location,
+            packageName = packageName,
             className = ui.className,
             outputNotes = ui.notes
         )
 
         val prompt = PromptBuilder.build(req)
 
-        // Run async (but return in this action; do not claim background “later”)
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val code = kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
-                writeGenerated(project, file, framework, ui.location, ui.className, code)
+                writeGenerated(project, file, ui.framework, ui.location, ui.className, code)
             } catch (e: Exception) {
                 log.error("Test generation failed:", e)
                 Notifications.error(project, "Test generation failed:", e.message ?: e.toString())

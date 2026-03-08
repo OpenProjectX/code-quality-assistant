@@ -4,10 +4,14 @@ package org.openprojectx.ai.plugin.core
 object PromptBuilder {
     fun build(req: GenerationRequest): String {
         val frameworkRules = when (req.framework) {
-            Framework.REST_ASSURED -> """
+            Framework.REST_ASSURED -> {
+                val packageName = req.packageName?.takeIf { it.isNotBlank() }
+                    ?: error("packageName is required for REST_ASSURED generation")
+
+                """
         Target: Java tests using JUnit 5 + Rest Assured.
         Requirements:
-        - Generate a single test class: ${req.packageName}.${req.className}
+        - Generate a single test class: $packageName.${req.className}
         - Use RestAssured given/when/then style.
         - Add assertions beyond status code: validate key fields, required properties, enums, and error models if present.
         - For each operation in the spec, generate:
@@ -19,6 +23,7 @@ object PromptBuilder {
         - Do NOT invent endpoints not in the contract.
         - Output ONLY code, no markdown.
       """.trimIndent()
+            }
 
             Framework.KARATE -> """
         Target: Karate tests.

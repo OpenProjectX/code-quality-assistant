@@ -54,7 +54,7 @@ publishing {
             version = project.version.toString()
 
             artifact(tasks.named("buildPlugin")) {
-                extension = "zip"
+                extension = "jar"
             }
 
             pom {
