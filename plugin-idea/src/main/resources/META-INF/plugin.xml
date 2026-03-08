@@ -2,6 +2,8 @@
     <id>org.openprojectx.aitestgen</id>
     <name>AI Test Generator</name>
     <vendor>OpenProjectX</vendor>
+    <description>AI Test Generator</description>
+
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>

@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.intellij)
     alias(libs.plugins.kotlinPluginSerialization)
+    `maven-publish`
+    signing
 }
 
 repositories {
@@ -8,6 +10,8 @@ repositories {
         defaultRepositories()
     }
 }
+
+val isCi: Boolean by gradle.extra
 
 //intellij {
 //    version.set("2024.3") // pick your target
@@ -40,6 +44,62 @@ dependencies {
     implementation(libs.bundles.kotlinxEcosystem)
 
     implementation("ch.qos.logback:logback-classic:1.5.32")
+}
 
+publishing {
+    publications {
+        create<MavenPublication>("pluginZip") {
+            groupId = project.group.toString()
+            artifactId = "ai-test-plugin"
+            version = project.version.toString()
+
+            artifact(tasks.named("buildPlugin")) {
+                extension = "zip"
+            }
+
+            pom {
+                name.set("AI Test Plugin")
+                description.set("IntelliJ IDEA plugin ZIP distribution")
+                url.set("https://github.com/OpenProjectX/ai-test-plugin")
+
+                licenses {
+                    license {
+                        name.set("Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("OpenProjectX")
+                        name.set("OpenProjectX")
+                        email.set("admin@openprojectx.org")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:https://github.com/OpenProjectX/ai-test-plugin.git")
+                    developerConnection.set("scm:git:ssh://git@github.com:OpenProjectX/ai-test-plugin.git")
+                    url.set("https://github.com/OpenProjectX/ai-test-plugin.git")
+                }
+            }
+        }
+    }
+
+//    repositories {
+//        mavenLocal()
+//    }
+}
+
+signing {
+    if (isCi) {
+        val keyFile = System.getenv("SIGNING_KEY_FILE")
+        val keyText = file(keyFile).readText()
+        val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+
+        useInMemoryPgpKeys(keyText, keyPass)
+
+        sign(publishing.publications["pluginZip"])
+    }
 
 }
