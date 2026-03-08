@@ -37,15 +37,15 @@ This plugin embraces **Contract-Based Testing** as a first-class paradigm. The c
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      CONTRACT                                │
-│                  (OpenAPI / Protobuf / ...)                  │
-│                        ⭐ SOURCE OF TRUTH                     │
+│                      CONTRACT                               │
+│                  (OpenAPI / Protobuf / ...)                 │
+│                        ⭐ SOURCE OF TRUTH                   │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              AI Test Generator Plugin                       │
-│         (context-aware prompt engineering)                   │
+│         (context-aware prompt engineering)                  │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
