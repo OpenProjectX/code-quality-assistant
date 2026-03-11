@@ -51,6 +51,13 @@ tasks {
     }
 }
 
+intellijPlatform {
+    publishing {
+        token = System.getenv("JETBRAINS_TOKEN")
+    }
+}
+
+
 dependencies {
     intellijPlatform {
         val type = providers.gradleProperty("platformType")
