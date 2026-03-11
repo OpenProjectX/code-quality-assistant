@@ -29,11 +29,11 @@ class BitbucketPullRequestProvider(
             closed = false,
             fromRef = Ref(
                 id = "refs/heads/${request.sourceBranch}",
-                repository = Repo(project = Project(repo.projectKey), slug = repo.repoSlug)
+                repository = BitbucketRepoRef(bitbucketProjectRef = BitbucketProjectRef(repo.projectKey), slug = repo.repoSlug)
             ),
             toRef = Ref(
                 id = "refs/heads/${request.targetBranch}",
-                repository = Repo(project = Project(repo.projectKey), slug = repo.repoSlug)
+                repository = BitbucketRepoRef(bitbucketProjectRef = BitbucketProjectRef(repo.projectKey), slug = repo.repoSlug)
             )
         )
 
@@ -63,17 +63,17 @@ class BitbucketPullRequestProvider(
     @Serializable
     data class Ref(
         val id: String,
-        val repository: Repo
+        val repository: BitbucketRepoRef
     )
 
     @Serializable
-    data class Repo(
-        val project: Project,
+    data class BitbucketRepoRef(
+        val bitbucketProjectRef: BitbucketProjectRef,
         val slug: String
     )
 
     @Serializable
-    data class Project(
+    data class BitbucketProjectRef(
         val key: String
     )
 

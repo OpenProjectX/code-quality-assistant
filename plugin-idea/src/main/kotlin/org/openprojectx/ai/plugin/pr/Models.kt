@@ -33,7 +33,11 @@ interface GitHostingProvider {
 data class PullRequestConfig(
     val enabled: Boolean = false,
     val createAfterPush: Boolean = false,
-    val provider: GitHostingProviderType = GitHostingProviderType.BITBUCKET,
     val token: String? = null,
     val targetBranch: String = "main"
+)
+
+data class PullRequestUiOptions(
+    val createAfterPush: Boolean,
+    val targetBranch: String
 )
