@@ -1,19 +1,17 @@
 package org.openprojectx.ai.plugin
 
-import com.amazon.ion.system.IonTextWriterBuilder.json
-import org.openprojectx.ai.plugin.llm.LlmProvider
-import org.openprojectx.ai.plugin.llm.LlmSettings
-
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.DEFAULT
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import org.openprojectx.ai.plugin.llm.LlmProvider
+import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.OpenAiCompatibleProvider
 import org.openprojectx.ai.plugin.llm.TemplateLlmProvider
 import java.util.concurrent.TimeUnit
@@ -41,6 +39,10 @@ object LlmProviderFactory {
             }
         }
 
-        return TemplateLlmProvider(http, settings)
+        return when (settings.provider.trim().lowercase()) {
+            "openai-compatible" -> OpenAiCompatibleProvider(http, settings)
+            "template" -> TemplateLlmProvider(http, settings)
+            else -> if (settings.template != null) TemplateLlmProvider(http, settings) else OpenAiCompatibleProvider(http, settings)
+        }
     }
 }

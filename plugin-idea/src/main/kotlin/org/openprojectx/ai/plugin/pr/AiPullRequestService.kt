@@ -22,16 +22,16 @@ class AiPullRequestService(private val project: Project) {
     ): PullRequestResult {
         val repository = GitRemoteParser.parse(remoteUrl)
 
-        val llmSettings = LlmAuthSessionService.getInstance(project).resolve(LlmSettingsLoader.load(project))
-        val llm = LlmProviderFactory.create(llmSettings)
-
         val prompt = PullRequestPromptBuilder.build(
             diff = shorten(diff),
             sourceBranch = sourceBranch,
             targetBranch = targetBranch
         )
 
-        val raw = runBlocking { llm.generateCode(prompt) }.trim()
+        val raw = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+            val llm = LlmProviderFactory.create(settings)
+            runBlocking { llm.generateCode(prompt) }.trim()
+        }
         val generated = json.decodeFromString<GeneratedPullRequestContent>(raw)
 
         val provider = GitHostingProviderFactory.create(

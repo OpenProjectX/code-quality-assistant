@@ -22,8 +22,7 @@ class GenerateTestsService(private val project: Project) {
         notificationState.setState(file.path, GenerationUiState.Generating)
         EditorNotifications.getInstance(project).updateNotifications(file)
 
-        val settings = LlmAuthSessionService.getInstance(project).resolve(LlmSettingsLoader.load(project))
-        val provider = LlmProviderFactory.create(settings)
+        val authSession = LlmAuthSessionService.getInstance(project)
 
         val packageName = when (val frameworkConfig = ui.frameworkConfig) {
             is FrameworkUiConfig.RestAssured -> frameworkConfig.packageName
@@ -44,7 +43,10 @@ class GenerateTestsService(private val project: Project) {
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val code = kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
+                val code = authSession.withReloginOnUnauthorized { settings ->
+                    val provider = LlmProviderFactory.create(settings)
+                    kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
+                }
                 writeGenerated(
                     project = project,
                     contractFile = file,

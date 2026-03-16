@@ -15,6 +15,19 @@ object LlmSettingsLoader {
 
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
+    fun readConfigText(project: Project): String {
+        val configFile = findOrCreateConfigFile(project.basePath ?: error("Project basePath is null"))
+        return configFile.readText(Charsets.UTF_8)
+    }
+
+    fun writeConfigText(project: Project, text: String) {
+        val configFile = findOrCreateConfigFile(project.basePath ?: error("Project basePath is null"))
+        configFile.writeText(text, Charsets.UTF_8)
+    }
+
+    fun configFilePath(project: Project): String =
+        findOrCreateConfigFile(project.basePath ?: error("Project basePath is null")).absolutePath
+
     fun loadConfig(project: Project): AiTestConfig {
         val basePath = project.basePath ?: error("Project basePath is null")
         val configFile = findConfigFile(basePath)
@@ -157,4 +170,38 @@ object LlmSettingsLoader {
         }
         return null
     }
+
+    private fun findOrCreateConfigFile(basePath: String): File {
+        val existing = findConfigFile(basePath)
+        if (existing != null) return existing
+
+        val file = File(basePath, ".ai-test.yaml")
+        if (!file.exists()) {
+            file.writeText(defaultConfigTemplate(), Charsets.UTF_8)
+        }
+        return file
+    }
+
+    private fun defaultConfigTemplate(): String = """
+        llm:
+          provider: openai-compatible
+          endpoint: https://api.openai.com/v1/chat/completions
+          model: gpt-4.1
+          apiKeyEnv: OPENAI_API_KEY
+
+        generation:
+          defaults:
+            framework: karate
+            className: OpenApiGeneratedTests
+            baseUrl: ""
+            notes: ""
+          common:
+            location: src/test/resources/karate
+          frameworks:
+            restassured:
+              location: src/test/java
+              packageName: org.openprojectx.ai.plugin.generated
+            karate:
+              location: src/test/resources/karate
+    """.trimIndent() + "\n"
 }

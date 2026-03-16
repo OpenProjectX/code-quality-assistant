@@ -27,11 +27,17 @@ class OpenAiCompatibleProvider(
             temperature = 0.1
         )
 
-        val resp: ChatCompletionsResponse = http.post(endpoint) {
+        val response = http.post(endpoint) {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(req)
-        }.body()
+        }
+
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw LlmUnauthorizedException("Unauthorized LLM request to $endpoint")
+        }
+
+        val resp: ChatCompletionsResponse = response.body()
 
         return resp.choices.firstOrNull()?.message?.content
             ?: error("Empty LLM response")
