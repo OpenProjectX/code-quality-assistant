@@ -23,6 +23,7 @@ class AiPullRequestService(private val project: Project) {
         val repository = GitRemoteParser.parse(remoteUrl)
 
         val prompt = PullRequestPromptBuilder.build(
+            template = LlmSettingsLoader.loadConfig(project).prompts.pullRequest,
             diff = shorten(diff),
             sourceBranch = sourceBranch,
             targetBranch = targetBranch

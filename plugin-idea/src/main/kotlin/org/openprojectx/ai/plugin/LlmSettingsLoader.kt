@@ -3,6 +3,7 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.Project
 import org.openprojectx.ai.plugin.core.Framework
+import org.openprojectx.ai.plugin.core.GenerationPromptTemplate
 import org.openprojectx.ai.plugin.llm.LlmAuthConfig
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.TemplateRequestConfig
@@ -36,6 +37,8 @@ object LlmSettingsLoader {
         val auth = llm["auth"] as? Map<*, *>
         val login = auth?.get("login") as? Map<*, *>
         val generation = root["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val defaults = generation["defaults"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val common = generation["common"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val frameworks = generation["frameworks"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
@@ -68,7 +71,12 @@ object LlmSettingsLoader {
             commonLocation = common.string("location"),
             restAssuredLocation = restAssured.string("location"),
             restAssuredPackageName = restAssured.string("packageName"),
-            karateLocation = karate.string("location")
+            karateLocation = karate.string("location"),
+            generationPromptWrapper = promptGeneration.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
+            generationPromptRestAssured = promptGeneration.string("restAssuredRules").ifBlank { AiPromptDefaults.GENERATION_REST_ASSURED },
+            generationPromptKarate = promptGeneration.string("karateRules").ifBlank { AiPromptDefaults.GENERATION_KARATE },
+            commitPrompt = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
+            pullRequestPrompt = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST }
         )
     }
 
@@ -76,6 +84,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
         root["generation"] = buildGenerationMap(root["generation"] as? Map<*, *>, model)
+        root["prompts"] = buildPromptsMap(root["prompts"] as? Map<*, *>, model)
         writeRootMap(project, root)
     }
 
@@ -91,10 +100,27 @@ object LlmSettingsLoader {
 
         val llm = parseLlmSettings(root)
         val generation = parseGenerationConfig(root)
+        val prompts = parsePromptOverrides(root)
 
         return AiTestConfig(
             llm = llm,
-            generation = generation
+            generation = generation,
+            prompts = prompts
+        )
+    }
+
+    private fun parsePromptOverrides(root: Map<*, *>): PromptOverrides {
+        val prompts = root["prompts"] as? Map<*, *> ?: return PromptOverrides()
+        val generation = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+
+        return PromptOverrides(
+            generation = GenerationPromptTemplate(
+                wrapper = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
+                restAssuredRules = generation.string("restAssuredRules").ifBlank { AiPromptDefaults.GENERATION_REST_ASSURED },
+                karateRules = generation.string("karateRules").ifBlank { AiPromptDefaults.GENERATION_KARATE }
+            ),
+            commitMessage = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
+            pullRequest = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST }
         )
     }
 
@@ -319,6 +345,18 @@ object LlmSettingsLoader {
         )
 
         return generation
+    }
+
+    private fun buildPromptsMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+        val prompts = existing.toMutableLinkedMap()
+        prompts["generation"] = linkedMapOf<String, Any>(
+            "wrapper" to model.generationPromptWrapper,
+            "restAssuredRules" to model.generationPromptRestAssured,
+            "karateRules" to model.generationPromptKarate
+        )
+        prompts["commitMessage"] = model.commitPrompt
+        prompts["pullRequest"] = model.pullRequestPrompt
+        return prompts
     }
 
     private fun buildTemplateMap(

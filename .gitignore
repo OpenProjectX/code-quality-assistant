@@ -174,3 +174,4 @@ gradle-app.setting
 /.intellijPlatform/
 /http-client.private.env.json
 /.ai-test.yaml
+/.idea/

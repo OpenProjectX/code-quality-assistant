@@ -66,6 +66,11 @@ class AiTestSettingsConfigurable(
     private lateinit var restAssuredLocationField: JTextField
     private lateinit var restAssuredPackageNameField: JTextField
     private lateinit var karateLocationField: JTextField
+    private lateinit var generationPromptWrapperField: JTextArea
+    private lateinit var generationPromptRestAssuredField: JTextArea
+    private lateinit var generationPromptKarateField: JTextArea
+    private lateinit var commitPromptField: JTextArea
+    private lateinit var pullRequestPromptField: JTextArea
 
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
 
@@ -119,6 +124,11 @@ class AiTestSettingsConfigurable(
         restAssuredLocationField = JTextField()
         restAssuredPackageNameField = JTextField()
         karateLocationField = JTextField()
+        generationPromptWrapperField = textArea(10)
+        generationPromptRestAssuredField = textArea(12)
+        generationPromptKarateField = textArea(10)
+        commitPromptField = textArea(12)
+        pullRequestPromptField = textArea(14)
 
         llmTemplateEnabled.addActionListener { toggleTemplateCards() }
         loginEnabled.addActionListener { toggleTemplateCards() }
@@ -127,6 +137,7 @@ class AiTestSettingsConfigurable(
             addTab("LLM", llmTab())
             addTab("Login", loginTab())
             addTab("Generation", generationTab())
+            addTab("Prompts", promptsTab())
         }
 
         val toolbar = JPanel(BorderLayout()).apply {
@@ -233,6 +244,23 @@ class AiTestSettingsConfigurable(
         )))
         add(formSection("Karate", listOf(
             "Location" to karateLocationField
+        )))
+    }).apply { border = BorderFactory.createEmptyBorder() }
+
+    private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
+        add(formSection("Generation Wrapper", listOf(
+            "Template" to JScrollPane(generationPromptWrapperField)
+        )))
+        add(formSection("Generation Rules", listOf(
+            "Rest Assured rules" to JScrollPane(generationPromptRestAssuredField),
+            "Karate rules" to JScrollPane(generationPromptKarateField)
+        )))
+        add(formSection("AI Actions", listOf(
+            "Commit message prompt" to JScrollPane(commitPromptField),
+            "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -362,7 +390,12 @@ class AiTestSettingsConfigurable(
         commonLocation = commonLocationField.text.trim(),
         restAssuredLocation = restAssuredLocationField.text.trim(),
         restAssuredPackageName = restAssuredPackageNameField.text.trim(),
-        karateLocation = karateLocationField.text.trim()
+        karateLocation = karateLocationField.text.trim(),
+        generationPromptWrapper = generationPromptWrapperField.text,
+        generationPromptRestAssured = generationPromptRestAssuredField.text,
+        generationPromptKarate = generationPromptKarateField.text,
+        commitPrompt = commitPromptField.text,
+        pullRequestPrompt = pullRequestPromptField.text
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -395,6 +428,11 @@ class AiTestSettingsConfigurable(
         restAssuredLocationField.text = state.restAssuredLocation
         restAssuredPackageNameField.text = state.restAssuredPackageName
         karateLocationField.text = state.karateLocation
+        generationPromptWrapperField.text = state.generationPromptWrapper
+        generationPromptRestAssuredField.text = state.generationPromptRestAssured
+        generationPromptKarateField.text = state.generationPromptKarate
+        commitPromptField.text = state.commitPrompt
+        pullRequestPromptField.text = state.pullRequestPrompt
 
         toggleTemplateCards()
         updatePathLabel()

@@ -23,6 +23,7 @@ class GenerateTestsService(private val project: Project) {
         EditorNotifications.getInstance(project).updateNotifications(file)
 
         val authSession = LlmAuthSessionService.getInstance(project)
+        val config = LlmSettingsLoader.loadConfig(project)
 
         val packageName = when (val frameworkConfig = ui.frameworkConfig) {
             is FrameworkUiConfig.RestAssured -> frameworkConfig.packageName
@@ -39,7 +40,7 @@ class GenerateTestsService(private val project: Project) {
             outputNotes = ui.notes
         )
 
-        val prompt = PromptBuilder.build(req)
+        val prompt = PromptBuilder.build(req, config.prompts.generation)
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {

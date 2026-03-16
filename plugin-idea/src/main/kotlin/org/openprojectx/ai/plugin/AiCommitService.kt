@@ -15,27 +15,7 @@ class AiCommitService(private val project: Project) {
     }
 
     private fun buildPrompt(diff: String): String {
-        return """
-            You are an expert Git commit message generator.
-
-            Based on the git diff below, generate a concise and high-quality commit message.
-
-            Requirements:
-            - Use Conventional Commits style when appropriate
-            - Output only the commit message
-            - First line must be <= 72 characters if possible
-            - Focus on intent and user-visible/codebase-visible change
-            - Do not include markdown fences
-            - Do not explain your answer
-
-            Preferred format:
-            <type>: <short summary>
-
-            Optional body:
-            - bullet points only if really needed
-
-            Git diff:
-            $diff
-        """.trimIndent()
+        val template = LlmSettingsLoader.loadConfig(project).prompts.commitMessage
+        return AiPromptDefaults.render(template, mapOf("diff" to diff))
     }
 }
