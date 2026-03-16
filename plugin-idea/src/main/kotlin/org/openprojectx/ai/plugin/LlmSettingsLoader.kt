@@ -6,6 +6,7 @@ import org.openprojectx.ai.plugin.core.Framework
 import org.openprojectx.ai.plugin.llm.LlmAuthConfig
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.TemplateRequestConfig
+import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import java.io.File
 
@@ -27,6 +28,56 @@ object LlmSettingsLoader {
 
     fun configFilePath(project: Project): String =
         findOrCreateConfigFile(project.basePath ?: error("Project basePath is null")).absolutePath
+
+    fun loadSettingsModel(project: Project): AiTestSettingsModel {
+        val root = readRootMap(project)
+        val llm = root["llm"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val template = llm["template"] as? Map<*, *>
+        val auth = llm["auth"] as? Map<*, *>
+        val login = auth?.get("login") as? Map<*, *>
+        val generation = root["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val defaults = generation["defaults"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val common = generation["common"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val frameworks = generation["frameworks"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val restAssured = frameworks[Framework.REST_ASSURED.id] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val karate = frameworks[Framework.KARATE.id] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+
+        return AiTestSettingsModel(
+            llmProvider = llm.string("provider").ifBlank { "openai-compatible" },
+            llmModel = llm.string("model"),
+            llmEndpoint = llm.string("endpoint"),
+            llmTimeoutSeconds = llm.string("timeoutSeconds").ifBlank { "60" },
+            llmApiKey = llm.string("apiKey"),
+            llmApiKeyEnv = llm.string("apiKeyEnv"),
+            llmTemplateEnabled = template != null,
+            llmTemplateMethod = template.string("method").ifBlank { "POST" },
+            llmTemplateUrl = template.string("url"),
+            llmTemplateHeaders = headersToText(template?.get("headers") as? Map<*, *>),
+            llmTemplateBody = template.string("body"),
+            llmTemplateResponsePath = template.string("responsePath"),
+            loginEnabled = login != null,
+            loginMethod = login.string("method").ifBlank { "POST" },
+            loginUrl = login.string("url"),
+            loginHeaders = headersToText(login?.get("headers") as? Map<*, *>),
+            loginBody = login.string("body"),
+            loginResponsePath = login.string("responsePath"),
+            defaultFramework = Framework.fromIdOrNull(defaults.string("framework")) ?: AiTestDefaults.DEFAULT_FRAMEWORK,
+            defaultClassName = defaults.string("className").ifBlank { AiTestDefaults.DEFAULT_CLASS_NAME },
+            defaultBaseUrl = defaults.string("baseUrl"),
+            defaultNotes = defaults.string("notes"),
+            commonLocation = common.string("location"),
+            restAssuredLocation = restAssured.string("location"),
+            restAssuredPackageName = restAssured.string("packageName"),
+            karateLocation = karate.string("location")
+        )
+    }
+
+    fun saveSettingsModel(project: Project, model: AiTestSettingsModel) {
+        val root = readRootMap(project).toMutableLinkedMap()
+        root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
+        root["generation"] = buildGenerationMap(root["generation"] as? Map<*, *>, model)
+        writeRootMap(project, root)
+    }
 
     fun loadConfig(project: Project): AiTestConfig {
         val basePath = project.basePath ?: error("Project basePath is null")
@@ -204,4 +255,150 @@ object LlmSettingsLoader {
             karate:
               location: src/test/resources/karate
     """.trimIndent() + "\n"
+
+    private fun buildLlmMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+        val llm = existing.toMutableLinkedMap()
+        putIfNotBlank(llm, "provider", model.llmProvider)
+        putIfNotBlank(llm, "model", model.llmModel)
+        putIfNotBlank(llm, "endpoint", model.llmEndpoint)
+        putIfNotBlank(llm, "timeoutSeconds", model.llmTimeoutSeconds)
+        putIfNotBlank(llm, "apiKey", model.llmApiKey)
+        putIfNotBlank(llm, "apiKeyEnv", model.llmApiKeyEnv)
+
+        if (model.llmTemplateEnabled) {
+            llm["template"] = buildTemplateMap(
+                method = model.llmTemplateMethod,
+                url = model.llmTemplateUrl,
+                headersText = model.llmTemplateHeaders,
+                body = model.llmTemplateBody,
+                responsePath = model.llmTemplateResponsePath
+            )
+        } else {
+            llm.remove("template")
+        }
+
+        if (model.loginEnabled) {
+            llm["auth"] = linkedMapOf(
+                "login" to buildTemplateMap(
+                    method = model.loginMethod,
+                    url = model.loginUrl,
+                    headersText = model.loginHeaders,
+                    body = model.loginBody,
+                    responsePath = model.loginResponsePath
+                )
+            )
+        } else {
+            llm.remove("auth")
+        }
+
+        return llm
+    }
+
+    private fun buildGenerationMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+        val generation = existing.toMutableLinkedMap()
+
+        generation["defaults"] = linkedMapOf<String, Any>(
+            "framework" to model.defaultFramework.id,
+            "className" to model.defaultClassName,
+            "baseUrl" to model.defaultBaseUrl,
+            "notes" to model.defaultNotes
+        )
+
+        generation["common"] = linkedMapOf<String, Any>(
+            "location" to model.commonLocation
+        )
+
+        generation["frameworks"] = linkedMapOf<String, Any>(
+            Framework.REST_ASSURED.id to linkedMapOf<String, Any>(
+                "location" to model.restAssuredLocation,
+                "packageName" to model.restAssuredPackageName
+            ),
+            Framework.KARATE.id to linkedMapOf<String, Any>(
+                "location" to model.karateLocation
+            )
+        )
+
+        return generation
+    }
+
+    private fun buildTemplateMap(
+        method: String,
+        url: String,
+        headersText: String,
+        body: String,
+        responsePath: String
+    ): Map<String, Any> = linkedMapOf<String, Any>().apply {
+        put("method", method.ifBlank { "POST" })
+        put("url", url)
+        val headers = headersFromText(headersText)
+        if (headers.isNotEmpty()) {
+            put("headers", headers)
+        }
+        put("body", body)
+        put("responsePath", responsePath)
+    }
+
+    private fun readRootMap(project: Project): Map<String, Any?> {
+        val text = readConfigText(project)
+        val root = Yaml().load<Any?>(text) as? Map<*, *>
+        return root.toMutableLinkedMap()
+    }
+
+    private fun writeRootMap(project: Project, root: Map<String, Any>) {
+        val options = DumperOptions().apply {
+            defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+            isPrettyFlow = true
+            indent = 2
+        }
+        val yaml = Yaml(options)
+        writeConfigText(project, yaml.dump(root))
+    }
+
+    private fun headersToText(headers: Map<*, *>?): String {
+        if (headers.isNullOrEmpty()) return ""
+        return headers.entries.joinToString("\n") { (key, value) -> "${key.toString()}: ${value?.toString().orEmpty()}" }
+    }
+
+    private fun headersFromText(text: String): Map<String, String> {
+        val result = linkedMapOf<String, String>()
+        text.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { line ->
+                val idx = line.indexOf(':')
+                if (idx >= 0) {
+                    val key = line.substring(0, idx).trim()
+                    val value = line.substring(idx + 1).trim()
+                    if (key.isNotEmpty()) {
+                        result[key] = value
+                    }
+                }
+            }
+        return result
+    }
+
+    private fun Map<*, *>?.string(key: String): String =
+        this?.get(key)?.toString()?.trim().orEmpty()
+
+    private fun Map<*, *>?.toMutableLinkedMap(): MutableMap<String, Any> {
+        val result = linkedMapOf<String, Any>()
+        this?.forEach { (key, value) ->
+            val keyText = key?.toString() ?: return@forEach
+            when (value) {
+                is Map<*, *> -> result[keyText] = value.toMutableLinkedMap()
+                is List<*> -> result[keyText] = value.toMutableList()
+                null -> {}
+                else -> result[keyText] = value
+            }
+        }
+        return result
+    }
+
+    private fun putIfNotBlank(target: MutableMap<String, Any>, key: String, value: String) {
+        if (value.isBlank()) {
+            target.remove(key)
+        } else {
+            target[key] = value
+        }
+    }
 }
