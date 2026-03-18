@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![IntelliJ Platform](https://img.shields.io/badge/Platform-IntelliJ%20IDEA%202025%2B-brightgreen)](https://www.jetbrains.com/idea/)
+[![IntelliJ Platform](https://img.shields.io/badge/Platform-IntelliJ%20IDEA%202023%2B-brightgreen)](https://www.jetbrains.com/idea/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.1.3-orange)](https://github.com/OpenProjectX/ai-test-plugin/releases)
 
@@ -83,7 +83,7 @@ ai-test-plugin/
 
 ### From JetBrains Marketplace
 
-1. Open IntelliJ IDEA 2025.2+
+1. Open IntelliJ IDEA 2023.3+
 2. Go to **Settings → Plugins**
 3. Search for "AI Test Generator"
 4. Install and restart IDE
@@ -209,7 +209,7 @@ Feature: User API Contract Tests
 
 ### Prerequisites
 
-- IntelliJ IDEA 2025.2+ (for development)
+- IntelliJ IDEA 2023.3+ (for development)
 - JDK 17+
 - Gradle 9.x
 
