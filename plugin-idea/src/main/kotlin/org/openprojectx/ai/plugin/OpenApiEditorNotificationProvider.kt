@@ -35,7 +35,7 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
                 contractText.contains("org.junit") ||
                 file.name.endsWith("Test.java") ||
                 file.name.endsWith("Tests.java")
-            if (!looksLikeTestClass || !TestDependencyInstaller.needsSetup(project)) {
+            if (!looksLikeTestClass || !TestDependencyInstaller.needsSetup(project, file)) {
                 return null
             }
 
@@ -44,7 +44,7 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
                 text = "Test class detected. Missing JUnit/Mockito/Rest Assured dependencies."
                 icon(OpenProjectXIcons.GenerateTests)
                 createActionLabel("One-click Configure Test Dependencies") {
-                    TestDependencyInstaller.installAndDownloadWithFeedback(project)
+                    TestDependencyInstaller.installAndDownloadWithFeedback(project, file)
                 }
             }
         }
