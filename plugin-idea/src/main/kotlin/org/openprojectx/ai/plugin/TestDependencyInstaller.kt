@@ -6,6 +6,35 @@ import java.io.File
 
 object TestDependencyInstaller {
 
+    fun needsSetup(project: Project): Boolean {
+        val basePath = project.basePath ?: return false
+        val pom = File(basePath, "pom.xml")
+        if (pom.exists()) {
+            val text = pom.readText(Charsets.UTF_8)
+            return !text.contains("<artifactId>junit-jupiter</artifactId>") ||
+                !text.contains("<artifactId>mockito-core</artifactId>") ||
+                !text.contains("<artifactId>rest-assured</artifactId>")
+        }
+
+        val gradleKts = File(basePath, "build.gradle.kts")
+        if (gradleKts.exists()) {
+            val text = gradleKts.readText(Charsets.UTF_8)
+            return !text.contains("org.junit.jupiter:junit-jupiter") ||
+                !text.contains("org.mockito:mockito-core") ||
+                !text.contains("io.rest-assured:rest-assured")
+        }
+
+        val gradle = File(basePath, "build.gradle")
+        if (gradle.exists()) {
+            val text = gradle.readText(Charsets.UTF_8)
+            return !text.contains("org.junit.jupiter:junit-jupiter") ||
+                !text.contains("org.mockito:mockito-core") ||
+                !text.contains("io.rest-assured:rest-assured")
+        }
+
+        return false
+    }
+
     fun installAndDownloadWithFeedback(project: Project) {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
