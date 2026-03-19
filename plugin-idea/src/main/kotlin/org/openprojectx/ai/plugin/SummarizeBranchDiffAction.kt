@@ -152,3 +152,27 @@ class SummarizeBranchLogToolbarAction : SummarizeBranchDiffAction(
     iconPath = "/icons/summarize-vcs-log.svg",
     sourceTag = "Vcs.Log.Toolbar.Internal"
 )
+
+class SummarizeBranchDiffToolbarAction : SummarizeBranchDiffAction(
+    tooltip = "Summarize Branch Differences (Diff Toolbar)",
+    iconPath = "/icons/summarize-diff-toolbar.svg",
+    sourceTag = "Diff.Toolbar"
+)
+
+class SummarizeBranchDiffEditorToolbarAction : SummarizeBranchDiffAction(
+    tooltip = "Summarize Branch Differences (Diff Editor Toolbar)",
+    iconPath = "/icons/summarize-diff-editor-toolbar.svg",
+    sourceTag = "Diff.EditorToolbar"
+)
+
+class SummarizeBranchFileHistoryToolbarAction : SummarizeBranchDiffAction(
+    tooltip = "Summarize Branch Differences (File History Toolbar)",
+    iconPath = "/icons/summarize-file-history-toolbar.svg",
+    sourceTag = "Vcs.FileHistory.Toolbar"
+)
+
+class SummarizeBranchComparePopupToolbarAction : SummarizeBranchDiffAction(
+    tooltip = "Summarize Branch Differences (Compare Popup)",
+    iconPath = "/icons/summarize-compare-popup-toolbar.svg",
+    sourceTag = "Git.Branches.ToolBar"
+)

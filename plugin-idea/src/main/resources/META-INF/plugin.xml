@@ -59,5 +59,33 @@
                 description="Summarize Branch Differences (VCS Log)">
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
         </action>
+        <action
+                id="org.openprojectx.ai.plugin.SummarizeBranchDiffToolbarAction"
+                class="org.openprojectx.ai.plugin.SummarizeBranchDiffToolbarAction"
+                text="Summarize Branch Differences (Diff Toolbar)"
+                description="Summarize Branch Differences (Diff Toolbar)">
+            <add-to-group group-id="Diff.Toolbar" anchor="last"/>
+        </action>
+        <action
+                id="org.openprojectx.ai.plugin.SummarizeBranchDiffEditorToolbarAction"
+                class="org.openprojectx.ai.plugin.SummarizeBranchDiffEditorToolbarAction"
+                text="Summarize Branch Differences (Diff Editor Toolbar)"
+                description="Summarize Branch Differences (Diff Editor Toolbar)">
+            <add-to-group group-id="Diff.EditorToolbar" anchor="last"/>
+        </action>
+        <action
+                id="org.openprojectx.ai.plugin.SummarizeBranchFileHistoryToolbarAction"
+                class="org.openprojectx.ai.plugin.SummarizeBranchFileHistoryToolbarAction"
+                text="Summarize Branch Differences (File History Toolbar)"
+                description="Summarize Branch Differences (File History Toolbar)">
+            <add-to-group group-id="Vcs.FileHistory.Toolbar" anchor="last"/>
+        </action>
+        <action
+                id="org.openprojectx.ai.plugin.SummarizeBranchComparePopupToolbarAction"
+                class="org.openprojectx.ai.plugin.SummarizeBranchComparePopupToolbarAction"
+                text="Summarize Branch Differences (Compare Popup)"
+                description="Summarize Branch Differences (Compare Popup)">
+            <add-to-group group-id="Git.Branches.ToolBar" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
