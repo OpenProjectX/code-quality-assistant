@@ -134,9 +134,3 @@ class SummarizeProbeVcsLogInternalToolbarAction : SummarizeBranchDiffAction(
     iconPath = "/icons/git-probe-02.svg",
     sourceTag = "Vcs.Log.Toolbar.Internal"
 )
-
-class SummarizeProbeDiffViewerDotToolbarAction : SummarizeBranchDiffAction(
-    tooltip = "Summarize Branch Differences [Probe Diff.Viewer.Toolbar]",
-    iconPath = "/icons/git-probe-red.svg",
-    sourceTag = "Diff.Viewer.Toolbar"
-)

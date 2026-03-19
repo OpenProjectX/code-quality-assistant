@@ -38,12 +38,5 @@
                 description="Summarize [Probe Vcs.Log.Toolbar.Internal]">
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
         </action>
-        <action
-                id="org.openprojectx.ai.plugin.SummarizeProbeDiffViewerDotToolbarAction"
-                class="org.openprojectx.ai.plugin.SummarizeProbeDiffViewerDotToolbarAction"
-                text="Summarize [Probe Diff.Viewer.Toolbar]"
-                description="Summarize [Probe Diff.Viewer.Toolbar]">
-            <add-to-group group-id="Diff.Viewer.Toolbar" anchor="last"/>
-        </action>
     </actions>
 </idea-plugin>
