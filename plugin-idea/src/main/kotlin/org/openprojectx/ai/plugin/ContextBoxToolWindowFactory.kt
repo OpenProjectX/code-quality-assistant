@@ -48,9 +48,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
         render(stateService.snapshot())
 
-        project.messageBus.connect(toolWindow.disposable).subscribe(ContextBoxStateService.TOPIC) {
-            render(it)
-        }
+        project.messageBus.connect(toolWindow.disposable).subscribe(
+            ContextBoxStateService.TOPIC,
+            ContextBoxListener { snapshot ->
+                render(snapshot)
+            }
+        )
 
         val content = ContentFactory.getInstance().createContent(panel, "", false)
         toolWindow.contentManager.addContent(content)
