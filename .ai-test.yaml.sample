@@ -4,6 +4,19 @@ llm:
 #  apiKeyEnv: OPENAI_API_KEY
 #  model: gpt-4.1
 #  timeoutSeconds: 60
+#
+  auth:
+    login:
+      method: POST
+      url: http://localhost:8080/login
+      headers:
+        Content-Type: application/json
+      body: |
+        {
+          "username": "{{username}}",
+          "password": "{{password}}"
+        }
+      responsePath: $.apiKey
 
   provider: openai-compatible
   endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions

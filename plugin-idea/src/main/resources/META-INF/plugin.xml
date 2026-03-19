@@ -12,6 +12,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <editorNotificationProvider implementation="org.openprojectx.ai.plugin.OpenApiEditorNotificationProvider"/>
+        <projectConfigurable instance="org.openprojectx.ai.plugin.AiTestSettingsConfigurable"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij">

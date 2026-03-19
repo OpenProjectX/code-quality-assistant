@@ -6,13 +6,18 @@ data class LlmSettings(
     val timeoutSeconds: Long = 60,
     val apiKey: String? = null,
     val endpoint: String? = null,
-    val template: TemplateLlmConfig? = null
+    val template: TemplateRequestConfig? = null,
+    val auth: LlmAuthConfig? = null
 )
 
-data class TemplateLlmConfig(
+data class TemplateRequestConfig(
     val method: String = "POST",
     val url: String,
     val headers: Map<String, String> = emptyMap(),
     val body: String,
     val responsePath: String
+)
+
+data class LlmAuthConfig(
+    val login: TemplateRequestConfig
 )

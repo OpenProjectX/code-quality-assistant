@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.openprojectx.ai.plugin.HttpClients
+import org.openprojectx.ai.plugin.LlmAuthSessionService
 import org.openprojectx.ai.plugin.LlmProviderFactory
 import org.openprojectx.ai.plugin.LlmSettingsLoader
 
@@ -21,16 +22,17 @@ class AiPullRequestService(private val project: Project) {
     ): PullRequestResult {
         val repository = GitRemoteParser.parse(remoteUrl)
 
-        val llmSettings = LlmSettingsLoader.load(project)
-        val llm = LlmProviderFactory.create(llmSettings)
-
         val prompt = PullRequestPromptBuilder.build(
+            template = LlmSettingsLoader.loadConfig(project).prompts.pullRequest,
             diff = shorten(diff),
             sourceBranch = sourceBranch,
             targetBranch = targetBranch
         )
 
-        val raw = runBlocking { llm.generateCode(prompt) }.trim()
+        val raw = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+            val llm = LlmProviderFactory.create(settings)
+            runBlocking { llm.generateCode(prompt) }.trim()
+        }
         val generated = json.decodeFromString<GeneratedPullRequestContent>(raw)
 
         val provider = GitHostingProviderFactory.create(
