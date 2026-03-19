@@ -176,3 +176,9 @@ class SummarizeBranchComparePopupToolbarAction : SummarizeBranchDiffAction(
     iconPath = "/icons/summarize-compare-popup-toolbar.svg",
     sourceTag = "Git.Branches.ToolBar"
 )
+
+class SummarizeBranchVcsLogToolbarAction : SummarizeBranchDiffAction(
+    tooltip = "Summarize Branch Differences (VCS Log Toolbar)",
+    iconPath = "/icons/summarize-vcs-log-toolbar.svg",
+    sourceTag = "Vcs.Log.Toolbar"
+)

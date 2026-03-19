@@ -60,6 +60,13 @@
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
         </action>
         <action
+                id="org.openprojectx.ai.plugin.SummarizeBranchVcsLogToolbarAction"
+                class="org.openprojectx.ai.plugin.SummarizeBranchVcsLogToolbarAction"
+                text="Summarize Branch Differences (VCS Log Toolbar)"
+                description="Summarize Branch Differences (VCS Log Toolbar)">
+            <add-to-group group-id="Vcs.Log.Toolbar" anchor="after" relative-to-action="Vcs.Log.Refresh"/>
+        </action>
+        <action
                 id="org.openprojectx.ai.plugin.SummarizeBranchDiffToolbarAction"
                 class="org.openprojectx.ai.plugin.SummarizeBranchDiffToolbarAction"
                 text="Summarize Branch Differences (Diff Toolbar)"
