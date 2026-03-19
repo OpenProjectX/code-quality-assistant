@@ -27,10 +27,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             isEditable = false
             lineWrap = false
         }
+        val branchSummaryArea = JTextArea().apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+        }
 
         val tabs = JTabbedPane().apply {
             addTab("Classes", JBScrollPane(classList))
             addTab("Code Diff", JBScrollPane(diffArea))
+            addTab("Branch Analysis", JBScrollPane(branchSummaryArea))
         }
 
         val panel = JPanel(BorderLayout()).apply {
@@ -44,6 +50,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
             diffArea.text = snapshot.latestDiff
             diffArea.caretPosition = 0
+            branchSummaryArea.text = snapshot.latestBranchSummary
+            branchSummaryArea.caretPosition = 0
         }
 
         render(stateService.snapshot())

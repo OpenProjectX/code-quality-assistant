@@ -18,7 +18,8 @@ class ContextBoxStateService(private val project: Project) {
 
     data class Snapshot(
         val entries: List<Entry>,
-        val latestDiff: String
+        val latestDiff: String,
+        val latestBranchSummary: String
     )
 
     companion object {
@@ -30,8 +31,9 @@ class ContextBoxStateService(private val project: Project) {
     private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
     private val entries = mutableListOf<Entry>()
     private var latestDiff: String = "No generated diff yet."
+    private var latestBranchSummary: String = "No branch diff summary yet."
 
-    fun snapshot(): Snapshot = Snapshot(entries.toList(), latestDiff)
+    fun snapshot(): Snapshot = Snapshot(entries.toList(), latestDiff, latestBranchSummary)
 
     fun recordGeneration(className: String, targetPath: String, diff: String) {
         entries.add(
@@ -43,6 +45,17 @@ class ContextBoxStateService(private val project: Project) {
             )
         )
         latestDiff = diff.ifBlank { "No diff generated." }
+        project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
+    }
+
+    fun recordBranchSummary(targetBranch: String, sourceBranch: String, summary: String) {
+        latestBranchSummary = buildString {
+            appendLine("Target Branch: $targetBranch")
+            appendLine("Source Branch: $sourceBranch")
+            appendLine()
+            appendLine("Analysis:")
+            append(summary.trim())
+        }.trimEnd()
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
     }
 }

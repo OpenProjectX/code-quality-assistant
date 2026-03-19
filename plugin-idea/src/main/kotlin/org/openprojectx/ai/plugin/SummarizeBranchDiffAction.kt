@@ -8,7 +8,6 @@ import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
-import com.intellij.openapi.ui.Messages
 import com.intellij.vcs.log.VcsLogDataKeys
 
 open class SummarizeBranchDiffAction(
@@ -64,7 +63,16 @@ open class SummarizeBranchDiffAction(
                     )
 
                     ApplicationManager.getApplication().invokeLater {
-                        Messages.showInfoMessage(project, summary.trim(), "Branch Diff Summary")
+                        ContextBoxStateService.getInstance(project).recordBranchSummary(
+                            targetBranch = targetBranch,
+                            sourceBranch = sourceBranch,
+                            summary = summary
+                        )
+                        Notifications.info(
+                            project,
+                            "Branch Diff Summary",
+                            "Summary updated in AI Context Box > Branch Analysis."
+                        )
                     }
                 } catch (ex: Exception) {
                     Notifications.error(
