@@ -76,7 +76,29 @@ object LlmSettingsLoader {
             generationPromptRestAssured = promptGeneration.string("restAssuredRules").ifBlank { AiPromptDefaults.GENERATION_REST_ASSURED },
             generationPromptKarate = promptGeneration.string("karateRules").ifBlank { AiPromptDefaults.GENERATION_KARATE },
             commitPrompt = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
-            pullRequestPrompt = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST }
+            pullRequestPrompt = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST },
+            branchDiffPrompt = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
+            generationPromptProfileDefault = prompts.map("generationProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            generationPromptProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    prompts.map("generationProfiles").map("items"),
+                    AiPromptDefaults.GENERATION_WRAPPER
+                )
+            ),
+            commitPromptProfileDefault = prompts.map("commitMessageProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            commitPromptProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    prompts.map("commitMessageProfiles").map("items"),
+                    AiPromptDefaults.COMMIT_MESSAGE
+                )
+            ),
+            branchDiffPromptProfileDefault = prompts.map("branchDiffSummaryProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            branchDiffPromptProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    prompts.map("branchDiffSummaryProfiles").map("items"),
+                    AiPromptDefaults.BRANCH_DIFF_SUMMARY
+                )
+            )
         )
     }
 
@@ -120,7 +142,22 @@ object LlmSettingsLoader {
                 karateRules = generation.string("karateRules").ifBlank { AiPromptDefaults.GENERATION_KARATE }
             ),
             commitMessage = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
-            pullRequest = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST }
+            pullRequest = prompts.string("pullRequest").ifBlank { AiPromptDefaults.PULL_REQUEST },
+            branchDiffSummary = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
+            profiles = PromptProfiles(
+                generation = parsePromptProfileSet(
+                    prompts.map("generationProfiles"),
+                    defaultTemplate = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER }
+                ),
+                commitMessage = parsePromptProfileSet(
+                    prompts.map("commitMessageProfiles"),
+                    defaultTemplate = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE }
+                ),
+                branchDiffSummary = parsePromptProfileSet(
+                    prompts.map("branchDiffSummaryProfiles"),
+                    defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY }
+                )
+            )
         )
     }
 
@@ -356,7 +393,64 @@ object LlmSettingsLoader {
         )
         prompts["commitMessage"] = model.commitPrompt
         prompts["pullRequest"] = model.pullRequestPrompt
+        prompts["branchDiffSummary"] = model.branchDiffPrompt
+        prompts["generationProfiles"] = buildPromptProfileMap(
+            selected = model.generationPromptProfileDefault,
+            yamlText = model.generationPromptProfilesYaml,
+            defaultTemplate = model.generationPromptWrapper
+        )
+        prompts["commitMessageProfiles"] = buildPromptProfileMap(
+            selected = model.commitPromptProfileDefault,
+            yamlText = model.commitPromptProfilesYaml,
+            defaultTemplate = model.commitPrompt
+        )
+        prompts["branchDiffSummaryProfiles"] = buildPromptProfileMap(
+            selected = model.branchDiffPromptProfileDefault,
+            yamlText = model.branchDiffPromptProfilesYaml,
+            defaultTemplate = model.branchDiffPrompt
+        )
         return prompts
+    }
+
+    private fun parsePromptProfileSet(profileMap: Map<*, *>, defaultTemplate: String): PromptProfileSet {
+        val items = parsePromptProfileItems(profileMap.map("items"), defaultTemplate)
+        val selected = profileMap.string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME }
+        return PromptProfileSet(selected = selected, items = items)
+    }
+
+    private fun parsePromptProfileItems(map: Map<*, *>, defaultTemplate: String): Map<String, String> {
+        val parsed = linkedMapOf<String, String>()
+        map.forEach { (key, value) ->
+            val name = key?.toString()?.trim().orEmpty()
+            val template = value?.toString().orEmpty()
+            if (name.isNotEmpty() && template.isNotBlank()) {
+                parsed[name] = template
+            }
+        }
+        if (parsed.isEmpty()) {
+            parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
+        } else if (!parsed.containsKey(PromptProfileSet.DEFAULT_NAME)) {
+            parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
+        }
+        return parsed
+    }
+
+    private fun buildPromptProfileMap(selected: String, yamlText: String, defaultTemplate: String): Map<String, Any> {
+        val parsedYaml = Yaml().load<Any?>(yamlText) as? Map<*, *>
+        val items = parsePromptProfileItems(parsedYaml ?: emptyMap<Any?, Any?>(), defaultTemplate)
+        return linkedMapOf(
+            "selected" to selected.ifBlank { PromptProfileSet.DEFAULT_NAME },
+            "items" to items
+        )
+    }
+
+    private fun dumpPromptProfilesYaml(items: Map<String, String>): String {
+        val options = DumperOptions().apply {
+            defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+            isPrettyFlow = true
+            indent = 2
+        }
+        return Yaml(options).dump(items).trimEnd()
     }
 
     private fun buildTemplateMap(
@@ -417,6 +511,9 @@ object LlmSettingsLoader {
 
     private fun Map<*, *>?.string(key: String): String =
         this?.get(key)?.toString()?.trim().orEmpty()
+
+    private fun Map<*, *>?.map(key: String): Map<*, *> =
+        this?.get(key) as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
     private fun Map<*, *>?.toMutableLinkedMap(): MutableMap<String, Any> {
         val result = linkedMapOf<String, Any>()

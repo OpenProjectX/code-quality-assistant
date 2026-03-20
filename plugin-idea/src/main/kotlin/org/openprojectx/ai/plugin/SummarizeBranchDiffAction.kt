@@ -7,8 +7,10 @@ import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.ui.Messages
 import com.intellij.vcs.log.VcsLogDataKeys
 import git4idea.repo.GitRepositoryManager
+import java.awt.event.MouseEvent
 
 open class SummarizeBranchDiffAction(
     tooltip: String = "Summarize Branch Differences (Default)",
@@ -24,6 +26,8 @@ open class SummarizeBranchDiffAction(
         val project = e.project ?: return
         val sourceBranch = resolveCurrentBranch(project)
         val targetRef = resolveTargetRef(e, sourceBranch)
+        val templateSelection = selectTemplateIfNeeded(project, e)
+        if (templateSelection == SelectionResult.Cancelled) return
 
         if (targetRef == null) {
             Notifications.warn(
@@ -57,7 +61,8 @@ open class SummarizeBranchDiffAction(
                     val summary = AiBranchDiffSummaryService(project).generate(
                         sourceBranch = sourceBranch,
                         targetBranch = targetRef,
-                        diff = diff
+                        diff = diff,
+                        templateOverride = (templateSelection as? SelectionResult.Selected)?.template
                     )
 
                     ApplicationManager.getApplication().invokeLater {
@@ -144,6 +149,33 @@ open class SummarizeBranchDiffAction(
                 hashObject.javaClass.getMethod("toShortString").invoke(hashObject) as? String
             }.getOrNull()
             ?: hashObject.toString()
+    }
+
+    private fun selectTemplateIfNeeded(project: com.intellij.openapi.project.Project, e: AnActionEvent): SelectionResult {
+        val mouseEvent = e.inputEvent as? MouseEvent ?: return SelectionResult.Default
+        if (!mouseEvent.isPopupTrigger && mouseEvent.button != MouseEvent.BUTTON3) return SelectionResult.Default
+
+        val profiles = LlmSettingsLoader.loadConfig(project).prompts.profiles.branchDiffSummary
+        val items = profiles.items.toList()
+        if (items.isEmpty()) return SelectionResult.Default
+
+        val names = items.map { it.first }.toTypedArray()
+        val selected = Messages.showChooseDialog(
+            project,
+            "Choose branch diff prompt profile",
+            "Branch Diff Prompt Profiles",
+            names,
+            profiles.selected,
+            null
+        )
+        if (selected == -1) return SelectionResult.Cancelled
+        return SelectionResult.Selected(items[selected].second)
+    }
+
+    private sealed interface SelectionResult {
+        data object Default : SelectionResult
+        data object Cancelled : SelectionResult
+        data class Selected(val template: String) : SelectionResult
     }
 }
 

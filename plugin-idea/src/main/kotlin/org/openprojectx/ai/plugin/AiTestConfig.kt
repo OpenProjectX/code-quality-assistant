@@ -13,8 +13,36 @@ data class AiTestConfig(
 data class PromptOverrides(
     val generation: GenerationPromptTemplate = GenerationPromptTemplate(),
     val commitMessage: String = AiPromptDefaults.COMMIT_MESSAGE,
-    val pullRequest: String = AiPromptDefaults.PULL_REQUEST
+    val pullRequest: String = AiPromptDefaults.PULL_REQUEST,
+    val branchDiffSummary: String = AiPromptDefaults.BRANCH_DIFF_SUMMARY,
+    val profiles: PromptProfiles = PromptProfiles()
 )
+
+data class PromptProfiles(
+    val generation: PromptProfileSet = PromptProfileSet.default(
+        defaultTemplate = AiPromptDefaults.GENERATION_WRAPPER
+    ),
+    val commitMessage: PromptProfileSet = PromptProfileSet.default(
+        defaultTemplate = AiPromptDefaults.COMMIT_MESSAGE
+    ),
+    val branchDiffSummary: PromptProfileSet = PromptProfileSet.default(
+        defaultTemplate = AiPromptDefaults.BRANCH_DIFF_SUMMARY
+    )
+)
+
+data class PromptProfileSet(
+    val selected: String = DEFAULT_NAME,
+    val items: Map<String, String> = linkedMapOf(DEFAULT_NAME to "")
+) {
+    companion object {
+        const val DEFAULT_NAME = "default"
+
+        fun default(defaultTemplate: String): PromptProfileSet = PromptProfileSet(
+            selected = DEFAULT_NAME,
+            items = linkedMapOf(DEFAULT_NAME to defaultTemplate)
+        )
+    }
+}
 
 data class GenerationConfig(
     val defaultFramework: Framework = AiTestDefaults.DEFAULT_FRAMEWORK,

@@ -10,12 +10,15 @@ import javax.swing.*
 class GenerateTestsDialog(
     private val project: Project,
     private val sourceFile: com.intellij.openapi.vfs.VirtualFile,
-    private val contractText: String
+    private val contractText: String,
+    preselectedPromptProfile: String? = null
 ) : DialogWrapper(project) {
 
     private val config = LlmSettingsLoader.loadConfig(project)
 
     private val frameworkCombo = JComboBox(Framework.entries.toTypedArray())
+    private val generationPromptProfiles = config.prompts.profiles.generation.items
+    private val generationPromptProfileCombo = JComboBox(generationPromptProfiles.keys.toTypedArray())
     private val location = JTextField()
     private val clsField = JTextField()
     private val baseUrlField = JTextField()
@@ -33,6 +36,7 @@ class GenerateTestsDialog(
     init {
         title = "Generate API Tests"
         applyDefaults(config.generation.defaultFramework)
+        generationPromptProfileCombo.selectedItem = preselectedPromptProfile ?: config.prompts.profiles.generation.selected
         frameworkCombo.selectedItem = config.generation.defaultFramework
         frameworkCombo.addActionListener {
             val selected = selectedFramework()
@@ -51,6 +55,7 @@ class GenerateTestsDialog(
         frameworkSpecificPanel.add(restAssuredPanel, Framework.REST_ASSURED.id)
 
         form.add(labeled("Framework", frameworkCombo))
+        form.add(labeled("Prompt Profile", generationPromptProfileCombo))
         form.add(labeled("Location", location))
         form.add(labeled("Class Name", clsField))
         form.add(labeled("Base URL (optional)", baseUrlField))
@@ -140,6 +145,7 @@ class GenerateTestsDialog(
 
         return UiResult(
             framework = framework,
+            generationPromptWrapperOverride = generationPromptProfiles[generationPromptProfileCombo.selectedItem?.toString().orEmpty()],
             location = location.text.trim(),
             className = clsField.text.trim(),
             baseUrl = baseUrlField.text.trim().ifEmpty { null },
@@ -150,6 +156,7 @@ class GenerateTestsDialog(
 
     data class UiResult(
         val framework: Framework,
+        val generationPromptWrapperOverride: String?,
         val location: String,
         val className: String,
         val baseUrl: String?,
@@ -158,8 +165,13 @@ class GenerateTestsDialog(
     )
 
     companion object {
-        fun open(project: Project, file: com.intellij.openapi.vfs.VirtualFile, contractText: String) {
-            val dialog = GenerateTestsDialog(project, file, contractText)
+        fun open(
+            project: Project,
+            file: com.intellij.openapi.vfs.VirtualFile,
+            contractText: String,
+            preselectedPromptProfile: String? = null
+        ) {
+            val dialog = GenerateTestsDialog(project, file, contractText, preselectedPromptProfile)
             if (!dialog.showAndGet()) return
             GenerateTestsService(project).generate(dialog.result(), file, contractText)
         }

@@ -5,8 +5,8 @@ import kotlinx.coroutines.runBlocking
 
 class AiCommitService(private val project: Project) {
 
-    fun generate(diff: String): String {
-        val prompt = buildPrompt(diff)
+    fun generate(diff: String, templateOverride: String? = null): String {
+        val prompt = buildPrompt(diff, templateOverride)
 
         return LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
             val provider = LlmProviderFactory.create(settings)
@@ -14,8 +14,12 @@ class AiCommitService(private val project: Project) {
         }
     }
 
-    private fun buildPrompt(diff: String): String {
-        val template = LlmSettingsLoader.loadConfig(project).prompts.commitMessage
+    private fun buildPrompt(diff: String, templateOverride: String?): String {
+        val template = templateOverride
+            ?: PromptProfileResolver.resolve(
+                LlmSettingsLoader.loadConfig(project).prompts.profiles.commitMessage,
+                AiPromptDefaults.COMMIT_MESSAGE
+            )
         return AiPromptDefaults.render(template, mapOf("diff" to diff))
     }
 }

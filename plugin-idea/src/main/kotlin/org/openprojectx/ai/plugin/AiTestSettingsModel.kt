@@ -33,5 +33,12 @@ data class AiTestSettingsModel(
     val generationPromptRestAssured: String = AiPromptDefaults.GENERATION_REST_ASSURED,
     val generationPromptKarate: String = AiPromptDefaults.GENERATION_KARATE,
     val commitPrompt: String = AiPromptDefaults.COMMIT_MESSAGE,
-    val pullRequestPrompt: String = AiPromptDefaults.PULL_REQUEST
+    val pullRequestPrompt: String = AiPromptDefaults.PULL_REQUEST,
+    val branchDiffPrompt: String = AiPromptDefaults.BRANCH_DIFF_SUMMARY,
+    val generationPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
+    val generationPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.GENERATION_WRAPPER.replace("\n", "\n  ")}",
+    val commitPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
+    val commitPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.COMMIT_MESSAGE.replace("\n", "\n  ")}",
+    val branchDiffPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
+    val branchDiffPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.BRANCH_DIFF_SUMMARY.replace("\n", "\n  ")}"
 )

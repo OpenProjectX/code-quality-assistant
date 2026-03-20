@@ -7,6 +7,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.vcs.VcsDataKeys
+import java.awt.event.MouseEvent
 
 class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
 
@@ -16,6 +17,11 @@ class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
 
         if (commitMessageUi == null) {
             Notifications.error(project, "Generate Commit Message", "Commit message box is not available.")
+            return
+        }
+
+        val selectedTemplate = selectTemplateIfNeeded(project, e)
+        if (selectedTemplate == SelectionResult.Cancelled) {
             return
         }
 
@@ -31,7 +37,10 @@ class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
                     }
 
                     indicator.text = "Calling LLM..."
-                    val message = AiCommitService(project).generate(diff)
+                    val message = AiCommitService(project).generate(
+                        diff = diff,
+                        templateOverride = (selectedTemplate as? SelectionResult.Selected)?.template
+                    )
 
                     ApplicationManager.getApplication().invokeLater {
                         commitMessageUi.setCommitMessage(message.trim())
@@ -51,5 +60,32 @@ class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible =
             e.project != null && e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) != null
+    }
+
+    private fun selectTemplateIfNeeded(project: com.intellij.openapi.project.Project, e: AnActionEvent): SelectionResult {
+        val mouseEvent = e.inputEvent as? MouseEvent ?: return SelectionResult.Default
+        if (!mouseEvent.isPopupTrigger && mouseEvent.button != MouseEvent.BUTTON3) return SelectionResult.Default
+
+        val config = LlmSettingsLoader.loadConfig(project)
+        val items = config.prompts.profiles.commitMessage.items.toList()
+        if (items.isEmpty()) return SelectionResult.Default
+
+        val names = items.map { it.first }.toTypedArray()
+        val selected = com.intellij.openapi.ui.Messages.showChooseDialog(
+            project,
+            "Choose commit prompt profile",
+            "Commit Prompt Profiles",
+            names,
+            config.prompts.profiles.commitMessage.selected,
+            null
+        )
+        if (selected == -1) return SelectionResult.Cancelled
+        return SelectionResult.Selected(items[selected].second)
+    }
+
+    private sealed interface SelectionResult {
+        data object Default : SelectionResult
+        data object Cancelled : SelectionResult
+        data class Selected(val template: String) : SelectionResult
     }
 }

@@ -9,6 +9,8 @@ import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.EditorNotificationPanel
 import com.intellij.ui.EditorNotifications
 import com.intellij.util.ui.JBUI
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 
 class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNotificationPanel>() {
 
@@ -57,12 +59,32 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
                 }
             }
 
-            createActionLabel("Generate Tests By AI") {
+            val actionLabel = createActionLabel("Generate Tests By AI") {
                 stateService.setState(file.path, GenerationUiState.Generating)
                 EditorNotifications.getInstance(project).updateNotifications(file)
 
                 GenerateTestsDialog.open(project, file, contractText)
             }
+            actionLabel.addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) {
+                    if (!e.isPopupTrigger && e.button != MouseEvent.BUTTON3) return
+                    val profiles = LlmSettingsLoader.loadConfig(project).prompts.profiles.generation
+                    val options = profiles.items.keys.toTypedArray()
+                    if (options.isEmpty()) return
+                    val selected = com.intellij.openapi.ui.Messages.showChooseDialog(
+                        project,
+                        "Choose test generation prompt profile",
+                        "Generation Prompt Profiles",
+                        options,
+                        profiles.selected,
+                        null
+                    )
+                    if (selected < 0) return
+                    stateService.setState(file.path, GenerationUiState.Generating)
+                    EditorNotifications.getInstance(project).updateNotifications(file)
+                    GenerateTestsDialog.open(project, file, contractText, options[selected])
+                }
+            })
         }
     }
 }

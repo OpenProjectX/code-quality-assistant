@@ -67,7 +67,14 @@ class GenerateTestsService(private val project: Project) {
             outputNotes = ui.notes
         )
 
-        val prompt = PromptBuilder.build(req, config.prompts.generation)
+        val generationTemplate = config.prompts.generation.copy(
+            wrapper = ui.generationPromptWrapperOverride
+                ?: PromptProfileResolver.resolve(
+                    config.prompts.profiles.generation,
+                    config.prompts.generation.wrapper
+                )
+        )
+        val prompt = PromptBuilder.build(req, generationTemplate)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating tests by AI", true) {
             override fun run(indicator: ProgressIndicator) {

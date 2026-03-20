@@ -5,8 +5,8 @@ import kotlinx.coroutines.runBlocking
 
 class AiBranchDiffSummaryService(private val project: Project) {
 
-    fun generate(sourceBranch: String, targetBranch: String, diff: String): String {
-        val prompt = buildPrompt(sourceBranch, targetBranch, diff)
+    fun generate(sourceBranch: String, targetBranch: String, diff: String, templateOverride: String? = null): String {
+        val prompt = buildPrompt(sourceBranch, targetBranch, diff, templateOverride)
 
         return LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
             val provider = LlmProviderFactory.create(settings)
@@ -14,9 +14,14 @@ class AiBranchDiffSummaryService(private val project: Project) {
         }
     }
 
-    private fun buildPrompt(sourceBranch: String, targetBranch: String, diff: String): String {
+    private fun buildPrompt(sourceBranch: String, targetBranch: String, diff: String, templateOverride: String?): String {
+        val template = templateOverride
+            ?: PromptProfileResolver.resolve(
+                LlmSettingsLoader.loadConfig(project).prompts.profiles.branchDiffSummary,
+                AiPromptDefaults.BRANCH_DIFF_SUMMARY
+            )
         return AiPromptDefaults.render(
-            AiPromptDefaults.BRANCH_DIFF_SUMMARY,
+            template,
             mapOf(
                 "sourceBranch" to sourceBranch,
                 "targetBranch" to targetBranch,

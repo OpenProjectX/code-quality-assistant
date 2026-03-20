@@ -71,6 +71,13 @@ class AiTestSettingsConfigurable(
     private lateinit var generationPromptKarateField: JTextArea
     private lateinit var commitPromptField: JTextArea
     private lateinit var pullRequestPromptField: JTextArea
+    private lateinit var branchDiffPromptField: JTextArea
+    private lateinit var generationPromptProfileDefaultField: JTextField
+    private lateinit var generationPromptProfilesYamlField: JTextArea
+    private lateinit var commitPromptProfileDefaultField: JTextField
+    private lateinit var commitPromptProfilesYamlField: JTextArea
+    private lateinit var branchDiffPromptProfileDefaultField: JTextField
+    private lateinit var branchDiffPromptProfilesYamlField: JTextArea
 
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
 
@@ -129,6 +136,13 @@ class AiTestSettingsConfigurable(
         generationPromptKarateField = textArea(10)
         commitPromptField = textArea(12)
         pullRequestPromptField = textArea(14)
+        branchDiffPromptField = textArea(12)
+        generationPromptProfileDefaultField = JTextField()
+        generationPromptProfilesYamlField = textArea(12)
+        commitPromptProfileDefaultField = JTextField()
+        commitPromptProfilesYamlField = textArea(12)
+        branchDiffPromptProfileDefaultField = JTextField()
+        branchDiffPromptProfilesYamlField = textArea(12)
 
         llmTemplateEnabled.addActionListener { toggleTemplateCards() }
         loginEnabled.addActionListener { toggleTemplateCards() }
@@ -260,7 +274,16 @@ class AiTestSettingsConfigurable(
         )))
         add(formSection("AI Actions", listOf(
             "Commit message prompt" to JScrollPane(commitPromptField),
+            "Branch diff summary prompt" to JScrollPane(branchDiffPromptField),
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
+        )))
+        add(formSection("Prompt Profiles (Right click actions to choose)", listOf(
+            "Test prompt default profile" to generationPromptProfileDefaultField,
+            "Test prompt profiles (YAML map)" to JScrollPane(generationPromptProfilesYamlField),
+            "Commit prompt default profile" to commitPromptProfileDefaultField,
+            "Commit prompt profiles (YAML map)" to JScrollPane(commitPromptProfilesYamlField),
+            "Branch diff default profile" to branchDiffPromptProfileDefaultField,
+            "Branch diff profiles (YAML map)" to JScrollPane(branchDiffPromptProfilesYamlField)
         )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -395,7 +418,14 @@ class AiTestSettingsConfigurable(
         generationPromptRestAssured = generationPromptRestAssuredField.text,
         generationPromptKarate = generationPromptKarateField.text,
         commitPrompt = commitPromptField.text,
-        pullRequestPrompt = pullRequestPromptField.text
+        pullRequestPrompt = pullRequestPromptField.text,
+        branchDiffPrompt = branchDiffPromptField.text,
+        generationPromptProfileDefault = generationPromptProfileDefaultField.text.trim(),
+        generationPromptProfilesYaml = generationPromptProfilesYamlField.text,
+        commitPromptProfileDefault = commitPromptProfileDefaultField.text.trim(),
+        commitPromptProfilesYaml = commitPromptProfilesYamlField.text,
+        branchDiffPromptProfileDefault = branchDiffPromptProfileDefaultField.text.trim(),
+        branchDiffPromptProfilesYaml = branchDiffPromptProfilesYamlField.text
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -432,7 +462,14 @@ class AiTestSettingsConfigurable(
         generationPromptRestAssuredField.text = state.generationPromptRestAssured
         generationPromptKarateField.text = state.generationPromptKarate
         commitPromptField.text = state.commitPrompt
+        branchDiffPromptField.text = state.branchDiffPrompt
         pullRequestPromptField.text = state.pullRequestPrompt
+        generationPromptProfileDefaultField.text = state.generationPromptProfileDefault
+        generationPromptProfilesYamlField.text = state.generationPromptProfilesYaml
+        commitPromptProfileDefaultField.text = state.commitPromptProfileDefault
+        commitPromptProfilesYamlField.text = state.commitPromptProfilesYaml
+        branchDiffPromptProfileDefaultField.text = state.branchDiffPromptProfileDefault
+        branchDiffPromptProfilesYamlField.text = state.branchDiffPromptProfilesYaml
 
         toggleTemplateCards()
         updatePathLabel()
@@ -451,11 +488,22 @@ class AiTestSettingsConfigurable(
         if (state.loginEnabled) {
             requireTemplate("Login template", state.loginUrl, state.loginBody, state.loginResponsePath)
         }
+        requirePromptProfiles("Test prompts YAML", state.generationPromptProfilesYaml)
+        requirePromptProfiles("Commit prompts YAML", state.commitPromptProfilesYaml)
+        requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
     }
 
     private fun requireTemplate(label: String, url: String, body: String, responsePath: String) {
         if (url.isBlank() || body.isBlank() || responsePath.isBlank()) {
             throw IllegalArgumentException("$label requires URL, body, and response JSONPath")
+        }
+    }
+
+    private fun requirePromptProfiles(label: String, text: String) {
+        val parsed = org.yaml.snakeyaml.Yaml().load<Any?>(text) as? Map<*, *>
+            ?: throw IllegalArgumentException("$label must be a YAML map of profileName: promptTemplate")
+        if (parsed.isEmpty()) {
+            throw IllegalArgumentException("$label cannot be empty")
         }
     }
 
