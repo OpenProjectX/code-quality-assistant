@@ -12,7 +12,7 @@ import git4idea.repo.GitRepositoryManager
 
 open class SummarizeBranchDiffAction(
     tooltip: String = "Summarize Branch Differences (Default)",
-    iconPath: String = "/icons/git-probe-02.svg",
+    iconPath: String = "/icons/blue-bulb.svg",
     private val sourceTag: String = "default"
 ) : DumbAwareAction(
     null,
@@ -149,12 +149,12 @@ open class SummarizeBranchDiffAction(
 
 class SummarizeProbeVcsLogInternalToolbarAction : SummarizeBranchDiffAction(
     tooltip = "Summarize Branch Differences [Probe Vcs.Log.Toolbar.Internal]",
-    iconPath = "/icons/git-probe-02.svg",
+    iconPath = "/icons/blue-bulb.svg",
     sourceTag = "Vcs.Log.Toolbar.Internal"
 )
 
 class SummarizeProbeVcsLogContextMenuAction : SummarizeBranchDiffAction(
     tooltip = "Analyze Current Branch vs Selected Branch/Commit",
-    iconPath = "/icons/git-probe-02.svg",
+    iconPath = "/icons/blue-bulb.svg",
     sourceTag = "Vcs.Log.ContextMenu"
 )
