@@ -36,6 +36,13 @@
                 description="Generate commit message from current git diff using AI">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </action>
+        <group
+                id="org.openprojectx.ai.plugin.GenerateCommitMessagePromptMenuAction"
+                class="org.openprojectx.ai.plugin.GenerateCommitMessagePromptMenuAction"
+                text="Generate Commit Message (Choose Prompt)"
+                description="Choose a configured prompt to generate commit message">
+            <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
+        </group>
         <action
                 id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogInternalToolbarAction"
                 class="org.openprojectx.ai.plugin.SummarizeProbeVcsLogInternalToolbarAction"
