@@ -29,19 +29,22 @@
     </extensions>
 
     <actions>
-        <action
-                id="org.openprojectx.ai.plugin.GenerateCommitMessageAction"
-                class="org.openprojectx.ai.plugin.GenerateCommitMessageAction"
-                text="Generate Commit Message"
-                description="Generate commit message from current git diff using AI">
-            <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
-        </action>
         <group
                 id="org.openprojectx.ai.plugin.GenerateCommitMessagePromptMenuAction"
                 class="org.openprojectx.ai.plugin.GenerateCommitMessagePromptMenuAction"
                 text="Generate Commit Message (Choose Prompt)"
                 description="Choose a configured prompt to generate commit message">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
+        </group>
+        <group
+                id="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
+                class="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
+                text="Analyze Branch Diff (Choose Prompt)"
+                description="Choose a configured prompt to analyze branch diff">
+            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
+            <add-to-group group-id="Vcs.Log.Branches.ContextMenu" anchor="last"/>
+            <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
+            <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
         </group>
         <action
                 id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogInternalToolbarAction"

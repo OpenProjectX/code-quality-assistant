@@ -1,55 +1,64 @@
 package org.openprojectx.ai.plugin
 
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.DumbAwareAction
+import com.intellij.openapi.actionSystem.DumbAware
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.vcs.log.VcsLogDataKeys
 import git4idea.repo.GitRepositoryManager
 
-open class SummarizeBranchDiffAction(
-    tooltip: String = "Summarize Branch Differences (Default)",
-    iconPath: String = "/icons/blue-bulb.svg",
-    private val sourceTag: String = "default"
-) : DumbAwareAction(
-    null,
-    tooltip,
-    IconLoader.getIcon(iconPath, SummarizeBranchDiffAction::class.java)
-) {
+class BranchDiffPromptMenuAction : ActionGroup("Analyze Branch Diff (Choose Prompt)", true), DumbAware {
+
+    override fun getChildren(e: AnActionEvent?): Array<AnAction> {
+        val project = e?.project ?: return emptyArray()
+        val profiles = LlmSettingsLoader.loadConfig(project).prompts.profiles.branchDiffSummary.items
+        if (profiles.isEmpty()) return emptyArray()
+
+        return profiles.entries.map { (name, template) ->
+            BranchDiffByPromptAction(name, template)
+        }.toTypedArray()
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabledAndVisible = e.project != null
+    }
+}
+
+private class BranchDiffByPromptAction(
+    private val promptName: String,
+    private val promptTemplate: String
+) : AnAction(promptName), DumbAware {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val sourceBranch = resolveCurrentBranch(project)
         val targetRef = resolveTargetRef(e, sourceBranch)
-
         if (targetRef == null) {
             Notifications.warn(
                 project,
                 "Summarize Branch Diff",
-                "[$sourceTag] Please select a branch or commit in VCS Log to compare with current branch $sourceBranch."
+                "Please select a branch or commit in VCS Log to compare with current branch $sourceBranch."
             )
             return
         }
+
+        saveDefaultBranchDiffPromptProfile(project, promptName)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Summarizing Branch Diff", false) {
             override fun run(indicator: ProgressIndicator) {
                 try {
                     indicator.text = "Collecting branch diff for $sourceBranch vs $targetRef..."
                     val diff = GitDiffProvider.getDiffBetweenBranches(
-                        project,
+                        project = project,
                         sourceBranch = sourceBranch,
                         targetBranch = targetRef
                     )
-
                     if (diff.isBlank()) {
-                        Notifications.info(
-                            project,
-                            "Summarize Branch Diff",
-                            "[$sourceTag] No changes found between $sourceBranch and $targetRef."
-                        )
+                        Notifications.info(project, "Summarize Branch Diff", "No changes found between $sourceBranch and $targetRef.")
                         return
                     }
 
@@ -57,7 +66,8 @@ open class SummarizeBranchDiffAction(
                     val summary = AiBranchDiffSummaryService(project).generate(
                         sourceBranch = sourceBranch,
                         targetBranch = targetRef,
-                        diff = diff
+                        diff = diff,
+                        templateOverride = promptTemplate
                     )
 
                     ApplicationManager.getApplication().invokeLater {
@@ -66,25 +76,27 @@ open class SummarizeBranchDiffAction(
                             sourceBranch = sourceBranch,
                             summary = summary
                         )
-                        Notifications.info(
-                            project,
-                            "Branch Diff Summary",
-                            "Summary updated in AI Context Box > Branch Analysis."
-                        )
+                        Notifications.info(project, "Branch Diff Summary", "Summary updated in AI Context Box > Branch Analysis.")
                     }
                 } catch (ex: Exception) {
-                    Notifications.error(
-                        project,
-                        "Summarize Branch Diff failed [$sourceTag]",
-                        ex.message ?: ex.toString()
-                    )
+                    Notifications.error(project, "Summarize Branch Diff failed", ex.message ?: ex.toString())
                 }
             }
         })
     }
 
-    override fun update(e: AnActionEvent) {
-        e.presentation.isEnabledAndVisible = e.project != null
+    private fun saveDefaultBranchDiffPromptProfile(project: com.intellij.openapi.project.Project, selectedName: String) {
+        val current = LlmSettingsLoader.loadSettingsModel(project)
+        if (current.branchDiffPromptProfileDefault == selectedName) return
+        LlmSettingsLoader.saveSettingsModel(
+            project,
+            current.copy(branchDiffPromptProfileDefault = selectedName)
+        )
+    }
+
+    private fun resolveCurrentBranch(project: com.intellij.openapi.project.Project): String {
+        val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
+        return repo?.currentBranchName ?: "HEAD"
     }
 
     private fun resolveTargetRef(e: AnActionEvent, currentBranch: String): String? {
@@ -115,11 +127,6 @@ open class SummarizeBranchDiffAction(
         }
     }
 
-    private fun resolveCurrentBranch(project: com.intellij.openapi.project.Project): String {
-        val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
-        return repo?.currentBranchName ?: "HEAD"
-    }
-
     private fun resolveSelectedCommitHash(e: AnActionEvent): String? {
         val vcsLog = e.getData(VcsLogDataKeys.VCS_LOG) ?: return null
         val selectedCommits = runCatching {
@@ -145,17 +152,4 @@ open class SummarizeBranchDiffAction(
             }.getOrNull()
             ?: hashObject.toString()
     }
-
 }
-
-class SummarizeProbeVcsLogInternalToolbarAction : SummarizeBranchDiffAction(
-    tooltip = "Summarize Branch Differences [Probe Vcs.Log.Toolbar.Internal]",
-    iconPath = "/icons/blue-bulb.svg",
-    sourceTag = "Vcs.Log.Toolbar.Internal"
-)
-
-class SummarizeProbeVcsLogContextMenuAction : SummarizeBranchDiffAction(
-    tooltip = "Analyze Current Branch vs Selected Branch/Commit",
-    iconPath = "/icons/blue-bulb.svg",
-    sourceTag = "Vcs.Log.ContextMenu"
-)
