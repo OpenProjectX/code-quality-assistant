@@ -51,10 +51,10 @@ intellijPlatform {
 
 dependencies {
     intellijPlatform {
-        val type = providers.gradleProperty("platformType")
-        val version = providers.gradleProperty("platformVersion")
+        val type = providers.gradleProperty("platformType").getOrElse("IC")
+        val version = providers.gradleProperty("platformVersion").getOrElse("2025.2")
 
-        intellijIdea(version)
+        create(type, version)
         bundledPlugins(listOf("org.jetbrains.plugins.yaml","Git4Idea"))
     }
 
