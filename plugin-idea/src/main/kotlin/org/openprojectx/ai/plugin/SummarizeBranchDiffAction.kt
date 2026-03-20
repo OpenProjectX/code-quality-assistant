@@ -152,3 +152,9 @@ class SummarizeProbeVcsLogInternalToolbarAction : SummarizeBranchDiffAction(
     iconPath = "/icons/git-probe-02.svg",
     sourceTag = "Vcs.Log.Toolbar.Internal"
 )
+
+class SummarizeProbeVcsLogContextMenuAction : SummarizeBranchDiffAction(
+    tooltip = "Analyze Current Branch vs Selected Branch/Commit",
+    iconPath = "/icons/git-probe-02.svg",
+    sourceTag = "Vcs.Log.ContextMenu"
+)
