@@ -11,6 +11,9 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.VcsDataKeys
 
 class GenerateCommitMessagePromptMenuAction : ActionGroup("Generate Commit Message (Choose Prompt)", true), DumbAware {
+    init {
+        templatePresentation.icon = OpenProjectXIcons.GenerateTests
+    }
 
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val project = e?.project ?: return emptyArray()
@@ -32,6 +35,9 @@ private class GenerateCommitMessageByPromptAction(
     private val promptName: String,
     private val promptTemplate: String
 ) : AnAction(promptName), DumbAware {
+    init {
+        templatePresentation.icon = OpenProjectXIcons.GenerateTests
+    }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return

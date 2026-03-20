@@ -16,6 +16,7 @@
         <toolWindow id="AI Context Box"
                     anchor="right"
                     factoryClass="org.openprojectx.ai.plugin.ContextBoxToolWindowFactory"
+                    icon="/icons/blue-bulb.svg"
                     canCloseContents="false"
                     stripeTitle="AI Context Box"/>
     </extensions>
