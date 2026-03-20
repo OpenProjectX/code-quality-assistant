@@ -75,9 +75,9 @@ class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
             project,
             "Choose commit prompt profile",
             "Commit Prompt Profiles",
+            null,
             names,
-            config.prompts.profiles.commitMessage.selected,
-            null
+            config.prompts.profiles.commitMessage.selected
         )
         if (selected == -1) return SelectionResult.Cancelled
         return SelectionResult.Selected(items[selected].second)

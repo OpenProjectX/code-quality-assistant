@@ -164,9 +164,9 @@ open class SummarizeBranchDiffAction(
             project,
             "Choose branch diff prompt profile",
             "Branch Diff Prompt Profiles",
+            null,
             names,
-            profiles.selected,
-            null
+            profiles.selected
         )
         if (selected == -1) return SelectionResult.Cancelled
         return SelectionResult.Selected(items[selected].second)

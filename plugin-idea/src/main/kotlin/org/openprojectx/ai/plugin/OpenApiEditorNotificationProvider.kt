@@ -75,9 +75,9 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
                         project,
                         "Choose test generation prompt profile",
                         "Generation Prompt Profiles",
+                        null,
                         options,
-                        profiles.selected,
-                        null
+                        profiles.selected
                     )
                     if (selected < 0) return
                     stateService.setState(file.path, GenerationUiState.Generating)
