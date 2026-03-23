@@ -1,0 +1,468 @@
+diff --git a/output/diff_HEAD_1_HEAD/diff.txt b/output/diff_HEAD_1_HEAD/diff.txt
+new file mode 100644
+index 0000000..45a709a
+--- /dev/null
++++ b/output/diff_HEAD_1_HEAD/diff.txt
+@@ -0,0 +1,221 @@
++diff --git a/src/main/java/com/example/demo/ConcurrentCache.java b/src/main/java/com/example/demo/ConcurrentCache.java
++new file mode 100644
++index 0000000..e612860
++--- /dev/null
+++++ b/src/main/java/com/example/demo/ConcurrentCache.java
++@@ -0,0 +1,26 @@
+++package com.example.demo;
+++
+++import java.util.concurrent.CompletableFuture;
+++import java.util.concurrent.ConcurrentHashMap;
+++import java.util.concurrent.atomic.AtomicReference;
+++
+++public class ConcurrentCache<K, V>  {
+++
+++
+++    public static void main(String[] args) {
+++
+++        String string = "了ds";
+++        string.toCharArray();
+++        string.codePoints();
+++        System.out.println(string.toCharArray().length);
+++        System.out.println(string.length());
+++    }
+++}
+++
+++interface Cache<K, V> {
+++    V get(K key);
+++}
+++
+++interface LoadingFunction<K, V> {
+++    V apply(K key);
+++}
++\ No newline at end of file
++diff --git a/src/main/java/com/example/demo/Main_478307.java b/src/main/java/com/example/demo/Main_478307.java
++new file mode 100644
++index 0000000..1ab3ca1
++--- /dev/null
+++++ b/src/main/java/com/example/demo/Main_478307.java
++@@ -0,0 +1,46 @@
+++package com.example.demo;
+++
+++public class Main_478307 {
+++
+++    static class Node {
+++        int val;
+++        Node next;
+++
+++        Node(int val) {
+++            this.val = val;
+++        }
+++    }
+++
+++    public static void main(String[] args) {
+++
+++        // 构建链表 1 -> 2 -> 3 -> 4 -> 5 -> null
+++        Node head = new Node(1);
+++        head.next = new Node(2);
+++        head.next.next = new Node(3);
+++        head.next.next.next = new Node(4);
+++        head.next.next.next.next = new Node(5);
+++
+++        // 反转链表
+++        Node reversed = reverseNodeList(head);
+++
+++        // 输出
+++        System.out.print("null ");
+++        while (reversed != null) {
+++            System.out.print(reversed.val + " ");
+++            reversed = reversed.next;
+++        }
+++    }
+++
+++    private static Node reverseNodeList(Node head) {
+++        Node reversed = null;
+++        Node tmp;
+++        while (head != null) {
+++            tmp = reversed;
+++            reversed = head;
+++            head = head.next;
+++            reversed.next = tmp;
+++
+++        }
+++        return reversed;
+++    }
+++}
++\ No newline at end of file
++diff --git a/src/main/java/com/example/demo/Solution_12347894.java b/src/main/java/com/example/demo/Solution_12347894.java
++new file mode 100644
++index 0000000..63982c6
++--- /dev/null
+++++ b/src/main/java/com/example/demo/Solution_12347894.java
++@@ -0,0 +1,57 @@
+++package com.example.demo;
+++
+++public class Solution_12347894 {
+++    public static ListNode<Integer> reverseList(ListNode<Integer> head) {
+++        ListNode<Integer> listNodeListNode = new ListNode<>();
+++        while (head != null) {
+++            ListNode<Integer> current = new ListNode<>(head.val);
+++            listNodeListNode.prepend(current);
+++            listNodeListNode = current;
+++            head = head.next;
+++        }
+++        return listNodeListNode;
+++    }
+++
+++    public static void main(String[] args) {
+++        ListNode<Integer> listNode = new ListNode<>(0);
+++        ListNode<Integer> listNode2 = listNode;
+++        for (int i = 1; i < 10; i++) {
+++            listNode2.append(new ListNode<>(i));
+++            listNode2 = listNode2.next;
+++        }
+++        ListNode<Integer> listNode3 = listNode;
+++        while (listNode != null) {
+++            System.out.println(listNode.val);
+++            listNode = listNode.next;
+++        }
+++        ListNode<Integer> listNode1 = reverseList(listNode3);
+++        while (listNode1 != null) {
+++            System.out.println(listNode1.val);
+++            listNode1 = listNode1.next;
+++        }
+++    }
+++
+++    public static class ListNode<Integer> {
+++        Integer val;
+++        ListNode<Integer> next;
+++
+++        ListNode(Integer val) {
+++            this.val = val;
+++            this.next = null;
+++        }
+++
+++        ListNode() {
+++            this.val = null;
+++            this.next = null;
+++        }
+++
+++        public void append(ListNode<Integer> next) {
+++            this.next = next;
+++        }
+++
+++        public void prepend(ListNode<Integer> head) {
+++            head.next = this;
+++        }
+++    }
+++
+++}
++diff --git a/src/main/java/com/example/demo/ThreadPrint.java b/src/main/java/com/example/demo/ThreadPrint.java
++new file mode 100644
++index 0000000..2666870
++--- /dev/null
+++++ b/src/main/java/com/example/demo/ThreadPrint.java
++@@ -0,0 +1,65 @@
+++package com.example.demo;
+++
+++import java.util.Arrays;
+++import java.util.LinkedList;
+++import java.util.Queue;
+++import java.util.concurrent.Executor;
+++import java.util.concurrent.ExecutorService;
+++import java.util.concurrent.Executors;
+++import java.util.concurrent.Future;
+++import java.util.concurrent.locks.*;
+++
+++public class ThreadPrint {
+++    static Lock lock = new ReentrantLock();
+++    static Queue<Character> queue = new LinkedList<>(Arrays.asList('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'));
+++    static volatile boolean needToWait = true;
+++
+++    public static void main(String[] args) {
+++        Condition conditionMain = lock.newCondition();
+++        Condition condition_1 = lock.newCondition();
+++        Condition condition_2 = lock.newCondition();
+++        Condition condition_3 = lock.newCondition();
+++        ExecutorService executor = Executors.newCachedThreadPool();
+++        executor.execute(() -> printOnConditions(conditionMain, condition_1, condition_2));
+++        executor.execute(() -> printOnConditions(conditionMain, condition_2, condition_3));
+++        executor.execute(() -> printOnConditions(conditionMain, condition_3, condition_1));
+++        Future<?> future1 = executor.submit(() -> printOnConditions(conditionMain, condition_3, condition_1));
+++        Future<?> future2 = executor.submit(() -> printOnConditions(conditionMain, condition_3, condition_1));
+++        Future<?> future3 = executor.submit(() -> printOnConditions(conditionMain, condition_3, condition_1));
+++
+++        lock.lock();
+++        needToWait = false;
+++        try {
+++            conditionMain.await();
+++        } catch (InterruptedException e) {
+++            System.out.println("main thread was interrupted");
+++        } finally {
+++            condition_1.signal();
+++            lock.unlock();
+++            future1.isDone();
+++        }
+++    }
+++
+++    private static void printOnConditions(Condition conditionMain, Condition condition_wait, Condition condition_signal) {
+++        while (needToWait) {
+++            Thread.onSpinWait();
+++        }
+++        lock.lock();
+++        conditionMain.signal();
+++        try {
+++            while (true) {
+++                condition_wait.await();
+++                if (queue.peek() == null) {
+++                    condition_signal.signal();
+++                    break;
+++                }
+++                System.out.println(Thread.currentThread().threadId() + " :  " + queue.poll());
+++                condition_signal.signal();
+++            }
+++        } catch (InterruptedException e) {
+++            throw new RuntimeException(e);
+++        } finally {
+++            lock.unlock();
+++        }
+++    }
+++}
++\ No newline at end of file
+diff --git a/output/diff_HEAD_1_HEAD/review.md b/output/diff_HEAD_1_HEAD/review.md
+new file mode 100644
+index 0000000..a41dd58
+--- /dev/null
++++ b/output/diff_HEAD_1_HEAD/review.md
+@@ -0,0 +1,132 @@
++# Code Review — HEAD~1 → HEAD
++
++> Prompt used: `prompts/diff-review.md`
++
++---
++
++## 1. Summary
++
++This commit adds four algorithm exercise files to the `com.example.demo` package, covering linked-list reversal (two approaches) and multi-threaded printing coordination. The files appear to be coding-practice work rather than production features. Several bugs and incomplete implementations are present and should be addressed before treating these as reference-quality code.
++
++- `ConcurrentCache.java` — Empty cache skeleton with two interfaces and an unrelated Unicode string test
++- `Main_478307.java` — Iterative linked-list reversal with a minor output-ordering issue
++- `Solution_12347894.java` — Second linked-list reversal using a custom generic `ListNode`; contains a trailing dummy-node bug and a misleading type parameter name
++- `ThreadPrint.java` — Three-thread character-printing exercise using `ReentrantLock`/`Condition`; has extra duplicate threads and a potential deadlock
++
++**Risk Level**: Low — All four files are isolated exercises with their own `main` methods; they touch no shared infrastructure, no production business logic, and no tests.
++
++---
++
++## 2. What Changed
++
++Four new Java source files were added to `com.example.demo`, all algorithm/coding-exercise work:
++
++- **`ConcurrentCache.java`** — Declares a `ConcurrentCache<K,V>` class and two interfaces (`Cache<K,V>`, `LoadingFunction<K,V>`). The class is an empty skeleton; a `main` method inside it explores Unicode string/character encoding as an unrelated side-experiment.
++- **`Main_478307.java`** — A self-contained linked-list reversal exercise. Builds a 5-node list and reverses it iteratively using a simple pointer-swap loop.
++- **`Solution_12347894.java`** — A second linked-list reversal approach. Introduces a generic `ListNode<Integer>` inner class with `append`/`prepend` helpers and an alternative `reverseList` method.
++- **`ThreadPrint.java`** — A multi-threaded printing exercise: three (intended) threads take turns printing characters from a shared queue, coordinated via a `ReentrantLock` and three `Condition` objects. Six threads are created in practice.
++
++---
++
++## 3. Code Quality Assessment
++
++### Correctness
++
++Several correctness problems exist (detailed in §4). The two reversal implementations have subtle bugs, and `ThreadPrint` has a deadlock-prone design.
++
++### Design
++
++All four files are standalone exercises placed directly in the root `com.example.demo` package rather than a dedicated sub-package (e.g., `exercises`). The `ConcurrentCache` class mixes unrelated concerns: its interfaces hint at a cache abstraction while its `main` method tests string encoding. `Solution_12347894.reverseList` allocates one new `ListNode` per iteration instead of reversing in place — unnecessary heap pressure for an exercise that presumably intends the canonical O(1)-space reversal.
++
++### Java idioms
++
++- `Solution_12347894.java:34`: The type parameter is literally named `Integer`, which shadows `java.lang.Integer`. This is legal but deeply misleading.
++- `ConcurrentCache.java`: Imports `CompletableFuture`, `ConcurrentHashMap`, and `AtomicReference` that are never used.
++- `ThreadPrint.java`: `Executor` is imported but unused; `ExecutorService` is used instead.
++- Missing newline at end of `ConcurrentCache.java`, `Main_478307.java`, and `ThreadPrint.java`.
++
++### Readability
++
++- `Solution_12347894.java:5`: Variable name `listNodeListNode` is a doubled-word name with no semantic meaning.
++- `Main_478307.java:27`: `System.out.print("null ")` is printed *before* the traversal loop, making the output appear as `null 5 4 3 2 1` — semantically backwards.
++- `ThreadPrint.java`: Six threads are created but the design only accounts for three, with `future1`/`future2`/`future3` being copy-pasted duplicates of thread 3's arguments.
++
++### Completeness
++
++`ConcurrentCache.java` declares a `Cache<K,V>` interface but the class does not implement it. The body is empty except for the unrelated `main` method — an incomplete skeleton.
++
++---
++
++## 4. Potential Issues
++
++| # | Location | Issue | Severity |
++| --- | --- | --- | --- |
++| 1 | `ThreadPrint.java:38` | `future1.isDone()` is called as a statement but its return value is discarded. It does not block or cancel. The executor is never shut down, so the JVM may run indefinitely. | High |
++| 2 | `ThreadPrint.java:26–28` | `future1`, `future2`, `future3` all use identical args `(conditionMain, condition_3, condition_1)`, duplicating thread 3. Six workers compete on a 3-slot round-robin, causing more than one thread to wake on each `condition_1.signal()` call. | High |
++| 3 | `ThreadPrint.java:32–40` | Potential deadlock: all six workers spin-wait then race for the lock when `needToWait = false`. Multiple workers signal `conditionMain` while the main thread may only be in `await()` once. Excess signals are silently lost; if no worker holds the right condition chain, all threads stall indefinitely. | High |
++| 4 | `Solution_12347894.java:5–12` | `reverseList` initialises a dummy `new ListNode<>()` with `val = null`. The returned list always contains a trailing null-valued node, producing incorrect output. | High |
++| 5 | `Solution_12347894.java:34` | Generic type parameter named `Integer` shadows `java.lang.Integer`. Any use of `java.lang.Integer` methods inside this class requires full qualification. | Medium |
++| 6 | `Main_478307.java:27` | `System.out.print("null ")` is printed before the loop. Output is `null 5 4 3 2 1` instead of the expected `5 4 3 2 1 null`. | Low |
++| 7 | `ConcurrentCache.java:1–5` | Three unused imports suggest intended work that was never implemented. | Low |
++
++---
++
++## 5. Suggestions for Improvement
++
++**`ThreadPrint.java` — remove extra threads (lines 26–28)**
++
++The three `future1/2/3` submissions are copy-paste artifacts. Remove them, keep only the three `executor.execute(...)` calls, and shut down the executor:
++
++```java
++executor.shutdown();
++executor.awaitTermination(10, TimeUnit.SECONDS);
++```
++
++**`ThreadPrint.java` — replace `conditionMain` with a `CountDownLatch`**
++
++To avoid fragile signal-before-await ordering, use a latch so the main thread reliably waits until workers are ready:
++
++```java
++CountDownLatch ready = new CountDownLatch(3);
++// each worker calls ready.countDown() after acquiring the lock
++ready.await(); // main thread blocks here
++```
++
++**`Solution_12347894.java` — fix `reverseList` dummy-node bug (line 5)**
++
++Initialise to `null` instead of a dummy node:
++
++```java
++public static ListNode<Integer> reverseList(ListNode<Integer> head) {
++    ListNode<Integer> prev = null;
++    while (head != null) {
++        ListNode<Integer> current = new ListNode<>(head.val);
++        current.next = prev;
++        prev = current;
++        head = head.next;
++    }
++    return prev;
++}
++```
++
++**`Solution_12347894.java` — rename the generic type parameter (line 34)**
++
++Rename `Integer` to `T` to avoid shadowing `java.lang.Integer`:
++
++```java
++public static class ListNode<T> { T val; ListNode<T> next; ... }
++```
++
++**`ConcurrentCache.java` — remove unused imports and implement or stub the interface**
++
++Either have `ConcurrentCache` implement `Cache<K,V>`, or remove the interfaces if they are placeholders. Remove the three unused imports.
++
++---
++
++## 6. Positive Observations
++
++- **`Main_478307.java` — clean iterative reversal**: The `reverseNodeList` algorithm (lines 33–43) is the canonical O(n)-time O(1)-space iterative reversal. The logic is concise and correct.
++
++- **`ThreadPrint.java` — correct `ReentrantLock` + `Condition` structure**: The `try/finally` that always calls `unlock()` follows the recommended `java.util.concurrent.locks` pattern. Using `Thread.onSpinWait()` in the spin loop is a good touch that hints to the CPU about the busy-wait state.
++
++- **`Solution_12347894.java` — `append`/`prepend` helpers**: Factoring out pointer manipulation into named methods on `ListNode` improves readability compared to raw `node.next = ...` assignments.
+diff --git a/output/session-summary.md b/output/session-summary.md
+new file mode 100644
+index 0000000..4d875d1
+--- /dev/null
++++ b/output/session-summary.md
+@@ -0,0 +1,33 @@
++# Session Summary
++
++## What Was Done
++
++### 1. Created a reusable git diff review prompt
++- **`prompts/diff-review.md`** — A single prompt template for reviewing any git diff. Paste the diff at the bottom and send to an LLM. Produces a 6-section structured review:
++  1. Summary (high-level description, files changed, risk level)
++  2. What Changed (per-file plain-language description)
++  3. Code Quality Assessment (correctness, design, idioms, readability, completeness)
++  4. Potential Issues (file:line + severity)
++  5. Suggestions for Improvement (actionable, location-specific)
++  6. Positive Observations
++
++  Started as two separate prompts (review + summary), then merged into one at user request.
++
++### 2. Tested the prompt on HEAD~1 → HEAD of this repo
++- Ran `git diff HEAD~1 HEAD` — the diff covers 4 new algorithm exercise Java files added in the latest commit.
++- Applied the prompt to produce a full review.
++
++### 3. Output files written to `output/diff_HEAD_1_HEAD/`
++- **`diff.txt`** — raw git diff output
++- **`review.md`** — full review produced by applying the prompt
++
++---
++
++## Key Findings from the Review
++
++| File | Issues |
++| --- | --- |
++| `ThreadPrint.java` | 3 High issues: 6 threads created for a 3-thread design; `future.isDone()` is a no-op (executor never shut down); potential deadlock from fragile signal/await ordering |
++| `Solution_12347894.java` | 1 High: `reverseList` returns a list with a spurious trailing null node (dummy-head bug); 1 Medium: type parameter named `Integer` shadows `java.lang.Integer` |
++| `Main_478307.java` | 1 Low: prints `"null "` before the list instead of after |
++| `ConcurrentCache.java` | 1 Low: 3 unused imports; class is an empty skeleton that doesn't implement its own `Cache` interface |
+diff --git a/prompts/diff-review.md b/prompts/diff-review.md
+new file mode 100644
+index 0000000..f028211
+--- /dev/null
++++ b/prompts/diff-review.md
+@@ -0,0 +1,58 @@
++# Git Diff Review Prompt
++
++Use this prompt to get a combined review and summary of a git diff. Paste the diff content after the `## Diff` heading.
++
++---
++
++You are a senior software engineer performing a thorough code review. You will be given a git diff between two refs. Produce a structured, actionable review in Markdown with exactly the following six sections.
++
++## 1. Summary
++
++Write 2-4 sentences describing what this change does at a high level and why it matters. Then provide:
++
++- A bullet list of files changed: `filename.ext` — 5-10 word description
++- **Risk Level**: Low / Medium / High with one sentence justification
++
++## 2. What Changed
++
++Provide a concise plain-language description of every file changed. For new files, describe their apparent purpose and role in the codebase. For modified files, describe what was altered and why.
++
++## 3. Code Quality Assessment
++
++Evaluate the code against these dimensions:
++
++- **Correctness**: Does the logic appear correct? Are there off-by-one errors, race conditions, null pointer risks, or logical flaws?
++- **Design**: Is the abstraction level appropriate? Are classes and methods cohesive? Does the code follow SOLID principles where applicable?
++- **Language idioms**: Is the code idiomatic? Are language features (generics, concurrency primitives, streams, etc.) used correctly?
++- **Readability**: Are names descriptive? Is complexity justified? Is the code easy to follow?
++- **Completeness**: Are there TODO stubs, empty implementations, or dead code?
++
++## 4. Potential Issues
++
++List specific bugs, risks, or correctness problems found. For each issue:
++
++- State the **file and approximate line** (e.g., `ThreadPrint.java:34`)
++- Describe the problem clearly
++- Classify severity: **Critical** / **High** / **Medium** / **Low**
++
++If no issues are found, state that explicitly.
++
++## 5. Suggestions for Improvement
++
++Provide concrete, actionable suggestions. Each suggestion must:
++
++- Reference a specific file and location
++- Describe the current problem
++- Recommend a specific fix or alternative approach
++
++Do not suggest changes unrelated to the diff.
++
++## 6. Positive Observations
++
++Note any patterns, techniques, or design decisions in the diff that are well done and worth keeping.
++
++---
++
++## Diff
++
++<!-- Paste the output of `git diff <ref1> <ref2>` here -->
