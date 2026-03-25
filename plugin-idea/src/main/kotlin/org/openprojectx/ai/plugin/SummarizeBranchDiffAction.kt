@@ -1,19 +1,18 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DumbAwareAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
-import com.intellij.openapi.ui.Messages
 import com.intellij.vcs.log.VcsLogDataKeys
+import git4idea.repo.GitRepositoryManager
 
 open class SummarizeBranchDiffAction(
     tooltip: String = "Summarize Branch Differences (Default)",
-    iconPath: String = "/icons/git-probe-02.svg",
+    iconPath: String = "/icons/blue-bulb.svg",
     private val sourceTag: String = "default"
 ) : DumbAwareAction(
     null,
@@ -23,35 +22,33 @@ open class SummarizeBranchDiffAction(
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val branches = resolveComparedBranches(e)
-        val changedFiles = resolveChangedFiles(e)
+        val sourceBranch = resolveCurrentBranch(project)
+        val targetRef = resolveTargetRef(e, sourceBranch)
 
-        if (branches == null && changedFiles.isEmpty()) {
+        if (targetRef == null) {
             Notifications.warn(
                 project,
                 "Summarize Branch Diff",
-                "[$sourceTag] Cannot detect diff context. Open a branch/file diff and try again."
+                "[$sourceTag] Please select a branch or commit in VCS Log to compare with current branch $sourceBranch."
             )
             return
         }
 
-        val sourceBranch = branches?.first ?: "working-tree"
-        val targetBranch = branches?.second ?: "HEAD"
-
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Summarizing Branch Diff", false) {
             override fun run(indicator: ProgressIndicator) {
                 try {
-                    indicator.text = "Collecting branch diff for $sourceBranch vs $targetBranch..."
-                    val diff = when {
-                        changedFiles.isNotEmpty() -> GitDiffProvider.getDiffForFiles(project, changedFiles)
-                        else -> GitDiffProvider.getDiffBetweenBranches(project, sourceBranch, targetBranch)
-                    }
+                    indicator.text = "Collecting branch diff for $sourceBranch vs $targetRef..."
+                    val diff = GitDiffProvider.getDiffBetweenBranches(
+                        project,
+                        sourceBranch = sourceBranch,
+                        targetBranch = targetRef
+                    )
 
                     if (diff.isBlank()) {
                         Notifications.info(
                             project,
                             "Summarize Branch Diff",
-                            "[$sourceTag] No changes found between $sourceBranch and $targetBranch."
+                            "[$sourceTag] No changes found between $sourceBranch and $targetRef."
                         )
                         return
                     }
@@ -59,12 +56,21 @@ open class SummarizeBranchDiffAction(
                     indicator.text = "Generating summary..."
                     val summary = AiBranchDiffSummaryService(project).generate(
                         sourceBranch = sourceBranch,
-                        targetBranch = targetBranch,
-                        diff = buildSummaryInput(diff, changedFiles)
+                        targetBranch = targetRef,
+                        diff = diff
                     )
 
                     ApplicationManager.getApplication().invokeLater {
-                        Messages.showInfoMessage(project, summary.trim(), "Branch Diff Summary")
+                        ContextBoxStateService.getInstance(project).recordBranchSummary(
+                            targetBranch = targetRef,
+                            sourceBranch = sourceBranch,
+                            summary = summary
+                        )
+                        Notifications.info(
+                            project,
+                            "Branch Diff Summary",
+                            "Summary updated in AI Context Box > Branch Analysis."
+                        )
                     }
                 } catch (ex: Exception) {
                     Notifications.error(
@@ -81,22 +87,22 @@ open class SummarizeBranchDiffAction(
         e.presentation.isEnabledAndVisible = e.project != null
     }
 
-    private fun resolveComparedBranches(e: AnActionEvent): Pair<String, String>? {
+    private fun resolveTargetRef(e: AnActionEvent, currentBranch: String): String? {
         val rawBranches = e.getData(VcsLogDataKeys.VCS_LOG_BRANCHES) as? Collection<*>
-            ?: return null
-
-        val branches = LinkedHashSet<String>()
-        for (rawBranch in rawBranches) {
-            val name = extractBranchName(rawBranch)?.trim().orEmpty()
-            if (name.isNotEmpty()) {
-                branches.add(name)
+        if (rawBranches != null) {
+            val branches = linkedSetOf<String>()
+            for (rawBranch in rawBranches) {
+                val name = extractBranchName(rawBranch)?.trim().orEmpty()
+                if (name.isNotEmpty()) {
+                    branches.add(name)
+                }
             }
+
+            branches.firstOrNull { it != currentBranch }?.let { return it }
+            branches.firstOrNull()?.let { return it }
         }
 
-        if (branches.size != 2) return null
-
-        val values = branches.toList()
-        return Pair(values[0], values[1])
+        return resolveSelectedCommitHash(e)
     }
 
     private fun extractBranchName(value: Any?): String? {
@@ -109,28 +115,46 @@ open class SummarizeBranchDiffAction(
         }
     }
 
-    private fun resolveChangedFiles(e: AnActionEvent): List<String> {
-        val files = linkedSetOf<String>()
-        e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)
-            ?.mapTo(files) { it.path }
-
-        e.getData(CommonDataKeys.VIRTUAL_FILE)
-            ?.path
-            ?.let { files.add(it) }
-
-        return files.toList()
+    private fun resolveCurrentBranch(project: com.intellij.openapi.project.Project): String {
+        val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
+        return repo?.currentBranchName ?: "HEAD"
     }
 
-    private fun buildSummaryInput(diff: String, changedFiles: List<String>): String {
-        if (changedFiles.isEmpty()) return diff
-        val filesSection = changedFiles.joinToString(separator = "\n") { "- $it" }
-        return "Changed files:\n$filesSection\n\nDiff:\n$diff"
+    private fun resolveSelectedCommitHash(e: AnActionEvent): String? {
+        val vcsLog = e.getData(VcsLogDataKeys.VCS_LOG) ?: return null
+        val selectedCommits = runCatching {
+            vcsLog.javaClass.getMethod("getSelectedCommits").invoke(vcsLog) as? Collection<*>
+        }.getOrNull() ?: return null
+
+        return selectedCommits.firstNotNullOfOrNull { extractCommitHash(it) }
     }
 
+    private fun extractCommitHash(value: Any?): String? {
+        if (value == null) return null
+        if (value is String && value.matches(Regex("^[0-9a-fA-F]{7,40}$"))) return value
+
+        val hashObject = runCatching {
+            value.javaClass.getMethod("getHash").invoke(value)
+        }.getOrNull() ?: return null
+
+        return runCatching {
+            hashObject.javaClass.getMethod("asString").invoke(hashObject) as? String
+        }.getOrNull()
+            ?: runCatching {
+                hashObject.javaClass.getMethod("toShortString").invoke(hashObject) as? String
+            }.getOrNull()
+            ?: hashObject.toString()
+    }
 }
 
 class SummarizeProbeVcsLogInternalToolbarAction : SummarizeBranchDiffAction(
     tooltip = "Summarize Branch Differences [Probe Vcs.Log.Toolbar.Internal]",
-    iconPath = "/icons/git-probe-02.svg",
+    iconPath = "/icons/blue-bulb.svg",
     sourceTag = "Vcs.Log.Toolbar.Internal"
+)
+
+class SummarizeProbeVcsLogContextMenuAction : SummarizeBranchDiffAction(
+    tooltip = "Analyze Current Branch vs Selected Branch/Commit",
+    iconPath = "/icons/blue-bulb.svg",
+    sourceTag = "Vcs.Log.ContextMenu"
 )

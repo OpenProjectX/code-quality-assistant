@@ -13,6 +13,11 @@
     <extensions defaultExtensionNs="com.intellij">
         <editorNotificationProvider implementation="org.openprojectx.ai.plugin.OpenApiEditorNotificationProvider"/>
         <projectConfigurable instance="org.openprojectx.ai.plugin.AiTestSettingsConfigurable"/>
+        <toolWindow id="AI Context Box"
+                    anchor="right"
+                    factoryClass="org.openprojectx.ai.plugin.ContextBoxToolWindowFactory"
+                    canCloseContents="false"
+                    stripeTitle="AI Context Box"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -37,6 +42,16 @@
                 text="Summarize [Probe Vcs.Log.Toolbar.Internal]"
                 description="Summarize [Probe Vcs.Log.Toolbar.Internal]">
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
+        </action>
+        <action
+                id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
+                class="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
+                text="Analyze Current vs Selected"
+                description="Analyze changes between current branch and selected branch/commit">
+            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
+            <add-to-group group-id="Vcs.Log.Branches.ContextMenu" anchor="last"/>
+            <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
+            <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
         </action>
     </actions>
 </idea-plugin>

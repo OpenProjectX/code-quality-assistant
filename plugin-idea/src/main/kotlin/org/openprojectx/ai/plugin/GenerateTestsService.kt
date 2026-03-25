@@ -90,7 +90,6 @@ class GenerateTestsService(private val project: Project) {
                     indicator.fraction = 0.9
                     writeGenerated(
                         project = project,
-                        contractFile = file,
                         framework = effectiveFramework,
                         location = effectiveLocation,
                         packageName = packageName,
@@ -125,7 +124,6 @@ class GenerateTestsService(private val project: Project) {
 
     private fun writeGenerated(
         project: Project,
-        contractFile: VirtualFile,
         framework: Framework,
         location: String,
         packageName: String?,
@@ -147,6 +145,7 @@ class GenerateTestsService(private val project: Project) {
         }
 
         var targetFile: VirtualFile? = null
+        var previousContent: String? = null
 
         WriteCommandAction.runWriteCommandAction(project) {
             val targetDir = if (normalizedLocation.isBlank()) {
@@ -157,6 +156,7 @@ class GenerateTestsService(private val project: Project) {
             }
 
             val existing = targetDir.findChild(fileName)
+            previousContent = existing?.inputStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
             val target = existing ?: targetDir.createChildData(this, fileName)
             target.setBinaryContent(code.toByteArray(Charsets.UTF_8))
             targetFile = target
@@ -171,6 +171,37 @@ class GenerateTestsService(private val project: Project) {
             message = relativePath,
             file = createdFile
         )
+
+        ContextBoxStateService.getInstance(project).recordGeneration(
+            className = cls,
+            targetPath = relativePath,
+            diff = buildCodeDiff(relativePath, previousContent, code)
+        )
+    }
+
+
+    private fun buildCodeDiff(path: String, before: String?, after: String): String {
+        val beforeText = before ?: ""
+        if (beforeText == after) {
+            return "No content change for $path"
+        }
+
+        val beforeLines = beforeText.lines()
+        val afterLines = after.lines()
+
+        val builder = StringBuilder()
+        builder.append("--- a/").append(path).append("\n")
+        builder.append("+++ b/").append(path).append("\n")
+        builder.append("@@ -1,").append(beforeLines.size).append(" +1,").append(afterLines.size).append(" @@\n")
+
+        if (beforeLines.isNotEmpty()) {
+            beforeLines.forEach { builder.append('-').append(it).append("\n") }
+        }
+        if (afterLines.isNotEmpty()) {
+            afterLines.forEach { builder.append('+').append(it).append("\n") }
+        }
+
+        return builder.toString().trimEnd()
     }
 
     private fun resolveOutputLocation(

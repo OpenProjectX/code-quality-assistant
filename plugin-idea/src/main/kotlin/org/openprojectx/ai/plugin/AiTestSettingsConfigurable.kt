@@ -25,6 +25,7 @@ import javax.swing.JTabbedPane
 import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 
 class AiTestSettingsConfigurable(
     private val project: Project
@@ -251,18 +252,105 @@ class AiTestSettingsConfigurable(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
-        add(formSection("Generation Wrapper", listOf(
-            "Template" to JScrollPane(generationPromptWrapperField)
-        )))
-        add(formSection("Generation Rules", listOf(
-            "Rest Assured rules" to JScrollPane(generationPromptRestAssuredField),
-            "Karate rules" to JScrollPane(generationPromptKarateField)
-        )))
-        add(formSection("AI Actions", listOf(
-            "Commit message prompt" to JScrollPane(commitPromptField),
-            "Pull request prompt" to JScrollPane(pullRequestPromptField)
-        )))
+        add(buildPromptManagerPanel())
     }).apply { border = BorderFactory.createEmptyBorder() }
+
+    private data class PromptItem(
+        val name: String,
+        val area: JTextArea,
+        val defaultValue: String
+    )
+
+    private fun buildPromptManagerPanel(): JComponent {
+        val items = listOf(
+            PromptItem("Generation Wrapper", generationPromptWrapperField, AiPromptDefaults.GENERATION_WRAPPER),
+            PromptItem("Rest Assured Rules", generationPromptRestAssuredField, AiPromptDefaults.GENERATION_REST_ASSURED),
+            PromptItem("Karate Rules", generationPromptKarateField, AiPromptDefaults.GENERATION_KARATE),
+            PromptItem("Commit Message", commitPromptField, AiPromptDefaults.COMMIT_MESSAGE),
+            PromptItem("Pull Request", pullRequestPromptField, AiPromptDefaults.PULL_REQUEST)
+        )
+
+        val host = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Prompt Manager"),
+                BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            )
+        }
+
+        val hiddenNames = linkedSetOf<String>()
+        val addCombo = JComboBox<String>()
+        val addButton = JButton("Add Prompt")
+
+        val rowsByName = linkedMapOf<String, JPanel>()
+
+        fun refreshAddCombo() {
+            addCombo.removeAllItems()
+            hiddenNames.forEach { addCombo.addItem(it) }
+            addCombo.isEnabled = hiddenNames.isNotEmpty()
+            addButton.isEnabled = hiddenNames.isNotEmpty()
+        }
+
+        fun addPromptRow(item: PromptItem) {
+            val titleButton = JButton(item.name).apply {
+                horizontalAlignment = SwingConstants.LEFT
+            }
+            val removeButton = JButton("Delete")
+            val content = JScrollPane(item.area).apply { isVisible = false }
+            val header = JPanel(BorderLayout(8, 0)).apply {
+                add(titleButton, BorderLayout.CENTER)
+                add(removeButton, BorderLayout.EAST)
+            }
+            val row = JPanel(BorderLayout(0, 6)).apply {
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, java.awt.Color(75, 75, 75)),
+                    BorderFactory.createEmptyBorder(6, 0, 6, 0)
+                )
+                add(header, BorderLayout.NORTH)
+                add(content, BorderLayout.CENTER)
+            }
+
+            titleButton.addActionListener {
+                content.isVisible = !content.isVisible
+                row.revalidate()
+            }
+            removeButton.addActionListener {
+                item.area.text = item.defaultValue
+                host.remove(row)
+                rowsByName.remove(item.name)
+                hiddenNames.add(item.name)
+                refreshAddCombo()
+                host.revalidate()
+                host.repaint()
+            }
+
+            rowsByName[item.name] = row
+            host.add(row)
+        }
+
+        val addRow = JPanel(BorderLayout(8, 0)).apply {
+            border = BorderFactory.createEmptyBorder(0, 0, 8, 0)
+            add(addCombo, BorderLayout.CENTER)
+            add(addButton, BorderLayout.EAST)
+        }
+
+        addButton.addActionListener {
+            val selected = addCombo.selectedItem as? String ?: return@addActionListener
+            val item = items.firstOrNull { it.name == selected } ?: return@addActionListener
+            hiddenNames.remove(selected)
+            addPromptRow(item)
+            refreshAddCombo()
+            SwingUtilities.invokeLater {
+                host.revalidate()
+                host.repaint()
+            }
+        }
+
+        host.add(addRow)
+        items.forEach { addPromptRow(it) }
+        refreshAddCombo()
+        return host
+    }
 
     private fun formSection(title: String, rows: List<Pair<String, JComponent>>): JComponent {
         val panel = JPanel(GridBagLayout())
