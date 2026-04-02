@@ -1,14 +1,46 @@
 import java.io.File
 
+//val restrictedNetworkMode = providers.gradleProperty("restrictedNetworkMode")
+//    .map(String::toBooleanStrictOrNull)
+//    .orElse(
+//        providers.environmentVariable("RESTRICTED_NETWORK_MODE")
+//            .map(String::toBooleanStrictOrNull)
+//    )
+//    .getOrElse(false)
+
+fun localRepositoryDirectories(): List<File> {
+    val configuredPaths = sequenceOf(
+        providers.gradleProperty("localRepositoryPaths").orNull,
+        providers.environmentVariable("LOCAL_REPOSITORY_PATHS").orNull
+    )
+        .filterNotNull()
+        .flatMap { it.split(',').asSequence() }
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .map(::File)
+        .toList()
+
+    return configuredPaths.distinctBy { it.absoluteFile.normalize() }
+}
+
 pluginManagement {
     repositories {
-        gradlePluginPortal()
-        maven(url = "https://repo.spring.io/plugins-release")
+//        localRepositoryDirectories().forEach { repoDir ->
+//            maven(url = repoDir.toURI())
+//        }
+        mavenCentral()
+//        if (!restrictedNetworkMode) {
+            gradlePluginPortal()
+            maven(url = "https://repo.spring.io/plugins-release")
+//        }
     }
 }
 
 dependencyResolutionManagement {
     repositories {
+//        localRepositoryDirectories().forEach { repoDir ->
+//            maven(url = repoDir.toURI())
+//        }
         mavenCentral()
     }
 }
@@ -72,4 +104,3 @@ buildFiles.forEach { buildFile ->
 gradle.extra["isCi"] = System.getenv().containsKey("CI") ||
         System.getenv().containsKey("GITHUB_ACTIONS") ||
         System.getenv().containsKey("JENKINS_HOME")
-

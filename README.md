@@ -226,6 +226,27 @@ Feature: User API Contract Tests
 ./gradlew :plugin-idea:runIde
 ```
 
+### Restricted Network Setup
+
+If your corporate network only allows access to Maven Central, configure the build like this:
+
+```bash
+./gradlew :plugin-idea:buildPlugin \
+  -PrestrictedNetworkMode=true \
+  -PlocalRepositoryPaths=/opt/build/m2,/opt/build/jetbrains-mirror \
+  -PintellijPlatformLocalPath=/opt/idea/idea-IU-252.27397.103
+```
+
+- `restrictedNetworkMode=true` disables non-Central remote repositories such as Gradle Plugin Portal, Spring plugin repo, and JetBrains IntelliJ repositories.
+- `localRepositoryPaths` is a comma-separated list of local Maven repository directories that contain pre-downloaded plugin and JetBrains artifacts.
+- `intellijPlatformLocalPath` points to a local IntelliJ IDEA installation or unpacked distribution so `runIde` and `buildPlugin` do not need to download the IDE.
+
+You can also place the same values in [gradle.properties](/data/Git/ai-test-plugin/gradle.properties) or provide them with environment variables:
+
+- `RESTRICTED_NETWORK_MODE`
+- `LOCAL_REPOSITORY_PATHS`
+- `INTELLIJ_PLATFORM_LOCAL_PATH`
+
 ### Publish
 
 ```bash

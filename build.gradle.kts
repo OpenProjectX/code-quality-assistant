@@ -4,11 +4,26 @@ plugins {
     id("io.github.gradle-nexus.publish-plugin") version "2.0.0"
 }
 
+fun localRepositoryDirectories() = sequenceOf(
+    providers.gradleProperty("localRepositoryPaths").orNull,
+    providers.environmentVariable("LOCAL_REPOSITORY_PATHS").orNull
+)
+    .filterNotNull()
+    .flatMap { it.split(',').asSequence() }
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .map(::file)
+    .distinctBy { it.absoluteFile.normalize() }
+    .toList()
+
 allprojects {
     group = "org.openprojectx.ai.plugin"
     version = "0.1.4"
 
     repositories {
+        localRepositoryDirectories().forEach { repoDir ->
+            maven(url = repoDir.toURI())
+        }
         mavenCentral()
     }
 

@@ -5,9 +5,25 @@ plugins {
     signing
 }
 
+val restrictedNetworkMode = providers.gradleProperty("restrictedNetworkMode")
+    .map(String::toBooleanStrictOrNull)
+    .orElse(
+        providers.environmentVariable("RESTRICTED_NETWORK_MODE")
+            .map(String::toBooleanStrictOrNull)
+    )
+    .getOrElse(false)
+val localIntellijPlatformPath = providers.gradleProperty("intellijPlatformLocalPath")
+    .orElse(providers.environmentVariable("INTELLIJ_PLATFORM_LOCAL_PATH"))
+    .orNull
+
 repositories {
+
     intellijPlatform {
-        defaultRepositories()
+//        if (!restrictedNetworkMode && localIntellijPlatformPath == null) {
+//            defaultRepositories()
+//        }
+
+        localPlatformArtifacts()
     }
 }
 
@@ -39,6 +55,20 @@ tasks {
         dependsOn(buildPlugin)
         dependsOn(buildPluginJar)
     }
+
+//    withType<JavaExec>().configureEach {
+//        if (name == "runIde") {
+//            doFirst("removeLegacyCoroutinesJavaagent") {
+//                val filteredArgs = allJvmArgs.filterNot {
+//                    it.contains("coroutines-javaagent-legacy.jar")
+//                }
+//                if (filteredArgs.size != allJvmArgs.size) {
+//                    logger.lifecycle("Removed incompatible coroutines-javaagent-legacy from runIde JVM args.")
+//                    allJvmArgs = filteredArgs
+//                }
+//            }
+//        }
+//    }
 }
 
 intellijPlatform {
@@ -54,7 +84,12 @@ dependencies {
         val type = providers.gradleProperty("platformType").getOrElse("IC")
         val version = providers.gradleProperty("platformVersion").getOrElse("2025.2")
 
-        create(type, version)
+        if (localIntellijPlatformPath != null) {
+            logger.info("using local platform: $localIntellijPlatformPath")
+            local(localIntellijPlatformPath)
+        } else {
+            create(type, version)
+        }
         bundledPlugins(listOf("org.jetbrains.plugins.yaml","Git4Idea"))
     }
 
@@ -62,6 +97,8 @@ dependencies {
     implementation(project(":llm-client"))
     implementation(libs.ktor.client.contentneg)
     implementation(libs.ktor.serialization.json)
+    implementation(libs.ktor.client.okhttp)
+
     implementation("io.ktor:ktor-client-logging:3.2.3")
 
     implementation(libs.bundles.kotlinxEcosystem)

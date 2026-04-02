@@ -4,6 +4,8 @@ rm -rf /data/.gradle/caches/9.3.0/transforms/
 ./gradlew :plugin-idea:runIde
 ./gradlew :plugin-idea:buildPlugin -x :plugin-idea:buildSearchableOptions
 
+./gradlew :plugin-idea:publishPlugin -x  :plugin-idea:buildSearchableOptions 
+
 ./gradlew :plugin-idea:assemble
 
 ./gradlew :plugin-idea:publishPluginZipPublicationToMavenLocal
