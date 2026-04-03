@@ -17,12 +17,11 @@ val localIntellijPlatformPath = providers.gradleProperty("intellijPlatformLocalP
     .orNull
 
 repositories {
-
     intellijPlatform {
-//        if (!restrictedNetworkMode && localIntellijPlatformPath == null) {
-//            defaultRepositories()
-//        }
-
+        if (!restrictedNetworkMode && localIntellijPlatformPath == null) {
+            defaultRepositories()
+        }
+        intellijDependencies()
         localPlatformArtifacts()
     }
 }
@@ -90,6 +89,7 @@ dependencies {
         } else {
             create(type, version)
         }
+        instrumentationTools()
         bundledPlugins(listOf("org.jetbrains.plugins.yaml","Git4Idea"))
     }
 
