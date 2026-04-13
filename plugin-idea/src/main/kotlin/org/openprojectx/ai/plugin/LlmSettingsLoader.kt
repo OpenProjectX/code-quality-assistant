@@ -328,6 +328,12 @@ object LlmSettingsLoader {
         putIfNotBlank(llm, "apiKey", model.llmApiKey)
         putIfNotBlank(llm, "apiKeyEnv", model.llmApiKeyEnv)
 
+        if (model.httpDisableTlsVerification) {
+            llm["http"] = linkedMapOf("disableTlsVerification" to true)
+        } else {
+            llm.remove("http")
+        }
+
         if (model.llmTemplateEnabled) {
             llm["template"] = buildTemplateMap(
                 method = model.llmTemplateMethod,

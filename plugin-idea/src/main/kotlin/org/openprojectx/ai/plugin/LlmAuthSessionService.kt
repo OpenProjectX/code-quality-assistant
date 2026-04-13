@@ -27,7 +27,7 @@ class LlmAuthSessionService(
 
         val credentials = promptCredentials()
         val apiKey = runBlocking {
-            TemplateRequestExecutor(HttpClients.shared()).execute(
+            TemplateRequestExecutor(HttpClients.shared(settings.httpDisableTlsVerification)).execute(
                 config = auth.login,
                 variables = mapOf(
                     "username" to credentials.username,

@@ -9,6 +9,7 @@ data class AiTestSettingsModel(
     val llmTimeoutSeconds: String = "60",
     val llmApiKey: String = "",
     val llmApiKeyEnv: String = "",
+    val httpDisableTlsVerification: Boolean = false,
     val llmTemplateEnabled: Boolean = false,
     val llmTemplateMethod: String = "POST",
     val llmTemplateUrl: String = "",

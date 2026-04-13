@@ -41,6 +41,7 @@ class AiTestSettingsConfigurable(
     private lateinit var timeoutField: JTextField
     private lateinit var apiKeyField: JPasswordField
     private lateinit var apiKeyEnvField: JTextField
+    private lateinit var httpDisableTlsVerification: JCheckBox
 
     private lateinit var llmTemplateEnabled: JCheckBox
     private lateinit var llmTemplateMethod: JComboBox<String>
@@ -100,6 +101,7 @@ class AiTestSettingsConfigurable(
         timeoutField = JTextField()
         apiKeyField = JPasswordField()
         apiKeyEnvField = JTextField()
+        httpDisableTlsVerification = JCheckBox("Disable TLS certificate verification (insecure, use only on trusted networks)")
 
         llmTemplateEnabled = JCheckBox("Use template-based LLM request")
         llmTemplateMethod = methodCombo()
@@ -243,6 +245,9 @@ class AiTestSettingsConfigurable(
         add(formSection("Credentials", listOf(
             "Direct API key" to apiKeyField,
             "API key env var" to apiKeyEnvField
+        )))
+        add(formSection("HTTP", listOf(
+            "" to httpDisableTlsVerification
         )))
         add(sectionWithToggle(llmTemplateEnabled, llmTemplatePanel).also { llmTemplateCardPanel = it })
     }).apply { border = BorderFactory.createEmptyBorder() }
@@ -491,6 +496,7 @@ class AiTestSettingsConfigurable(
         llmTimeoutSeconds = timeoutField.text.trim(),
         llmApiKey = String(apiKeyField.password).trim(),
         llmApiKeyEnv = apiKeyEnvField.text.trim(),
+        httpDisableTlsVerification = httpDisableTlsVerification.isSelected,
         llmTemplateEnabled = llmTemplateEnabled.isSelected,
         llmTemplateMethod = llmTemplateMethod.selectedItem?.toString().orEmpty(),
         llmTemplateUrl = llmTemplateUrl.text.trim(),
@@ -532,6 +538,7 @@ class AiTestSettingsConfigurable(
         timeoutField.text = state.llmTimeoutSeconds
         apiKeyField.setText(state.llmApiKey)
         apiKeyEnvField.text = state.llmApiKeyEnv
+        httpDisableTlsVerification.isSelected = state.httpDisableTlsVerification
 
         llmTemplateEnabled.isSelected = state.llmTemplateEnabled
         llmTemplateMethod.selectedItem = state.llmTemplateMethod

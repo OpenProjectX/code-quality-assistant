@@ -7,7 +7,8 @@ data class LlmSettings(
     val apiKey: String? = null,
     val endpoint: String? = null,
     val template: TemplateRequestConfig? = null,
-    val auth: LlmAuthConfig? = null
+    val auth: LlmAuthConfig? = null,
+    val httpDisableTlsVerification: Boolean = false
 )
 
 data class TemplateRequestConfig(

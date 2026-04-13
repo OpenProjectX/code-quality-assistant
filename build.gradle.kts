@@ -1,3 +1,7 @@
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.jvm.tasks.Jar
+
 plugins {
     `maven-publish`
     signing
@@ -16,9 +20,36 @@ fun localRepositoryDirectories() = sequenceOf(
     .distinctBy { it.absoluteFile.normalize() }
     .toList()
 
+val gitTrackedPaths = providers.exec {
+    workingDir(rootDir)
+    commandLine("git", "ls-files", "-z")
+}.standardOutput.asText.map { output ->
+    output
+        .split('\u0000')
+        .filter(String::isNotBlank)
+        .toSet()
+}
+
+val sourcesJar by tasks.registering(Jar::class) {
+    group = "build"
+    description = "Packages all Git-tracked files from the repository as a sources JAR."
+
+    archiveClassifier.set("sources")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+
+    from(rootDir) {
+        includeEmptyDirs = false
+        exclude { element ->
+            !element.isDirectory && element.relativePath.pathString !in gitTrackedPaths.get()
+        }
+    }
+}
+
 allprojects {
     group = "org.openprojectx.ai.plugin"
-    version = "0.1.4"
+    version = "0.1.5"
 
     repositories {
         localRepositoryDirectories().forEach { repoDir ->
@@ -28,6 +59,43 @@ allprojects {
     }
 
     apply(plugin = "kotlin-jvm")
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("rootModule") {
+            artifactId = "${rootProject.name}-root"
+            from(components["java"])
+            artifact(sourcesJar)
+
+            pom {
+                name.set("AI Test Plugin Root Module")
+                description.set("Root Maven publication for the AI Test Plugin build")
+                url.set("https://github.com/OpenProjectX/ai-test-plugin")
+
+                licenses {
+                    license {
+                        name.set("Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("OpenProjectX")
+                        name.set("OpenProjectX")
+                        email.set("admin@openprojectx.org")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:https://github.com/OpenProjectX/ai-test-plugin.git")
+                    developerConnection.set("scm:git:ssh://git@github.com:OpenProjectX/ai-test-plugin.git")
+                    url.set("https://github.com/OpenProjectX/ai-test-plugin.git")
+                }
+            }
+        }
+    }
 }
 
 nexusPublishing {
@@ -41,6 +109,20 @@ nexusPublishing {
             username.set(System.getenv("OSSRH_USERNAME"))
             password.set(System.getenv("OSSRH_PASSWORD"))
 
+        }
+    }
+}
+
+signing {
+    val isCi: Boolean by gradle.extra
+    if (isCi) {
+        val keyFile = System.getenv("SIGNING_KEY_FILE")
+        if (keyFile != null) {
+            val keyText = file(keyFile).readText()
+            val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+
+            useInMemoryPgpKeys(keyText, keyPass)
+            sign(publishing.publications["rootModule"])
         }
     }
 }

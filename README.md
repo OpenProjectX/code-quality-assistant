@@ -257,6 +257,37 @@ You can also place the same values in [gradle.properties](/data/Git/ai-test-plug
 ./gradlew :plugin-idea:publishPluginDistributionPublicationToSonatypeRepository closeAndReleaseSonatypeStagingRepository
 ```
 
+Maven Central publishing now goes through Sonatype Central Portal. Legacy OSSRH was retired on June 30, 2025, but Gradle builds can still publish through Sonatype's OSSRH Staging API compatibility endpoint, which this project already uses.
+
+Before releasing, configure these environment variables:
+
+- `OSSRH_USERNAME` and `OSSRH_PASSWORD`: Sonatype Central Portal publishing token credentials
+- `SIGNING_KEY_FILE`: path to the ASCII-armored PGP private key used to sign artifacts
+- `SIGNING_KEY_PASSWORD`: password for the signing key
+
+Recommended release flow:
+
+```bash
+# 1. Verify all publications locally, including generated artifacts such as sources JARs
+./gradlew publishToMavenLocal
+
+# 2. Publish and release to Maven Central
+./gradlew publishAllPublicationsToSonatypeRepository closeAndReleaseSonatypeStagingRepository
+```
+
+Root module source JAR:
+
+- The root Gradle module publishes under `org.openprojectx.ai.plugin:ai-test-plugin-root`.
+- That root publication includes a custom `sourcesJar` artifact that packages all Git-tracked files in the repository.
+- Run `./gradlew :sourcesJar` to build that archive directly.
+- When you run `publishToMavenLocal` or `publishAllPublicationsToSonatypeRepository`, that `sourcesJar` is included in the root module publication.
+
+Notes:
+
+- `publishToMavenLocal` is the fastest way to verify the generated `.pom`, signatures, and `-sources.jar` before a Central release.
+- `:plugin-idea:publishPluginDistributionPublicationToSonatypeRepository` publishes only the IntelliJ plugin distribution publication.
+- `publishAllPublicationsToSonatypeRepository` publishes both the root module publication and the `plugin-idea` publication.
+
 ## Roadmap
 
 - [ ] **gRPC Protobuf support** — Generate tests from `.proto` files

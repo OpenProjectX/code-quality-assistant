@@ -20,6 +20,13 @@ object LlmProviderFactory {
 
     fun create(settings: LlmSettings): LlmProvider {
         val http = HttpClient(OkHttp) {
+            engine {
+                config {
+                    if (settings.httpDisableTlsVerification) {
+                        HttpClients.trustAllCerts(this)
+                    }
+                }
+            }
             install(ContentNegotiation) {
                 json(
                     Json {
