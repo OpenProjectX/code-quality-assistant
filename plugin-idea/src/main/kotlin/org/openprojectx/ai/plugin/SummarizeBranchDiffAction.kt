@@ -24,7 +24,7 @@ open class SummarizeBranchDiffAction(
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val sourceBranch = resolveCurrentBranch(project)
-        val targetRef = resolveTargetRef(e, sourceBranch)
+        val targetRef = resolveTargetRef(project, e, sourceBranch)
 
         if (targetRef == null) {
             Notifications.warn(
@@ -88,7 +88,11 @@ open class SummarizeBranchDiffAction(
         e.presentation.isEnabledAndVisible = e.project != null
     }
 
-    private fun resolveTargetRef(e: AnActionEvent, currentBranch: String): String? {
+    private fun resolveTargetRef(
+        project: com.intellij.openapi.project.Project,
+        e: AnActionEvent,
+        currentBranch: String
+    ): String? {
         val rawBranches = e.getData(VcsLogDataKeys.VCS_LOG_BRANCHES) as? Collection<*>
         if (rawBranches != null) {
             val branches = linkedSetOf<String>()
@@ -103,7 +107,24 @@ open class SummarizeBranchDiffAction(
             branches.firstOrNull()?.let { return it }
         }
 
-        return resolveSelectedCommitHash(e)
+        resolveSelectedCommitHash(e)?.let { return it }
+
+        return resolveRepositoryBranchFallback(project, currentBranch)
+    }
+
+    private fun resolveRepositoryBranchFallback(
+        project: com.intellij.openapi.project.Project,
+        currentBranch: String
+    ): String? {
+        val repository = GitRepositoryManager.getInstance(project).repositories.firstOrNull() ?: return null
+        val localBranches = repository.branches.localBranches.map { it.name }
+        val normalizedCurrent = currentBranch.removePrefix("refs/heads/")
+        val candidates = localBranches.filter { it != normalizedCurrent && it != currentBranch }
+
+        val preferred = listOf("main", "master", "develop", "dev")
+        preferred.firstOrNull { it in candidates }?.let { return it }
+
+        return candidates.firstOrNull()
     }
 
     private fun extractBranchName(value: Any?): String? {
