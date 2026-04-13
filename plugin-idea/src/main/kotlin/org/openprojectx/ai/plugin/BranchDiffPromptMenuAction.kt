@@ -119,9 +119,38 @@ private class BranchDiffByPromptAction(
             branches.firstOrNull()?.let { return it }
         }
 
+        resolveBranchFromLogUi(e, currentBranch)?.let { return it }
         resolveSelectedCommitHash(e)?.let { return it }
 
         return resolveRepositoryBranchFallback(project, currentBranch)
+    }
+
+    private fun resolveBranchFromLogUi(e: AnActionEvent, currentBranch: String): String? {
+        val vcsLogUi = e.getData(VcsLogDataKeys.VCS_LOG_UI) ?: return null
+        val filterUi = runCatching { vcsLogUi.javaClass.getMethod("getFilterUi").invoke(vcsLogUi) }.getOrNull() ?: return null
+        val filters = runCatching { filterUi.javaClass.getMethod("getFilters").invoke(filterUi) }.getOrNull() ?: return null
+        val branchFilter = runCatching { filters.javaClass.getMethod("getBranchFilter").invoke(filters) }.getOrNull() ?: return null
+
+        val values = runCatching {
+            branchFilter.javaClass.getMethod("getValues").invoke(branchFilter) as? Collection<*>
+        }.getOrNull().orEmpty().mapNotNull { it?.toString()?.trim() }
+
+        if (values.isNotEmpty()) {
+            val normalizedCurrent = currentBranch.removePrefix("refs/heads/")
+            values.firstOrNull { it.isNotBlank() && it != currentBranch && it != normalizedCurrent }?.let { return it }
+            values.firstOrNull()?.let { return it }
+        }
+
+        val textPresentation = runCatching {
+            branchFilter.javaClass.getMethod("getTextPresentation").invoke(branchFilter)
+        }.getOrNull()?.toString().orEmpty()
+
+        if (textPresentation.isBlank()) return null
+        val normalizedCurrent = currentBranch.removePrefix("refs/heads/")
+        return textPresentation
+            .split(",", " ", "|")
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() && it != currentBranch && it != normalizedCurrent }
     }
 
     private fun resolveRepositoryBranchFallback(
