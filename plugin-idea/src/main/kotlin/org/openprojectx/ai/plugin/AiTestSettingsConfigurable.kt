@@ -32,6 +32,7 @@ import org.yaml.snakeyaml.Yaml
 class AiTestSettingsConfigurable(
     private val project: Project
 ) : SearchableConfigurable {
+    private val newPromptPlaceholder = "<New Prompt>"
 
     private var rootPanel: JPanel? = null
     private var pathLabel: JLabel? = null
@@ -309,10 +310,12 @@ class AiTestSettingsConfigurable(
         promptTypeField.addActionListener { refreshPromptManager() }
         promptProfileField.addActionListener { loadSelectedPromptContent() }
 
+        val clearButton = JButton("New / Clear")
         val addButton = JButton("Add")
         val updateButton = JButton("Update")
         val deleteButton = JButton("Delete")
 
+        clearButton.addActionListener { prepareNewPromptInput() }
         addButton.addActionListener { addPromptProfile() }
         updateButton.addActionListener { updatePromptProfile() }
         deleteButton.addActionListener { deletePromptProfile() }
@@ -324,6 +327,7 @@ class AiTestSettingsConfigurable(
             "Existing prompt" to promptProfileField,
             "Prompt content" to JScrollPane(promptContentField),
             "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(clearButton)
                 add(addButton)
                 add(updateButton)
                 add(deleteButton)
@@ -362,7 +366,7 @@ class AiTestSettingsConfigurable(
     private fun updatePromptProfile() {
         val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
         val content = promptContentField.text.trim()
-        if (selectedName.isBlank() || content.isBlank()) {
+        if (selectedName.isBlank() || selectedName == newPromptPlaceholder || content.isBlank()) {
             Messages.showErrorDialog(project, "Select a prompt and provide content before updating.", "AI Test Generator")
             return
         }
@@ -376,7 +380,7 @@ class AiTestSettingsConfigurable(
 
     private fun deletePromptProfile() {
         val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
-        if (selectedName.isBlank()) {
+        if (selectedName.isBlank() || selectedName == newPromptPlaceholder) {
             Messages.showErrorDialog(project, "Select a prompt before deleting.", "AI Test Generator")
             return
         }
@@ -400,19 +404,29 @@ class AiTestSettingsConfigurable(
 
     private fun refreshPromptManager(selectName: String? = null) {
         val model = DefaultComboBoxModel<String>()
+        model.addElement(newPromptPlaceholder)
         val map = promptMapByCategory(selectedPromptCategory())
         map.keys.forEach { model.addElement(it) }
         promptProfileField.model = model
-        if (model.size > 0) {
-            promptProfileField.selectedItem = selectName?.takeIf { map.containsKey(it) } ?: model.getElementAt(0)
-        }
+        val resolvedSelection = selectName?.takeIf { map.containsKey(it) } ?: newPromptPlaceholder
+        promptProfileField.selectedItem = resolvedSelection
         loadSelectedPromptContent()
     }
 
     private fun loadSelectedPromptContent() {
         val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
+        if (selectedName.isBlank() || selectedName == newPromptPlaceholder) {
+            promptContentField.text = ""
+            return
+        }
         val content = promptMapByCategory(selectedPromptCategory())[selectedName].orEmpty()
         promptContentField.text = content
+    }
+
+    private fun prepareNewPromptInput() {
+        promptProfileField.selectedItem = newPromptPlaceholder
+        promptContentField.text = ""
+        promptContentField.requestFocusInWindow()
     }
 
     private fun selectedPromptCategory(): PromptCategory =
