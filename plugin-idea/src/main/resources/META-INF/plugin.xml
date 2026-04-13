@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.openprojectx.cqa</id>
     <name>Code Quality Assistant</name>
-    <vendor>OpenProjectX</vendor>
+    <vendor>DTC ADA</vendor>
     <description>Code Quality Assistant driven by AI, empowering TDD, first classs support for contract based testing </description>
 
 
