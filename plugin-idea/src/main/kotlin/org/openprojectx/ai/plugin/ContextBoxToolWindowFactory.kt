@@ -99,8 +99,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     private data class PromptItem(
         val category: PromptCategory,
         val name: String,
-        val isGlobal: Boolean
-    )
+        val isGlobal: Boolean,
+        val isNew: Boolean = false
+    ) {
+        override fun toString(): String = name
+    }
 
     private fun createPromptManagerPanel(
         project: Project,
@@ -160,6 +163,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     listModel.addElement(PromptItem(category, name, name == global))
                 }
             }
+            listModel.addElement(PromptItem(PromptCategory.TEST, "new prompt", isGlobal = false, isNew = true))
             if (select != null) {
                 val index = (0 until listModel.size()).firstOrNull {
                     val item = listModel.get(it)
@@ -169,9 +173,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
         }
 
-        fun selectedItem(): PromptItem? = promptList.selectedValue
+        fun selectedItem(): PromptItem? = promptList.selectedValue?.takeIf { !it.isNew }
 
         promptList.addListSelectionListener {
+            val rawSelected = promptList.selectedValue ?: return@addListSelectionListener
+            if (rawSelected.isNew) {
+                categoryField.selectedItem = PromptCategory.TEST
+                nameField.text = ""
+                contentField.text = ""
+                return@addListSelectionListener
+            }
             val selected = selectedItem() ?: return@addListSelectionListener
             val model = LlmSettingsLoader.loadSettingsModel(project)
             val value = mapForCategory(model, selected.category)[selected.name].orEmpty()
@@ -180,16 +191,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             contentField.text = value
         }
 
-        val newButton = javax.swing.JButton("New")
         val saveButton = javax.swing.JButton("Save")
         val deleteButton = javax.swing.JButton("Delete")
-
-        newButton.addActionListener {
-            promptList.clearSelection()
-            categoryField.selectedItem = PromptCategory.TEST
-            nameField.text = ""
-            contentField.text = ""
-        }
 
         saveButton.addActionListener {
             val category = categoryField.selectedItem as? PromptCategory ?: PromptCategory.TEST
@@ -260,7 +263,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             )
             LlmSettingsLoader.saveSettingsModel(project, updated)
             refreshList()
-            newButton.doClick()
+            promptList.selectedIndex = listModel.size() - 1
         }
 
         val detail = JPanel(GridBagLayout()).apply {
@@ -285,12 +288,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             add(JBScrollPane(contentField), gbc)
             gbc.gridx = 1; gbc.gridy = 3; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
             add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                add(newButton); add(saveButton); add(deleteButton)
+                add(saveButton); add(deleteButton)
                 isOpaque = false
             }, gbc)
         }
 
         refreshList()
+        promptList.selectedIndex = listModel.size() - 1
 
         return JPanel(BorderLayout(8, 8)).apply {
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
