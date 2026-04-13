@@ -317,6 +317,12 @@ class AiTestSettingsConfigurable(
         val saveButton = JButton("Save")
         val deleteButton = JButton("Delete")
         promptListPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+        val promptListScrollPane = JScrollPane(promptListPanel).apply {
+            preferredSize = Dimension(640, 180)
+            minimumSize = Dimension(320, 140)
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
 
         clearButton.addActionListener { prepareNewPromptInput() }
         saveButton.addActionListener { savePromptProfile() }
@@ -325,7 +331,7 @@ class AiTestSettingsConfigurable(
         refreshPromptManager()
 
         return formSection("Prompt Manager", listOf(
-            "Prompt list (name + category)" to JScrollPane(promptListPanel),
+            "Prompt list (name + category)" to promptListScrollPane,
             "Prompt type" to promptTypeField,
             "Prompt name" to promptNameField,
             "Prompt content" to JScrollPane(promptContentField),
