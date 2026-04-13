@@ -1,0 +1,14 @@
+{
+  "name": "POST /login — return fake API key",
+  "request": {
+    "method": "POST",
+    "url": "/login"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "bodyFileName": "login-response.json"
+  }
+}

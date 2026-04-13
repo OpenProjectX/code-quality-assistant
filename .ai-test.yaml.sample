@@ -5,10 +5,17 @@ llm:
 #  model: gpt-4.1
 #  timeoutSeconds: 60
 #
+  # HTTP client options
+  # Set disableTlsVerification: true when the login server uses a self-signed certificate
+  # (e.g. the bundled fake-login-server module during local development).
+  http:
+    disableTlsVerification: false
+
   auth:
     login:
       method: POST
-      url: http://localhost:8080/login
+      # Use https://localhost:8443/login with the fake-login-server module (self-signed cert).
+      url: https://localhost:8443/login
       headers:
         Content-Type: application/json
       body: |

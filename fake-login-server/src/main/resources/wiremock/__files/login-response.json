@@ -1,0 +1,3 @@
+{
+  "apiKey": "{{systemValue key='fake.login.api.key' type='PROPERTY'}}"
+}

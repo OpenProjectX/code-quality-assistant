@@ -55,6 +55,11 @@ tasks {
         dependsOn(buildPluginJar)
     }
 
+    named("runIde") {
+        dependsOn(":fake-login-server:startFakeLoginServer")
+        finalizedBy(":fake-login-server:stopFakeLoginServer")
+    }
+
 //    withType<JavaExec>().configureEach {
 //        if (name == "runIde") {
 //            doFirst("removeLegacyCoroutinesJavaagent") {

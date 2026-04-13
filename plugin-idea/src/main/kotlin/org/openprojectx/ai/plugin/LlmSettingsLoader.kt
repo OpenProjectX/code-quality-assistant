@@ -36,6 +36,7 @@ object LlmSettingsLoader {
         val template = llm["template"] as? Map<*, *>
         val auth = llm["auth"] as? Map<*, *>
         val login = auth?.get("login") as? Map<*, *>
+        val http = llm["http"] as? Map<*, *>
         val generation = root["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
@@ -52,6 +53,7 @@ object LlmSettingsLoader {
             llmTimeoutSeconds = llm.string("timeoutSeconds").ifBlank { "60" },
             llmApiKey = llm.string("apiKey"),
             llmApiKeyEnv = llm.string("apiKeyEnv"),
+            httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: false,
             llmTemplateEnabled = template != null,
             llmTemplateMethod = template.string("method").ifBlank { "POST" },
             llmTemplateUrl = template.string("url"),
@@ -176,7 +178,7 @@ object LlmSettingsLoader {
         val apiKey = when {
             apiKeyDirect != null -> apiKeyDirect
             apiKeyEnv != null -> System.getenv(apiKeyEnv)?.takeIf { it.isNotBlank() }
-                ?: error("Env var '$apiKeyEnv' is not set (needed for llm.apiKeyEnv).")
+//                ?: error("Env var '$apiKeyEnv' is not set (needed for llm.apiKeyEnv).")
             else -> null
         }
 
@@ -199,6 +201,9 @@ object LlmSettingsLoader {
             LlmAuthConfig(login = parseTemplateRequestConfig(login, "llm.auth.login"))
         }
 
+        val httpMap = llm["http"] as? Map<*, *>
+        val disableTlsVerification = httpMap?.get("disableTlsVerification") as? Boolean ?: false
+
         return LlmSettings(
             provider = provider,
             model = model,
@@ -206,7 +211,8 @@ object LlmSettingsLoader {
             apiKey = apiKey,
             endpoint = endpoint,
             template = template,
-            auth = auth
+            auth = auth,
+            httpDisableTlsVerification = disableTlsVerification
         )
     }
 
