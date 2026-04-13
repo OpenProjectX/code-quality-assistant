@@ -12,12 +12,12 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import javax.swing.BorderFactory
+import javax.swing.ButtonGroup
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
-import javax.swing.DefaultComboBoxModel
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JPasswordField
@@ -32,8 +32,6 @@ import org.yaml.snakeyaml.Yaml
 class AiTestSettingsConfigurable(
     private val project: Project
 ) : SearchableConfigurable {
-    private val newPromptPlaceholder = "<New Prompt>"
-
     private var rootPanel: JPanel? = null
     private var pathLabel: JLabel? = null
 
@@ -83,10 +81,11 @@ class AiTestSettingsConfigurable(
     private lateinit var branchDiffPromptProfileDefaultField: JTextField
     private lateinit var branchDiffPromptProfilesYamlField: JTextArea
     private lateinit var promptTypeField: JComboBox<PromptCategory>
-    private lateinit var promptProfileField: JComboBox<String>
+    private lateinit var promptListPanel: JPanel
     private lateinit var promptContentField: JTextArea
 
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
+    private var selectedPromptName: String? = null
 
     private enum class PromptCategory(val label: String) {
         TEST("Test"),
@@ -307,86 +306,62 @@ class AiTestSettingsConfigurable(
     }).apply { border = BorderFactory.createEmptyBorder() }
 
     private fun unifiedPromptManagerSection(): JComponent {
-        promptTypeField.addActionListener { refreshPromptManager() }
-        promptProfileField.addActionListener { loadSelectedPromptContent() }
+        promptTypeField.addActionListener { refreshPromptManager(selectName = null) }
 
         val clearButton = JButton("New / Clear")
-        val addButton = JButton("Add")
-        val updateButton = JButton("Update")
+        val saveButton = JButton("Save")
         val deleteButton = JButton("Delete")
+        promptListPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
 
         clearButton.addActionListener { prepareNewPromptInput() }
-        addButton.addActionListener { addPromptProfile() }
-        updateButton.addActionListener { updatePromptProfile() }
+        saveButton.addActionListener { savePromptProfile() }
         deleteButton.addActionListener { deletePromptProfile() }
 
         refreshPromptManager()
 
         return formSection("Prompt Manager", listOf(
             "Prompt type" to promptTypeField,
-            "Existing prompt" to promptProfileField,
+            "Existing prompts (checkbox list)" to JScrollPane(promptListPanel),
             "Prompt content" to JScrollPane(promptContentField),
             "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                 add(clearButton)
-                add(addButton)
-                add(updateButton)
+                add(saveButton)
                 add(deleteButton)
             }
         ))
     }
 
-    private fun addPromptProfile() {
+    private fun savePromptProfile() {
         val content = promptContentField.text.trim()
         if (content.isBlank()) {
             Messages.showErrorDialog(project, "Prompt content is required.", "AI Test Generator")
             return
         }
 
-        val newName = Messages.showInputDialog(
-            project,
-            "Enter a name for the new prompt:",
-            "New Prompt",
-            null
-        )?.trim().orEmpty()
-
-        if (newName.isBlank()) {
-            Messages.showErrorDialog(project, "Prompt name is required.", "AI Test Generator")
-            return
-        }
-
         val category = selectedPromptCategory()
         val map = promptMapByCategory(category).toMutableMap()
-        map[newName] = content
+        val targetName = selectedPromptName?.takeIf { map.containsKey(it) } ?: nextLocalPromptName(map)
+        map[targetName] = content
         updatePromptYaml(category, map)
 
-        defaultFieldByCategory(category).takeIf { it.text.isBlank() }?.text = newName
-        refreshPromptManager(selectName = newName)
-    }
-
-    private fun updatePromptProfile() {
-        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
-        val content = promptContentField.text.trim()
-        if (selectedName.isBlank() || selectedName == newPromptPlaceholder || content.isBlank()) {
-            Messages.showErrorDialog(project, "Select a prompt and provide content before updating.", "AI Test Generator")
-            return
-        }
-
-        val category = selectedPromptCategory()
-        val map = promptMapByCategory(category).toMutableMap()
-        map[selectedName] = content
-        updatePromptYaml(category, map)
-        refreshPromptManager(selectName = selectedName)
+        defaultFieldByCategory(category).takeIf { it.text.isBlank() }?.text = targetName
+        refreshPromptManager(selectName = targetName)
     }
 
     private fun deletePromptProfile() {
-        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
-        if (selectedName.isBlank() || selectedName == newPromptPlaceholder) {
+        val selectedName = selectedPromptName.orEmpty()
+        if (selectedName.isBlank()) {
             Messages.showErrorDialog(project, "Select a prompt before deleting.", "AI Test Generator")
             return
         }
 
         val category = selectedPromptCategory()
         val map = promptMapByCategory(category).toMutableMap()
+        val globalName = map.keys.firstOrNull().orEmpty()
+        if (selectedName == globalName) {
+            Messages.showErrorDialog(project, "Global prompt cannot be deleted.", "AI Test Generator")
+            return
+        }
         map.remove(selectedName)
         if (map.isEmpty()) {
             Messages.showErrorDialog(project, "At least one prompt must remain in this category.", "AI Test Generator")
@@ -399,23 +374,51 @@ class AiTestSettingsConfigurable(
             defaultField.text = map.keys.first()
         }
 
-        refreshPromptManager(selectName = map.keys.first())
+        refreshPromptManager(selectName = null)
     }
 
     private fun refreshPromptManager(selectName: String? = null) {
-        val model = DefaultComboBoxModel<String>()
-        model.addElement(newPromptPlaceholder)
         val map = promptMapByCategory(selectedPromptCategory())
-        map.keys.forEach { model.addElement(it) }
-        promptProfileField.model = model
-        val resolvedSelection = selectName?.takeIf { map.containsKey(it) } ?: newPromptPlaceholder
-        promptProfileField.selectedItem = resolvedSelection
-        loadSelectedPromptContent()
+        val resolvedSelection = selectName?.takeIf { map.containsKey(it) }
+        selectedPromptName = resolvedSelection
+        promptListPanel.removeAll()
+
+        val group = ButtonGroup()
+        val globalName = map.keys.firstOrNull()
+        map.keys.forEach { name ->
+            val isGlobal = name == globalName
+            val checkbox = JCheckBox(
+                if (isGlobal) "🌐 [Global] $name (first, non-deletable)" else "📄 [Local] $name"
+            ).apply {
+                isSelected = name == resolvedSelection
+                addActionListener {
+                    selectedPromptName = name
+                    loadSelectedPromptContent()
+                }
+                if (isGlobal) {
+                    font = font.deriveFont(font.style or java.awt.Font.BOLD)
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(java.awt.Color(70, 130, 180)),
+                        BorderFactory.createEmptyBorder(2, 4, 2, 4)
+                    )
+                }
+            }
+            group.add(checkbox)
+            promptListPanel.add(checkbox)
+        }
+
+        if (resolvedSelection == null) {
+            promptContentField.text = ""
+        } else {
+            loadSelectedPromptContent()
+        }
+        promptListPanel.revalidate()
+        promptListPanel.repaint()
     }
 
     private fun loadSelectedPromptContent() {
-        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
-        if (selectedName.isBlank() || selectedName == newPromptPlaceholder) {
+        val selectedName = selectedPromptName.orEmpty()
+        if (selectedName.isBlank()) {
             promptContentField.text = ""
             return
         }
@@ -424,9 +427,19 @@ class AiTestSettingsConfigurable(
     }
 
     private fun prepareNewPromptInput() {
-        promptProfileField.selectedItem = newPromptPlaceholder
+        selectedPromptName = null
         promptContentField.text = ""
         promptContentField.requestFocusInWindow()
+        refreshPromptManager(selectName = null)
+    }
+
+    private fun nextLocalPromptName(map: Map<String, String>): String {
+        var index = 1
+        while (true) {
+            val candidate = "local-$index"
+            if (!map.containsKey(candidate)) return candidate
+            index++
+        }
     }
 
     private fun selectedPromptCategory(): PromptCategory =
