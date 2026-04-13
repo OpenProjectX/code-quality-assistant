@@ -158,7 +158,6 @@ class AiTestSettingsConfigurable(
         branchDiffPromptProfileDefaultField = JTextField()
         branchDiffPromptProfilesYamlField = textArea(12)
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
-        promptProfileField = JComboBox()
         promptContentField = textArea(8)
 
         llmTemplateEnabled.addActionListener { toggleTemplateCards() }
