@@ -173,9 +173,9 @@ class AiTestSettingsConfigurable(
 
         val tabs = JTabbedPane().apply {
             addTab("LLM", llmTab())
+            addTab("Prompts", promptsTab())
             addTab("Login", loginTab())
             addTab("Generation", generationTab())
-            addTab("Prompts", promptsTab())
         }
 
         val toolbar = JPanel(BorderLayout()).apply {
@@ -300,14 +300,6 @@ class AiTestSettingsConfigurable(
             "Commit message prompt" to JScrollPane(commitPromptField),
             "Branch diff summary prompt" to JScrollPane(branchDiffPromptField),
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
-        )))
-        add(formSection("Prompt Profiles (Right click actions to choose)", listOf(
-            "Test prompt default profile" to generationPromptProfileDefaultField,
-            "Test prompt profiles (YAML map)" to JScrollPane(generationPromptProfilesYamlField),
-            "Commit prompt default profile" to commitPromptProfileDefaultField,
-            "Commit prompt profiles (YAML map)" to JScrollPane(commitPromptProfilesYamlField),
-            "Branch diff default profile" to branchDiffPromptProfileDefaultField,
-            "Branch diff profiles (YAML map)" to JScrollPane(branchDiffPromptProfilesYamlField)
         )))
         add(unifiedPromptManagerSection())
     }).apply { border = BorderFactory.createEmptyBorder() }
