@@ -17,6 +17,7 @@ import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.DefaultComboBoxModel
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JPasswordField
@@ -76,18 +77,23 @@ class AiTestSettingsConfigurable(
     private lateinit var branchDiffPromptField: JTextArea
     private lateinit var generationPromptProfileDefaultField: JTextField
     private lateinit var generationPromptProfilesYamlField: JTextArea
-    private lateinit var generationPromptNewNameField: JTextField
-    private lateinit var generationPromptNewValueField: JTextArea
     private lateinit var commitPromptProfileDefaultField: JTextField
     private lateinit var commitPromptProfilesYamlField: JTextArea
-    private lateinit var commitPromptNewNameField: JTextField
-    private lateinit var commitPromptNewValueField: JTextArea
     private lateinit var branchDiffPromptProfileDefaultField: JTextField
     private lateinit var branchDiffPromptProfilesYamlField: JTextArea
-    private lateinit var branchDiffPromptNewNameField: JTextField
-    private lateinit var branchDiffPromptNewValueField: JTextArea
+    private lateinit var promptTypeField: JComboBox<PromptCategory>
+    private lateinit var promptProfileField: JComboBox<String>
+    private lateinit var promptContentField: JTextArea
 
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
+
+    private enum class PromptCategory(val label: String) {
+        TEST("Test"),
+        COMMIT("Commit"),
+        BRANCH_DIFF("Branch Diff");
+
+        override fun toString(): String = label
+    }
 
     override fun getId(): String = "org.openprojectx.ai.plugin.settings"
 
@@ -147,16 +153,13 @@ class AiTestSettingsConfigurable(
         branchDiffPromptField = textArea(12)
         generationPromptProfileDefaultField = JTextField()
         generationPromptProfilesYamlField = textArea(12)
-        generationPromptNewNameField = JTextField()
-        generationPromptNewValueField = textArea(6)
         commitPromptProfileDefaultField = JTextField()
         commitPromptProfilesYamlField = textArea(12)
-        commitPromptNewNameField = JTextField()
-        commitPromptNewValueField = textArea(6)
         branchDiffPromptProfileDefaultField = JTextField()
         branchDiffPromptProfilesYamlField = textArea(12)
-        branchDiffPromptNewNameField = JTextField()
-        branchDiffPromptNewValueField = textArea(6)
+        promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
+        promptProfileField = JComboBox()
+        promptContentField = textArea(8)
 
         llmTemplateEnabled.addActionListener { toggleTemplateCards() }
         loginEnabled.addActionListener { toggleTemplateCards() }
@@ -299,89 +302,144 @@ class AiTestSettingsConfigurable(
             "Branch diff default profile" to branchDiffPromptProfileDefaultField,
             "Branch diff profiles (YAML map)" to JScrollPane(branchDiffPromptProfilesYamlField)
         )))
-        add(generationPromptManagerSection())
-        add(commitPromptManagerSection())
-        add(branchDiffPromptManagerSection())
+        add(unifiedPromptManagerSection())
     }).apply { border = BorderFactory.createEmptyBorder() }
 
-    private fun generationPromptManagerSection(): JComponent {
-        val addButton = JButton("Add Test Prompt").apply {
-            addActionListener {
-                addPromptProfile(
-                    typeLabel = "Test",
-                    nameField = generationPromptNewNameField,
-                    valueField = generationPromptNewValueField,
-                    profilesYamlField = generationPromptProfilesYamlField,
-                    defaultField = generationPromptProfileDefaultField
-                )
+    private fun unifiedPromptManagerSection(): JComponent {
+        promptTypeField.addActionListener { refreshPromptManager() }
+        promptProfileField.addActionListener { loadSelectedPromptContent() }
+
+        val addButton = JButton("Add")
+        val updateButton = JButton("Update")
+        val deleteButton = JButton("Delete")
+
+        addButton.addActionListener { addPromptProfile() }
+        updateButton.addActionListener { updatePromptProfile() }
+        deleteButton.addActionListener { deletePromptProfile() }
+
+        refreshPromptManager()
+
+        return formSection("Prompt Manager", listOf(
+            "Prompt type" to promptTypeField,
+            "Existing prompt" to promptProfileField,
+            "Prompt content" to JScrollPane(promptContentField),
+            "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(addButton)
+                add(updateButton)
+                add(deleteButton)
             }
-        }
-        return formSection("Test Prompt Manager", listOf(
-            "New prompt name" to generationPromptNewNameField,
-            "New prompt value" to JScrollPane(generationPromptNewValueField),
-            "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(addButton) }
         ))
     }
 
-    private fun commitPromptManagerSection(): JComponent {
-        val addButton = JButton("Add Commit Prompt").apply {
-            addActionListener {
-                addPromptProfile(
-                    typeLabel = "Commit",
-                    nameField = commitPromptNewNameField,
-                    valueField = commitPromptNewValueField,
-                    profilesYamlField = commitPromptProfilesYamlField,
-                    defaultField = commitPromptProfileDefaultField
-                )
-            }
-        }
-        return formSection("Commit Prompt Manager", listOf(
-            "New prompt name" to commitPromptNewNameField,
-            "New prompt value" to JScrollPane(commitPromptNewValueField),
-            "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(addButton) }
-        ))
-    }
-
-    private fun branchDiffPromptManagerSection(): JComponent {
-        val addButton = JButton("Add Branch Diff Prompt").apply {
-            addActionListener {
-                addPromptProfile(
-                    typeLabel = "Branch Diff",
-                    nameField = branchDiffPromptNewNameField,
-                    valueField = branchDiffPromptNewValueField,
-                    profilesYamlField = branchDiffPromptProfilesYamlField,
-                    defaultField = branchDiffPromptProfileDefaultField
-                )
-            }
-        }
-        return formSection("Branch Diff Prompt Manager", listOf(
-            "New prompt name" to branchDiffPromptNewNameField,
-            "New prompt value" to JScrollPane(branchDiffPromptNewValueField),
-            "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(addButton) }
-        ))
-    }
-
-    private fun addPromptProfile(
-        typeLabel: String,
-        nameField: JTextField,
-        valueField: JTextArea,
-        profilesYamlField: JTextArea,
-        defaultField: JTextField
-    ) {
-        val name = nameField.text.trim()
-        val value = valueField.text.trim()
-        if (name.isBlank() || value.isBlank()) {
-            Messages.showErrorDialog(project, "$typeLabel prompt name and value are required.", "AI Test Generator")
+    private fun addPromptProfile() {
+        val content = promptContentField.text.trim()
+        if (content.isBlank()) {
+            Messages.showErrorDialog(project, "Prompt content is required.", "AI Test Generator")
             return
         }
-        val map = parseYamlMap(profilesYamlField.text).toMutableMap()
-        map[name] = value
-        profilesYamlField.text = dumpYamlMap(map)
-        if (defaultField.text.isBlank()) {
-            defaultField.text = name
+
+        val newName = Messages.showInputDialog(
+            project,
+            "Enter a name for the new prompt:",
+            "New Prompt",
+            null
+        )?.trim().orEmpty()
+
+        if (newName.isBlank()) {
+            Messages.showErrorDialog(project, "Prompt name is required.", "AI Test Generator")
+            return
         }
-        nameField.text = ""
-        valueField.text = ""
+
+        val category = selectedPromptCategory()
+        val map = promptMapByCategory(category).toMutableMap()
+        map[newName] = content
+        updatePromptYaml(category, map)
+
+        defaultFieldByCategory(category).takeIf { it.text.isBlank() }?.text = newName
+        refreshPromptManager(selectName = newName)
+    }
+
+    private fun updatePromptProfile() {
+        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
+        val content = promptContentField.text.trim()
+        if (selectedName.isBlank() || content.isBlank()) {
+            Messages.showErrorDialog(project, "Select a prompt and provide content before updating.", "AI Test Generator")
+            return
+        }
+
+        val category = selectedPromptCategory()
+        val map = promptMapByCategory(category).toMutableMap()
+        map[selectedName] = content
+        updatePromptYaml(category, map)
+        refreshPromptManager(selectName = selectedName)
+    }
+
+    private fun deletePromptProfile() {
+        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
+        if (selectedName.isBlank()) {
+            Messages.showErrorDialog(project, "Select a prompt before deleting.", "AI Test Generator")
+            return
+        }
+
+        val category = selectedPromptCategory()
+        val map = promptMapByCategory(category).toMutableMap()
+        map.remove(selectedName)
+        if (map.isEmpty()) {
+            Messages.showErrorDialog(project, "At least one prompt must remain in this category.", "AI Test Generator")
+            return
+        }
+        updatePromptYaml(category, map)
+
+        val defaultField = defaultFieldByCategory(category)
+        if (defaultField.text.trim() == selectedName) {
+            defaultField.text = map.keys.first()
+        }
+
+        refreshPromptManager(selectName = map.keys.first())
+    }
+
+    private fun refreshPromptManager(selectName: String? = null) {
+        val model = DefaultComboBoxModel<String>()
+        val map = promptMapByCategory(selectedPromptCategory())
+        map.keys.forEach { model.addElement(it) }
+        promptProfileField.model = model
+        if (model.size > 0) {
+            promptProfileField.selectedItem = selectName?.takeIf { map.containsKey(it) } ?: model.getElementAt(0)
+        }
+        loadSelectedPromptContent()
+    }
+
+    private fun loadSelectedPromptContent() {
+        val selectedName = promptProfileField.selectedItem?.toString().orEmpty()
+        val content = promptMapByCategory(selectedPromptCategory())[selectedName].orEmpty()
+        promptContentField.text = content
+    }
+
+    private fun selectedPromptCategory(): PromptCategory =
+        promptTypeField.selectedItem as? PromptCategory ?: PromptCategory.TEST
+
+    private fun promptMapByCategory(category: PromptCategory): Map<String, String> {
+        return when (category) {
+            PromptCategory.TEST -> parseYamlMap(generationPromptProfilesYamlField.text)
+            PromptCategory.COMMIT -> parseYamlMap(commitPromptProfilesYamlField.text)
+            PromptCategory.BRANCH_DIFF -> parseYamlMap(branchDiffPromptProfilesYamlField.text)
+        }
+    }
+
+    private fun updatePromptYaml(category: PromptCategory, value: Map<String, String>) {
+        when (category) {
+            PromptCategory.TEST -> generationPromptProfilesYamlField.text = dumpYamlMap(value)
+            PromptCategory.COMMIT -> commitPromptProfilesYamlField.text = dumpYamlMap(value)
+            PromptCategory.BRANCH_DIFF -> branchDiffPromptProfilesYamlField.text = dumpYamlMap(value)
+        }
+    }
+
+    private fun defaultFieldByCategory(category: PromptCategory): JTextField {
+        return when (category) {
+            PromptCategory.TEST -> generationPromptProfileDefaultField
+            PromptCategory.COMMIT -> commitPromptProfileDefaultField
+            PromptCategory.BRANCH_DIFF -> branchDiffPromptProfileDefaultField
+        }
     }
 
     private fun formSection(title: String, rows: List<Pair<String, JComponent>>): JComponent {
@@ -568,6 +626,7 @@ class AiTestSettingsConfigurable(
         branchDiffPromptProfileDefaultField.text = state.branchDiffPromptProfileDefault
         branchDiffPromptProfilesYamlField.text = state.branchDiffPromptProfilesYaml
 
+        refreshPromptManager()
         toggleTemplateCards()
         updatePathLabel()
     }
