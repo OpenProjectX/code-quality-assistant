@@ -14,6 +14,7 @@ import java.io.File
 object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
+    private const val GLOBAL_DIFF_REVIEW_PROFILE = "global/get diff review"
 
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
@@ -85,18 +86,24 @@ object LlmSettingsLoader {
                     AiPromptDefaults.GENERATION_WRAPPER
                 )
             ),
-            commitPromptProfileDefault = prompts.map("commitMessageProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            commitPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             commitPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
+                applyGlobalDiffReviewProfile(
+                    project,
+                    parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
                     AiPromptDefaults.COMMIT_MESSAGE
+                    )
                 )
             ),
-            branchDiffPromptProfileDefault = prompts.map("branchDiffSummaryProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            branchDiffPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             branchDiffPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
+                applyGlobalDiffReviewProfile(
+                    project,
+                    parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY
+                    )
                 )
             )
         )
@@ -106,7 +113,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
         root["generation"] = buildGenerationMap(root["generation"] as? Map<*, *>, model)
-        root["prompts"] = buildPromptsMap(root["prompts"] as? Map<*, *>, model)
+        root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
         writeRootMap(project, root)
     }
 
@@ -384,7 +391,7 @@ object LlmSettingsLoader {
         return generation
     }
 
-    private fun buildPromptsMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+    private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
         val prompts = existing.toMutableLinkedMap()
         prompts["generation"] = linkedMapOf<String, Any>(
             "wrapper" to model.generationPromptWrapper,
@@ -400,16 +407,56 @@ object LlmSettingsLoader {
             defaultTemplate = model.generationPromptWrapper
         )
         prompts["commitMessageProfiles"] = buildPromptProfileMap(
-            selected = model.commitPromptProfileDefault,
-            yamlText = model.commitPromptProfilesYaml,
+            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalDiffReviewProfile(
+                    project,
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        model.commitPrompt
+                    )
+                )
+            ),
             defaultTemplate = model.commitPrompt
         )
         prompts["branchDiffSummaryProfiles"] = buildPromptProfileMap(
-            selected = model.branchDiffPromptProfileDefault,
-            yamlText = model.branchDiffPromptProfilesYaml,
+            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalDiffReviewProfile(
+                    project,
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        model.branchDiffPrompt
+                    )
+                )
+            ),
             defaultTemplate = model.branchDiffPrompt
         )
         return prompts
+    }
+
+    private fun applyGlobalDiffReviewProfile(project: Project, items: Map<String, String>): Map<String, String> {
+        val diffReviewPrompt = loadProjectPromptFile(project) ?: return items
+        val normalized = linkedMapOf<String, String>()
+        normalized[GLOBAL_DIFF_REVIEW_PROFILE] = diffReviewPrompt
+        items.forEach { (name, value) ->
+            if (name != GLOBAL_DIFF_REVIEW_PROFILE) {
+                normalized[name] = value
+            }
+        }
+        return normalized
+    }
+
+    private fun loadProjectPromptFile(project: Project): String? {
+        val basePath = project.basePath ?: return null
+        val candidates = listOf(
+            "$basePath/prompts/git-diff-review-prompt.md",
+            "$basePath/prompts/diff-review.md"
+        )
+        return candidates.firstNotNullOfOrNull { path ->
+            val file = File(path)
+            if (file.exists() && file.isFile) file.readText(Charsets.UTF_8).trim().ifBlank { null } else null
+        }
     }
 
     private fun parsePromptProfileSet(profileMap: Map<*, *>, defaultTemplate: String): PromptProfileSet {
