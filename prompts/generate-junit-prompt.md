@@ -33,12 +33,13 @@ Generate a complete, compilable JUnit 5 test class that:
 8. Add a failure message to every `@ParameterizedTest` assertion so the failing input is visible in the test report: e.g., `assertEquals(expected, actual, "input: " + param)`
 9. When null/empty/blank all produce the same result, use `@NullAndEmptySource` (or combine `@NullSource` + `@EmptySource` + a `@ValueSource` blank entry) instead of writing separate `@Test` methods for each
 10. Import only what is used; do not add unnecessary imports
+11. The test class package must exactly match the package declaration of the source class — copy it verbatim. Do not infer, shorten, or alter it.
 
 ### Output Format
 Return **only** the Java source code for the test class, wrapped in a fenced code block:
 
 ```java
-package <same package as source class>;
+package <copy the exact package statement from the source class, e.g. "com.example.myapp.utils">;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
