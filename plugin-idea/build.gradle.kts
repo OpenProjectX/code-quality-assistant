@@ -46,7 +46,7 @@ val buildPluginJar by tasks.registering(Zip::class) {
 
 tasks {
     patchPluginXml {
-        sinceBuild.set("233")
+        sinceBuild.set("241")
         untilBuild.set("253.*")
     }
 

@@ -34,6 +34,7 @@ val pidFilePath: String = layout.buildDirectory.file("fake-login-server.pid").ge
 tasks.register("startFakeLoginServer") {
     group = "application"
     description = "Starts the fake HTTPS login server (WireMock, port 8443) as a background process"
+    notCompatibleWithConfigurationCache("Process-management task — configuration cache not applicable")
     dependsOn("jar")
 
     // ── Resolve at configuration time (required for configuration cache) ──────
@@ -113,6 +114,7 @@ tasks.register("startFakeLoginServer") {
 tasks.register("stopFakeLoginServer") {
     group = "application"
     description = "Stops the fake HTTPS login server started by startFakeLoginServer"
+    notCompatibleWithConfigurationCache("Process-management task — configuration cache not applicable")
 
     doLast {
         val pidFileRef = File(pidFilePath)
