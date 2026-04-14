@@ -1,3 +1,11 @@
+---
+global: true
+category:
+  - commit
+  - branchDiff
+name: get diff review
+---
+
 # Git Diff Review Prompt
 
 Use this prompt to get a combined review and summary of a git diff. Paste the diff content after the `## Diff` heading.

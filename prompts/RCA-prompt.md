@@ -1,3 +1,9 @@
+---
+global: true
+category: analysis
+name: rca
+---
+
 Analysis guidance:
 - Work through these in order before writing any output:
   1. Infer severity levels — do not assume standard labels; infer from keywords (Exception, Error, WARN, panic, traceback, stack traces, HTTP 5xx, etc.).
