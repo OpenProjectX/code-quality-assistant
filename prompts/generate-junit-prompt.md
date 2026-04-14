@@ -1,3 +1,9 @@
+---
+global: true
+category: test
+name: junit
+---
+
 # Prompt: Generate JUnit 5 Unit Tests for a Java Method
 
 ## Role

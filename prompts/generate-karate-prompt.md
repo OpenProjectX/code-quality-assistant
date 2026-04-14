@@ -1,3 +1,9 @@
+---
+global: true
+category: test
+name: karate
+---
+
 # Prompt: Generate Karate Feature Files from OpenAPI Spec
 
 ## Instructions for the LLM

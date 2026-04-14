@@ -14,6 +14,9 @@ import java.io.File
 object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
+    private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
+    private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
+    private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
 
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
@@ -82,23 +85,35 @@ object LlmSettingsLoader {
             branchDiffPrompt = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
             generationPromptProfileDefault = prompts.map("generationProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             generationPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
-                    prompts.map("generationProfiles").map("items"),
-                    AiPromptDefaults.GENERATION_WRAPPER
+                applyGlobalProfiles(
+                    project,
+                    "test",
+                    parsePromptProfileItems(
+                        prompts.map("generationProfiles").map("items"),
+                        AiPromptDefaults.GENERATION_WRAPPER
+                    )
                 )
             ),
-            commitPromptProfileDefault = prompts.map("commitMessageProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            commitPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             commitPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
+                applyGlobalProfiles(
+                    project,
+                    "commit",
+                    parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
                     AiPromptDefaults.COMMIT_MESSAGE
+                    )
                 )
             ),
-            branchDiffPromptProfileDefault = prompts.map("branchDiffSummaryProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            branchDiffPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             branchDiffPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
+                applyGlobalProfiles(
+                    project,
+                    "branchDiff",
+                    parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY
+                    )
                 )
             )
         )
@@ -108,7 +123,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
         root["generation"] = buildGenerationMap(root["generation"] as? Map<*, *>, model)
-        root["prompts"] = buildPromptsMap(root["prompts"] as? Map<*, *>, model)
+        root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
         writeRootMap(project, root)
     }
 
@@ -124,7 +139,7 @@ object LlmSettingsLoader {
 
         val llm = parseLlmSettings(root)
         val generation = parseGenerationConfig(root)
-        val prompts = parsePromptOverrides(root)
+        val prompts = parsePromptOverrides(project, root)
 
         return AiTestConfig(
             llm = llm,
@@ -133,7 +148,7 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun parsePromptOverrides(root: Map<*, *>): PromptOverrides {
+    private fun parsePromptOverrides(project: Project, root: Map<*, *>): PromptOverrides {
         val prompts = root["prompts"] as? Map<*, *> ?: return PromptOverrides()
         val generation = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
@@ -148,16 +163,22 @@ object LlmSettingsLoader {
             branchDiffSummary = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
             profiles = PromptProfiles(
                 generation = parsePromptProfileSet(
-                    prompts.map("generationProfiles"),
-                    defaultTemplate = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER }
+                    profileMap = prompts.map("generationProfiles"),
+                    defaultTemplate = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
+                    globalCategory = "test",
+                    project = project
                 ),
                 commitMessage = parsePromptProfileSet(
-                    prompts.map("commitMessageProfiles"),
-                    defaultTemplate = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE }
+                    profileMap = prompts.map("commitMessageProfiles"),
+                    defaultTemplate = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
+                    globalCategory = "commit",
+                    project = project
                 ),
                 branchDiffSummary = parsePromptProfileSet(
-                    prompts.map("branchDiffSummaryProfiles"),
-                    defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY }
+                    profileMap = prompts.map("branchDiffSummaryProfiles"),
+                    defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
+                    globalCategory = "branchDiff",
+                    project = project
                 )
             )
         )
@@ -396,7 +417,7 @@ object LlmSettingsLoader {
         return generation
     }
 
-    private fun buildPromptsMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+    private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
         val prompts = existing.toMutableLinkedMap()
         prompts["generation"] = linkedMapOf<String, Any>(
             "wrapper" to model.generationPromptWrapper,
@@ -408,24 +429,102 @@ object LlmSettingsLoader {
         prompts["branchDiffSummary"] = model.branchDiffPrompt
         prompts["generationProfiles"] = buildPromptProfileMap(
             selected = model.generationPromptProfileDefault,
-            yamlText = model.generationPromptProfilesYaml,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalProfiles(
+                    project,
+                    "test",
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.generationPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        model.generationPromptWrapper
+                    )
+                )
+            ),
             defaultTemplate = model.generationPromptWrapper
         )
         prompts["commitMessageProfiles"] = buildPromptProfileMap(
-            selected = model.commitPromptProfileDefault,
-            yamlText = model.commitPromptProfilesYaml,
+            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalProfiles(
+                    project,
+                    "commit",
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        model.commitPrompt
+                    )
+                )
+            ),
             defaultTemplate = model.commitPrompt
         )
         prompts["branchDiffSummaryProfiles"] = buildPromptProfileMap(
-            selected = model.branchDiffPromptProfileDefault,
-            yamlText = model.branchDiffPromptProfilesYaml,
+            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalProfiles(
+                    project,
+                    "branchDiff",
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        model.branchDiffPrompt
+                    )
+                )
+            ),
             defaultTemplate = model.branchDiffPrompt
         )
         return prompts
     }
 
-    private fun parsePromptProfileSet(profileMap: Map<*, *>, defaultTemplate: String): PromptProfileSet {
-        val items = parsePromptProfileItems(profileMap.map("items"), defaultTemplate)
+    private fun applyGlobalProfiles(project: Project, category: String, items: Map<String, String>): Map<String, String> {
+        val globalPrompts = loadGlobalPrompts(project)[category].orEmpty()
+        if (globalPrompts.isEmpty()) return items
+        val normalized = linkedMapOf<String, String>()
+        globalPrompts.forEach { (name, content) ->
+            normalized[name] = content
+        }
+        items.forEach { (name, value) ->
+            if (!globalPrompts.containsKey(name) && !name.startsWith("global/")) {
+                normalized[name] = value
+            }
+        }
+        return normalized
+    }
+
+    private fun loadGlobalPrompts(project: Project): Map<String, Map<String, String>> {
+        val basePath = project.basePath ?: return emptyMap()
+        val junit = readPromptFile("$basePath/prompts/generate-junit-prompt.md")
+        val karate = readPromptFile("$basePath/prompts/generate-karate-prompt.md")
+        val diffReview = readPromptFile("$basePath/prompts/git-diff-review-prompt.md")
+            ?: readPromptFile("$basePath/prompts/diff-review.md")
+
+        return mapOf(
+            "test" to linkedMapOf<String, String>().apply {
+                junit?.let { put(GLOBAL_JUNIT_PROFILE, it) }
+                karate?.let { put(GLOBAL_KARATE_PROFILE, it) }
+            },
+            "commit" to linkedMapOf<String, String>().apply {
+                diffReview?.let { put(GLOBAL_DIFF_REVIEW_PROFILE, it) }
+            },
+            "branchDiff" to linkedMapOf<String, String>().apply {
+                diffReview?.let { put(GLOBAL_DIFF_REVIEW_PROFILE, it) }
+            }
+        )
+    }
+
+    private fun readPromptFile(path: String): String? {
+        val file = File(path)
+        if (!file.exists() || !file.isFile) return null
+        return file.readText(Charsets.UTF_8).trim().ifBlank { null }
+    }
+
+    private fun parsePromptProfileSet(
+        profileMap: Map<*, *>,
+        defaultTemplate: String,
+        globalCategory: String,
+        project: Project
+    ): PromptProfileSet {
+        val items = applyGlobalProfiles(
+            project,
+            globalCategory,
+            parsePromptProfileItems(profileMap.map("items"), defaultTemplate)
+        )
         val selected = profileMap.string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME }
         return PromptProfileSet(selected = selected, items = items)
     }
