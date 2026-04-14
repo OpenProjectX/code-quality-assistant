@@ -107,6 +107,7 @@ class AiTestSettingsConfigurable(
     override fun getDisplayName(): String = "AI Test Generator"
 
     override fun createComponent(): JComponent {
+        val usage = ButtonUsageReportService.getInstance(project)
         providerField = JComboBox(arrayOf("openai-compatible", "template"))
         modelField = JTextField()
         endpointField = JTextField()
@@ -192,13 +193,17 @@ class AiTestSettingsConfigurable(
             add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                 add(JButton("Login Now").apply {
                     addActionListener {
+                        usage.record("settings.toolbar.login_now")
                         if (saveCurrentState()) {
                             LlmAuthSessionService.getInstance(project).loginNowWithFeedback()
                         }
                     }
                 })
                 add(JButton("Reload").apply {
-                    addActionListener { reset() }
+                    addActionListener {
+                        usage.record("settings.toolbar.reload")
+                        reset()
+                    }
                 })
             }, BorderLayout.EAST)
         }
@@ -316,9 +321,18 @@ class AiTestSettingsConfigurable(
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }
 
-        clearButton.addActionListener { prepareNewPromptInput() }
-        saveButton.addActionListener { savePromptProfile() }
-        deleteButton.addActionListener { deletePromptProfile() }
+        clearButton.addActionListener {
+            ButtonUsageReportService.getInstance(project).record("settings.prompt_manager.new_clear")
+            prepareNewPromptInput()
+        }
+        saveButton.addActionListener {
+            ButtonUsageReportService.getInstance(project).record("settings.prompt_manager.save")
+            savePromptProfile()
+        }
+        deleteButton.addActionListener {
+            ButtonUsageReportService.getInstance(project).record("settings.prompt_manager.delete")
+            deletePromptProfile()
+        }
 
         refreshPromptManager()
 

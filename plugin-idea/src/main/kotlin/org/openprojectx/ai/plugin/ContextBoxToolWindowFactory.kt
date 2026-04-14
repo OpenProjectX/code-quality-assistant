@@ -112,6 +112,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         borderColor: Color,
         commonFont: Font
     ): JPanel {
+        val usage = ButtonUsageReportService.getInstance(project)
         val listModel = DefaultListModel<PromptItem>()
         val promptList = JList(listModel).apply {
             font = commonFont
@@ -195,6 +196,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val deleteButton = javax.swing.JButton("Delete")
 
         saveButton.addActionListener {
+            usage.record("context_box.prompt_manager.save")
             val category = categoryField.selectedItem as? PromptCategory ?: PromptCategory.TEST
             val name = nameField.text.trim()
             val content = contentField.text.trim()
@@ -238,6 +240,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         }
 
         deleteButton.addActionListener {
+            usage.record("context_box.prompt_manager.delete")
             val selected = selectedItem()
             if (selected == null) {
                 Messages.showErrorDialog(project, "Please select a prompt first.", "Prompt Manager")
