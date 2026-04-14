@@ -14,9 +14,9 @@ import java.io.File
 object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
-    private const val GLOBAL_JUNIT_PROFILE = "global/junit"
-    private const val GLOBAL_KARATE_PROFILE = "global/karate"
-    private const val GLOBAL_DIFF_REVIEW_PROFILE = "global/get diff review"
+    private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
+    private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
+    private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
 
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
@@ -468,7 +468,7 @@ object LlmSettingsLoader {
             normalized[name] = content
         }
         items.forEach { (name, value) ->
-            if (!globalPrompts.containsKey(name)) {
+            if (!globalPrompts.containsKey(name) && !name.startsWith("global/")) {
                 normalized[name] = value
             }
         }

@@ -102,7 +102,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val isGlobal: Boolean,
         val isNew: Boolean = false
     ) {
-        override fun toString(): String = name
+        override fun toString(): String = when {
+            isNew -> name
+            isGlobal -> "💡 $name"
+            else -> name
+        }
     }
 
     private fun createPromptManagerPanel(

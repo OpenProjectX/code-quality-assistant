@@ -428,7 +428,7 @@ class AiTestSettingsConfigurable(
             map.keys.forEach { name ->
                 val isGlobal = name == globalName
                 val checkbox = JCheckBox(
-                    if (isGlobal) "🌐 $name  [${category.label}]  (Global)" else "📄 $name  [${category.label}]"
+                    if (isGlobal) "💡 $name  [${category.label}]  (Global)" else "📄 $name  [${category.label}]"
                 ).apply {
                     isSelected = resolvedSelection?.category == category && resolvedSelection.name == name
                     addActionListener {
