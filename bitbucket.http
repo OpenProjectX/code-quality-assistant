@@ -1,0 +1,2 @@
+GET  https://api.bitbucket.org/2.0/repositories/openprojectx/ai-test-plugin
+Authorization: Bearer {{bitbucketToken}}
