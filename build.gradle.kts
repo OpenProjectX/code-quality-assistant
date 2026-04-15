@@ -137,3 +137,10 @@ release {
         requireBranch.set("main")
     }
 }
+
+// net.researchgate.release registers a BuildEventsListenerRegistry listener that is
+// incompatible with the configuration cache. Marking the task notCompatibleWithConfigurationCache
+// tells Gradle to skip caching entirely for this build instead of failing.
+tasks.named("release") {
+    notCompatibleWithConfigurationCache("net.researchgate.release plugin is not configuration cache compatible")
+}

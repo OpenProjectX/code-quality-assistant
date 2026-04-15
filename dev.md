@@ -5,8 +5,8 @@ rm -rf /data/.gradle/caches/9.3.0/transforms/
 ./gradlew :plugin-idea:runIde
 ./gradlew :plugin-idea:buildPlugin
 
-# Release (config cache must be disabled — the plugin rewrites gradle.properties mid-build)
-./gradlew release --no-configuration-cache
+# Release
+./gradlew release
 
 
 ./gradlew :plugin-idea:publishPlugin  
