@@ -250,11 +250,12 @@ You can also place the same values in [gradle.properties](/data/Git/ai-test-plug
 ### Publish
 
 ```bash
-# Publish to Maven Local
-./gradlew :plugin-idea:publishPluginZipPublicationToMavenLocal
+# Publish all configured publications to Maven Local
+./gradlew publishToMavenLocal
 
-# Publish to Sonatype (requires credentials)
-./gradlew :plugin-idea:publishPluginDistributionPublicationToSonatypeRepository closeAndReleaseSonatypeStagingRepository
+# Publish all configured publications to Maven Central via Sonatype's
+# OSSRH Staging API compatibility service
+./gradlew publishAllPublicationsToSonatypeRepository closeAndReleaseSonatypeStagingRepository
 ```
 
 Maven Central publishing now goes through Sonatype Central Portal. Legacy OSSRH was retired on June 30, 2025, but Gradle builds can still publish through Sonatype's OSSRH Staging API compatibility endpoint, which this project already uses.

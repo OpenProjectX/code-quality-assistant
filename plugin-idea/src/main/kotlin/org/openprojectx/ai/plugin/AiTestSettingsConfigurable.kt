@@ -769,6 +769,7 @@ class AiTestSettingsConfigurable(
     }
 
     private fun updatePathLabel() {
+        if (project.basePath == null) return
         pathLabel?.text = "Project config: ${LlmSettingsLoader.configFilePath(project)}"
     }
 

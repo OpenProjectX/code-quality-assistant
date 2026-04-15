@@ -1,10 +1,15 @@
+code-quality-assistant
 ```shell
 rm -rf /data/.gradle/caches/9.3.0/transforms/
 
 ./gradlew :plugin-idea:runIde
-./gradlew :plugin-idea:buildPlugin -x :plugin-idea:buildSearchableOptions
+./gradlew :plugin-idea:buildPlugin
 
-./gradlew :plugin-idea:publishPlugin -x  :plugin-idea:buildSearchableOptions 
+# Release (config cache must be disabled — the plugin rewrites gradle.properties mid-build)
+./gradlew release --no-configuration-cache
+
+
+./gradlew :plugin-idea:publishPlugin  
 
 ./gradlew :plugin-idea:assemble
 
@@ -21,6 +26,7 @@ tree  ~/.m2/repository/org/openprojectx/ai/plugin/ai-test-plugin
 
 ./gradlew :plugin-idea:publishPluginDistributionPublicationToSonatypeRepository closeAndReleaseSonatypeStagingRepository
 
+./gradlew publishRootModulePublicationToSonatypeRepository closeAndReleaseSonatypeStagingRepository  -x :plugin-idea:buildSearchableOptions
 ```
 
 git filter-branch --force --index-filter \

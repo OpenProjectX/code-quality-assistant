@@ -6,6 +6,7 @@ plugins {
     `maven-publish`
     signing
     id("io.github.gradle-nexus.publish-plugin") version "2.0.0"
+    id("net.researchgate.release") version "3.1.0"
 }
 
 fun localRepositoryDirectories() = sequenceOf(
@@ -49,7 +50,7 @@ val sourcesJar by tasks.registering(Jar::class) {
 
 allprojects {
     group = "org.openprojectx.ai.plugin"
-    version = "0.1.5"
+    version = rootProject.version
 
     repositories {
         localRepositoryDirectories().forEach { repoDir ->
@@ -124,5 +125,15 @@ signing {
             useInMemoryPgpKeys(keyText, keyPass)
             sign(publishing.publications["rootModule"])
         }
+    }
+}
+
+release {
+    // Build the IntelliJ plugin distribution as the release build step.
+    buildTasks.set(listOf(":plugin-idea:buildPlugin"))
+    // Tag format: e.g. "0.1.8"
+    tagTemplate.set("\${version}")
+    git {
+        requireBranch.set("main")
     }
 }

@@ -582,6 +582,7 @@ object LlmSettingsLoader {
     }
 
     private fun readRootMap(project: Project): Map<String, Any?> {
+        if (project.basePath == null) return emptyMap()
         val text = readConfigText(project)
         val root = Yaml().load<Any?>(text) as? Map<*, *>
         return root.toMutableLinkedMap()
