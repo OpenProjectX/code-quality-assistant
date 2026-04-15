@@ -130,7 +130,7 @@ signing {
 
 release {
     // Build the IntelliJ plugin distribution as the release build step.
-    buildTasks.set(listOf(":plugin-idea:buildPlugin"))
+    buildTasks.set(listOf(":plugin-idea:publishPlugin "))
     // Tag format: e.g. "0.1.8"
     tagTemplate.set("\${version}")
     git {
