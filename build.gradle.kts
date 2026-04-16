@@ -128,11 +128,19 @@ signing {
     }
 }
 
-// Only apply the release plugin in the root build.
-// The release plugin's GradleBuild task spawns a nested Gradle invocation that re-evaluates
-// this script. Applying the plugin unconditionally would register its BuildEventsListenerRegistry
-// listener in the nested build too, causing a configuration cache failure there.
-if (gradle.parent == null) {
+// Only apply the release plugin when actually running the release task and in the root build.
+//
+// Two guards are needed:
+//  1. gradle.parent == null  — the release plugin's GradleBuild task spawns a nested invocation
+//     that re-evaluates this script; applying the plugin there would register its incompatible
+//     BuildEventsListenerRegistry listener in the nested build and break config cache there.
+//  2. taskNames contains "release" — the plugin registers its listener at apply-time, not
+//     task-execution-time, so applying it unconditionally poisons the config cache for every
+//     other build (clean, build, etc.) even when the release task is never run.
+val isReleaseBuild = gradle.parent == null &&
+    gradle.startParameter.taskNames.any { it == "release" || it.endsWith(":release") }
+
+if (isReleaseBuild) {
     apply(plugin = "net.researchgate.release")
 
     configure<net.researchgate.release.ReleaseExtension> {
@@ -145,9 +153,8 @@ if (gradle.parent == null) {
         }
     }
 
-    // net.researchgate.release registers a BuildEventsListenerRegistry listener that is
-    // incompatible with the configuration cache. Marking the task notCompatibleWithConfigurationCache
-    // tells Gradle to skip caching entirely for this build instead of failing.
+    // Belt-and-suspenders: also mark the release task itself as config-cache-incompatible
+    // so Gradle skips caching for the outer release build entirely.
     tasks.named("release") {
         notCompatibleWithConfigurationCache("net.researchgate.release plugin is not configuration cache compatible")
     }
