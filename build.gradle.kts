@@ -6,7 +6,7 @@ plugins {
     `maven-publish`
     signing
     id("io.github.gradle-nexus.publish-plugin") version "2.0.0"
-    id("net.researchgate.release") version "3.1.0"
+    id("net.researchgate.release") version "3.1.0" apply false
 }
 
 fun localRepositoryDirectories() = sequenceOf(
@@ -128,19 +128,27 @@ signing {
     }
 }
 
-release {
-    // Build the IntelliJ plugin distribution as the release build step.
-    buildTasks.set(listOf(":plugin-idea:publishPlugin"))
-    // Tag format: e.g. "0.1.8"
-    tagTemplate.set("\${version}")
-    git {
-        requireBranch.set("main")
-    }
-}
+// Only apply the release plugin in the root build.
+// The release plugin's GradleBuild task spawns a nested Gradle invocation that re-evaluates
+// this script. Applying the plugin unconditionally would register its BuildEventsListenerRegistry
+// listener in the nested build too, causing a configuration cache failure there.
+if (gradle.parent == null) {
+    apply(plugin = "net.researchgate.release")
 
-// net.researchgate.release registers a BuildEventsListenerRegistry listener that is
-// incompatible with the configuration cache. Marking the task notCompatibleWithConfigurationCache
-// tells Gradle to skip caching entirely for this build instead of failing.
-tasks.named("release") {
-    notCompatibleWithConfigurationCache("net.researchgate.release plugin is not configuration cache compatible")
+    configure<net.researchgate.release.ReleaseExtension> {
+        // Build the IntelliJ plugin distribution as the release build step.
+        buildTasks.set(listOf(":plugin-idea:publishPlugin"))
+        // Tag format: e.g. "0.1.8"
+        tagTemplate.set("\${version}")
+        git {
+            requireBranch.set("main")
+        }
+    }
+
+    // net.researchgate.release registers a BuildEventsListenerRegistry listener that is
+    // incompatible with the configuration cache. Marking the task notCompatibleWithConfigurationCache
+    // tells Gradle to skip caching entirely for this build instead of failing.
+    tasks.named("release") {
+        notCompatibleWithConfigurationCache("net.researchgate.release plugin is not configuration cache compatible")
+    }
 }
