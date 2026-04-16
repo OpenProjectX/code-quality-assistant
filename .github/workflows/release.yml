@@ -1,26 +1,30 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_version:
-        description: "Release version (e.g. 0.1.10) — leave blank to use current version in gradle.properties"
-        required: false
-      next_version:
-        description: "Next snapshot version (e.g. 0.1.11-SNAPSHOT) — leave blank to let the plugin auto-increment"
-        required: false
+  push:
+    branches:
+      - main
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Guard 1 — explicit commit-message filter.
+    # The release plugin always prefixes its own commits with "[Gradle Release Plugin]".
+    # Skipping those prevents a loop even if the checkout token is ever changed to a PAT.
+    # Guard 2 (implicit) — GitHub does not re-trigger workflows for pushes made with
+    # GITHUB_TOKEN, so this condition is a belt-and-suspenders safety net.
+    if: "!startsWith(github.event.head_commit.message, '[Gradle Release Plugin]')"
+
     permissions:
-      contents: write   # push commits + tags
+      contents: write   # push version-bump commits and tag
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Using GITHUB_TOKEN means the release plugin's push-back commits
+          # are attributed to github-actions[bot] and will NOT re-trigger this workflow.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up JDK 17
@@ -39,29 +43,19 @@ jobs:
 
       - name: Run release
         env:
-          JETBRAINS_TOKEN: ${{ secrets.JETBRAINS_TOKEN }}
-          OSSRH_USERNAME:  ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD:  ${{ secrets.OSSRH_PASSWORD }}
+          JETBRAINS_TOKEN:      ${{ secrets.JETBRAINS_TOKEN }}
+          OSSRH_USERNAME:       ${{ secrets.OSSRH_USERNAME }}
+          OSSRH_PASSWORD:       ${{ secrets.OSSRH_PASSWORD }}
           SIGNING_KEY_FILE:     ${{ runner.temp }}/signing.key
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           CI: "true"
         run: |
-          # Write the PGP key to a temp file if the secret is set
           if [ -n "${{ secrets.SIGNING_KEY_ASC }}" ]; then
             echo "${{ secrets.SIGNING_KEY_ASC }}" > "$SIGNING_KEY_FILE"
           fi
 
-          RELEASE_ARGS="-Prelease.useAutomaticVersion=true"
-
-          if [ -n "${{ inputs.release_version }}" ]; then
-            RELEASE_ARGS="$RELEASE_ARGS -Prelease.releaseVersion=${{ inputs.release_version }}"
-          fi
-
-          if [ -n "${{ inputs.next_version }}" ]; then
-            RELEASE_ARGS="$RELEASE_ARGS -Prelease.newVersion=${{ inputs.next_version }}"
-          fi
-
-          ./gradlew release $RELEASE_ARGS
+          ./gradlew release \
+            -Prelease.useAutomaticVersion=true
 
       - name: Upload plugin distribution
         uses: actions/upload-artifact@v4
