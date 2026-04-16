@@ -128,17 +128,26 @@ signing {
     }
 }
 
-// Only apply the release plugin when actually running the release task and in the root build.
+// Only apply the release plugin when actually running the release task.
 //
-// Two guards are needed:
-//  1. gradle.parent == null  — the release plugin's GradleBuild task spawns a nested invocation
-//     that re-evaluates this script; applying the plugin there would register its incompatible
-//     BuildEventsListenerRegistry listener in the nested build and break config cache there.
-//  2. taskNames contains "release" — the plugin registers its listener at apply-time, not
-//     task-execution-time, so applying it unconditionally poisons the config cache for every
-//     other build (clean, build, etc.) even when the release task is never run.
-val isReleaseBuild = gradle.parent == null &&
-    gradle.startParameter.taskNames.any { it == "release" || it.endsWith(":release") }
+// The release plugin's GradleBuild task spawns a nested Gradle invocation (visible in error
+// messages as project ':ai-test-plugin-release') to execute the configured buildTasks.  That
+// nested build also needs the plugin applied so that internal tasks like 'createScmAdapter' exist.
+// We therefore apply the plugin in two cases:
+//  1. Outer build  (gradle.parent == null)  — when "release" is in the requested task names.
+//  2. Nested build (gradle.parent != null)  — when the *parent* build was a release build.
+//     Config-cache compatibility doesn't matter here because the outer release build is already
+//     marked notCompatibleWithConfigurationCache, so the entire build skips the cache anyway.
+//
+// We deliberately do NOT apply the plugin for unrelated nested builds (gradle.parent != null
+// but parent is not running "release"), so non-release builds stay config-cache-friendly.
+fun isReleaseTaskRequested(taskNames: List<String>) =
+    taskNames.any { it == "release" || it.endsWith(":release") }
+
+val isReleaseBuild = when {
+    gradle.parent == null -> isReleaseTaskRequested(gradle.startParameter.taskNames)
+    else -> isReleaseTaskRequested(gradle.parent!!.startParameter.taskNames)
+}
 
 if (isReleaseBuild) {
     apply(plugin = "net.researchgate.release")
