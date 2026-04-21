@@ -290,6 +290,12 @@ class AiTestSettingsConfigurable(
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
         add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
+        add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
+            "" to bitbucketPromptRepoEnabledField,
+            "Repo URL" to bitbucketPromptRepoUrlField,
+            "Branch" to bitbucketPromptRepoBranchField,
+            "Token / PAT" to bitbucketPromptRepoTokenField
+        )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
     private fun generationTab(): JComponent = JScrollPane(JPanel().apply {
@@ -328,12 +334,6 @@ class AiTestSettingsConfigurable(
             "Commit message prompt" to JScrollPane(commitPromptField),
             "Branch diff summary prompt" to JScrollPane(branchDiffPromptField),
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
-        )))
-        add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
-            "" to bitbucketPromptRepoEnabledField,
-            "Repo URL" to bitbucketPromptRepoUrlField,
-            "Branch" to bitbucketPromptRepoBranchField,
-            "Token / PAT" to bitbucketPromptRepoTokenField
         )))
         add(unifiedPromptManagerSection())
     }).apply { border = BorderFactory.createEmptyBorder() }
