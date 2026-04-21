@@ -34,6 +34,8 @@ open class SummarizeBranchDiffAction(
             )
             return
         }
+        val selectedPrompt = LlmSettingsLoader.loadConfig(project).prompts.profiles.branchDiffSummary.selected
+        ButtonUsageReportService.getInstance(project).recordPromptUsage("branch.diff", selectedPrompt)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Summarizing Branch Diff", false) {
             override fun run(indicator: ProgressIndicator) {

@@ -56,6 +56,11 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
         if (!dialog.showAndGet()) return
         val selectedPrompt = dialog.selectedPrompt() ?: return
         val extraRequirements = dialog.extraRequirements().ifBlank { "None" }
+        val featureKey = when (selectedPrompt.category) {
+            PromptCategory.CODE_GENERATE -> "code.generate"
+            PromptCategory.CODE_REVIEW -> "code.review"
+        }
+        ButtonUsageReportService.getInstance(project).recordPromptUsage(featureKey, selectedPrompt.name)
 
         savePromptSelection(project, selectedPrompt)
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Code Generate & Review", false) {

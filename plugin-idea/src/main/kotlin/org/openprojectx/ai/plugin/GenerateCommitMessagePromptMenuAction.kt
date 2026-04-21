@@ -45,6 +45,7 @@ private class GenerateCommitMessageByPromptAction(
         val commitMessageUi = e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) ?: return
 
         saveDefaultCommitPromptProfile(project, promptName)
+        ButtonUsageReportService.getInstance(project).recordPromptUsage("commit.message", promptName)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating Commit Message", false) {
             override fun run(indicator: ProgressIndicator) {

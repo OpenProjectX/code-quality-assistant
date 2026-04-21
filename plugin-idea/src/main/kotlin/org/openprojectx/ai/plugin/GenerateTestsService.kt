@@ -21,6 +21,7 @@ class GenerateTestsService(private val project: Project) {
 
     private val log = LoggerFactory.getLogger(javaClass)
     private val notificationState = OpenApiNotificationStateService.getInstance(project)
+    private val usage = ButtonUsageReportService.getInstance(project)
 
     fun generate(ui: GenerateTestsDialog.UiResult, file: VirtualFile, contractText: String) {
         notificationState.setState(file.path, GenerationUiState.Generating)
@@ -75,6 +76,7 @@ class GenerateTestsService(private val project: Project) {
                 )
         )
         val prompt = PromptBuilder.build(req, generationTemplate)
+        usage.recordPromptUsage("test.generate", ui.generationPromptProfileName.ifBlank { "default" })
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating tests by AI", true) {
             override fun run(indicator: ProgressIndicator) {

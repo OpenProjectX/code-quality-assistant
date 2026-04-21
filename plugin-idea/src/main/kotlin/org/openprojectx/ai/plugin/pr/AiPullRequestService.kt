@@ -8,6 +8,7 @@ import org.openprojectx.ai.plugin.HttpClients
 import org.openprojectx.ai.plugin.LlmAuthSessionService
 import org.openprojectx.ai.plugin.LlmProviderFactory
 import org.openprojectx.ai.plugin.LlmSettingsLoader
+import org.openprojectx.ai.plugin.ButtonUsageReportService
 
 class AiPullRequestService(private val project: Project) {
 
@@ -28,6 +29,7 @@ class AiPullRequestService(private val project: Project) {
             sourceBranch = sourceBranch,
             targetBranch = targetBranch
         )
+        ButtonUsageReportService.getInstance(project).recordPromptUsage("pull.request", "default")
 
         val raw = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
             val llm = LlmProviderFactory.create(settings)

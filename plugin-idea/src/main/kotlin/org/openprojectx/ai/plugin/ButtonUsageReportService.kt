@@ -12,6 +12,8 @@ import java.time.Instant
 @Service(Service.Level.PROJECT)
 class ButtonUsageReportService(private val project: Project) {
     private val counts: MutableMap<String, Int> = linkedMapOf()
+    private val promptFeatureCounts: MutableMap<String, Int> = linkedMapOf()
+    private val promptUsageCounts: MutableMap<String, Int> = linkedMapOf()
 
     companion object {
         fun getInstance(project: Project): ButtonUsageReportService = project.service()
@@ -25,11 +27,26 @@ class ButtonUsageReportService(private val project: Project) {
     }
 
     @Synchronized
+    fun recordPromptUsage(featureKey: String, promptName: String) {
+        val normalizedFeature = featureKey.trim().ifBlank { "unknown" }
+        val normalizedPrompt = promptName.trim().ifBlank { "default" }
+        val featureCurrent = promptFeatureCounts[normalizedFeature] ?: 0
+        promptFeatureCounts[normalizedFeature] = featureCurrent + 1
+
+        val key = "$normalizedFeature::$normalizedPrompt"
+        val current = promptUsageCounts[key] ?: 0
+        promptUsageCounts[key] = current + 1
+        save()
+    }
+
+    @Synchronized
     private fun save() {
         val root = linkedMapOf<String, Any>(
             "project" to (project.name.ifBlank { "unknown" }),
             "updatedAt" to Instant.now().toString(),
-            "buttonUsageCounts" to counts
+            "buttonUsageCounts" to counts,
+            "promptFeatureUsageCounts" to promptFeatureCounts,
+            "promptUsageCounts" to promptUsageCounts
         )
         val options = DumperOptions().apply {
             defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
@@ -57,6 +74,20 @@ class ButtonUsageReportService(private val project: Project) {
                 val key = k?.toString()?.trim().orEmpty()
                 val value = v?.toString()?.toIntOrNull() ?: 0
                 if (key.isNotBlank()) counts[key] = value
+            }
+
+            val promptFeatureUsage = root["promptFeatureUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            promptFeatureUsage.forEach { (k, v) ->
+                val key = k?.toString()?.trim().orEmpty()
+                val value = v?.toString()?.toIntOrNull() ?: 0
+                if (key.isNotBlank()) promptFeatureCounts[key] = value
+            }
+
+            val promptUsage = root["promptUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            promptUsage.forEach { (k, v) ->
+                val key = k?.toString()?.trim().orEmpty()
+                val value = v?.toString()?.toIntOrNull() ?: 0
+                if (key.isNotBlank()) promptUsageCounts[key] = value
             }
         }
     }

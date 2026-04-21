@@ -48,6 +48,7 @@ private class BranchDiffByPromptAction(
         }
 
         saveDefaultBranchDiffPromptProfile(project, promptName)
+        ButtonUsageReportService.getInstance(project).recordPromptUsage("branch.diff", promptName)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Summarizing Branch Diff", false) {
             override fun run(indicator: ProgressIndicator) {
