@@ -27,6 +27,12 @@ data class PromptProfiles(
     ),
     val branchDiffSummary: PromptProfileSet = PromptProfileSet.default(
         defaultTemplate = AiPromptDefaults.BRANCH_DIFF_SUMMARY
+    ),
+    val codeGenerate: PromptProfileSet = PromptProfileSet.default(
+        defaultTemplate = AiPromptDefaults.CODE_GENERATE
+    ),
+    val codeReview: PromptProfileSet = PromptProfileSet.default(
+        defaultTemplate = AiPromptDefaults.CODE_REVIEW
     )
 )
 

@@ -91,7 +91,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     private enum class PromptCategory(val label: String) {
         TEST("Test"),
         COMMIT("Commit"),
-        BRANCH_DIFF("Branch Diff");
+        BRANCH_DIFF("Branch Diff"),
+        CODE_GENERATE("Code Generate"),
+        CODE_REVIEW("Code Review");
 
         override fun toString(): String = label
     }
@@ -134,6 +136,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 PromptCategory.TEST -> model.generationPromptProfilesYaml
                 PromptCategory.COMMIT -> model.commitPromptProfilesYaml
                 PromptCategory.BRANCH_DIFF -> model.branchDiffPromptProfilesYaml
+                PromptCategory.CODE_GENERATE -> model.codeGeneratePromptProfilesYaml
+                PromptCategory.CODE_REVIEW -> model.codeReviewPromptProfilesYaml
             }
             val parsed = Yaml().load<Any?>(text) as? Map<*, *> ?: emptyMap<Any?, Any?>()
             val result = linkedMapOf<String, String>()
@@ -209,12 +213,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val test = mapForCategory(model, PromptCategory.TEST)
             val commit = mapForCategory(model, PromptCategory.COMMIT)
             val branch = mapForCategory(model, PromptCategory.BRANCH_DIFF)
+            val codeGenerate = mapForCategory(model, PromptCategory.CODE_GENERATE)
+            val codeReview = mapForCategory(model, PromptCategory.CODE_REVIEW)
 
             if (selected != null) {
                 val target = when (selected.category) {
                     PromptCategory.TEST -> test
                     PromptCategory.COMMIT -> commit
                     PromptCategory.BRANCH_DIFF -> branch
+                    PromptCategory.CODE_GENERATE -> codeGenerate
+                    PromptCategory.CODE_REVIEW -> codeReview
                 }
                 if (selected.isGlobal && (selected.category != category || selected.name != name)) {
                     Messages.showErrorDialog(project, "Global prompt name/category cannot be changed.", "Prompt Manager")
@@ -227,13 +235,17 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 PromptCategory.TEST -> test
                 PromptCategory.COMMIT -> commit
                 PromptCategory.BRANCH_DIFF -> branch
+                PromptCategory.CODE_GENERATE -> codeGenerate
+                PromptCategory.CODE_REVIEW -> codeReview
             }
             finalTarget[name] = content
 
             val updated = model.copy(
                 generationPromptProfilesYaml = dumpYaml(test),
                 commitPromptProfilesYaml = dumpYaml(commit),
-                branchDiffPromptProfilesYaml = dumpYaml(branch)
+                branchDiffPromptProfilesYaml = dumpYaml(branch),
+                codeGeneratePromptProfilesYaml = dumpYaml(codeGenerate),
+                codeReviewPromptProfilesYaml = dumpYaml(codeReview)
             )
             LlmSettingsLoader.saveSettingsModel(project, updated)
             refreshList(PromptItem(category, name, false))
@@ -254,15 +266,21 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val test = mapForCategory(model, PromptCategory.TEST)
             val commit = mapForCategory(model, PromptCategory.COMMIT)
             val branch = mapForCategory(model, PromptCategory.BRANCH_DIFF)
+            val codeGenerate = mapForCategory(model, PromptCategory.CODE_GENERATE)
+            val codeReview = mapForCategory(model, PromptCategory.CODE_REVIEW)
             when (selected.category) {
                 PromptCategory.TEST -> test.remove(selected.name)
                 PromptCategory.COMMIT -> commit.remove(selected.name)
                 PromptCategory.BRANCH_DIFF -> branch.remove(selected.name)
+                PromptCategory.CODE_GENERATE -> codeGenerate.remove(selected.name)
+                PromptCategory.CODE_REVIEW -> codeReview.remove(selected.name)
             }
             val updated = model.copy(
                 generationPromptProfilesYaml = dumpYaml(test),
                 commitPromptProfilesYaml = dumpYaml(commit),
-                branchDiffPromptProfilesYaml = dumpYaml(branch)
+                branchDiffPromptProfilesYaml = dumpYaml(branch),
+                codeGeneratePromptProfilesYaml = dumpYaml(codeGenerate),
+                codeReviewPromptProfilesYaml = dumpYaml(codeReview)
             )
             LlmSettingsLoader.saveSettingsModel(project, updated)
             refreshList()

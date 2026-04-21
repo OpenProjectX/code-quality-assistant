@@ -81,6 +81,10 @@ class AiTestSettingsConfigurable(
     private lateinit var commitPromptProfilesYamlField: JTextArea
     private lateinit var branchDiffPromptProfileDefaultField: JTextField
     private lateinit var branchDiffPromptProfilesYamlField: JTextArea
+    private lateinit var codeGeneratePromptProfileDefaultField: JTextField
+    private lateinit var codeGeneratePromptProfilesYamlField: JTextArea
+    private lateinit var codeReviewPromptProfileDefaultField: JTextField
+    private lateinit var codeReviewPromptProfilesYamlField: JTextArea
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -92,7 +96,9 @@ class AiTestSettingsConfigurable(
     private enum class PromptCategory(val label: String) {
         TEST("Test"),
         COMMIT("Commit"),
-        BRANCH_DIFF("Branch Diff");
+        BRANCH_DIFF("Branch Diff"),
+        CODE_GENERATE("Code Generate"),
+        CODE_REVIEW("Code Review");
 
         override fun toString(): String = label
     }
@@ -167,6 +173,10 @@ class AiTestSettingsConfigurable(
         commitPromptProfilesYamlField = textArea(12)
         branchDiffPromptProfileDefaultField = JTextField()
         branchDiffPromptProfilesYamlField = textArea(12)
+        codeGeneratePromptProfileDefaultField = JTextField()
+        codeGeneratePromptProfilesYamlField = textArea(12)
+        codeReviewPromptProfileDefaultField = JTextField()
+        codeReviewPromptProfilesYamlField = textArea(12)
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -486,7 +496,9 @@ class AiTestSettingsConfigurable(
         return mutableMapOf(
             PromptCategory.TEST to LinkedHashMap(promptMapByCategory(PromptCategory.TEST)),
             PromptCategory.COMMIT to LinkedHashMap(promptMapByCategory(PromptCategory.COMMIT)),
-            PromptCategory.BRANCH_DIFF to LinkedHashMap(promptMapByCategory(PromptCategory.BRANCH_DIFF))
+            PromptCategory.BRANCH_DIFF to LinkedHashMap(promptMapByCategory(PromptCategory.BRANCH_DIFF)),
+            PromptCategory.CODE_GENERATE to LinkedHashMap(promptMapByCategory(PromptCategory.CODE_GENERATE)),
+            PromptCategory.CODE_REVIEW to LinkedHashMap(promptMapByCategory(PromptCategory.CODE_REVIEW))
         )
     }
 
@@ -494,6 +506,8 @@ class AiTestSettingsConfigurable(
         updatePromptYaml(PromptCategory.TEST, maps.getValue(PromptCategory.TEST))
         updatePromptYaml(PromptCategory.COMMIT, maps.getValue(PromptCategory.COMMIT))
         updatePromptYaml(PromptCategory.BRANCH_DIFF, maps.getValue(PromptCategory.BRANCH_DIFF))
+        updatePromptYaml(PromptCategory.CODE_GENERATE, maps.getValue(PromptCategory.CODE_GENERATE))
+        updatePromptYaml(PromptCategory.CODE_REVIEW, maps.getValue(PromptCategory.CODE_REVIEW))
     }
 
     private fun selectedPromptCategory(): PromptCategory =
@@ -504,6 +518,8 @@ class AiTestSettingsConfigurable(
             PromptCategory.TEST -> parseYamlMap(generationPromptProfilesYamlField.text)
             PromptCategory.COMMIT -> parseYamlMap(commitPromptProfilesYamlField.text)
             PromptCategory.BRANCH_DIFF -> parseYamlMap(branchDiffPromptProfilesYamlField.text)
+            PromptCategory.CODE_GENERATE -> parseYamlMap(codeGeneratePromptProfilesYamlField.text)
+            PromptCategory.CODE_REVIEW -> parseYamlMap(codeReviewPromptProfilesYamlField.text)
         }
     }
 
@@ -512,6 +528,8 @@ class AiTestSettingsConfigurable(
             PromptCategory.TEST -> generationPromptProfilesYamlField.text = dumpYamlMap(value)
             PromptCategory.COMMIT -> commitPromptProfilesYamlField.text = dumpYamlMap(value)
             PromptCategory.BRANCH_DIFF -> branchDiffPromptProfilesYamlField.text = dumpYamlMap(value)
+            PromptCategory.CODE_GENERATE -> codeGeneratePromptProfilesYamlField.text = dumpYamlMap(value)
+            PromptCategory.CODE_REVIEW -> codeReviewPromptProfilesYamlField.text = dumpYamlMap(value)
         }
     }
 
@@ -520,6 +538,8 @@ class AiTestSettingsConfigurable(
             PromptCategory.TEST -> generationPromptProfileDefaultField
             PromptCategory.COMMIT -> commitPromptProfileDefaultField
             PromptCategory.BRANCH_DIFF -> branchDiffPromptProfileDefaultField
+            PromptCategory.CODE_GENERATE -> codeGeneratePromptProfileDefaultField
+            PromptCategory.CODE_REVIEW -> codeReviewPromptProfileDefaultField
         }
     }
 
@@ -662,7 +682,11 @@ class AiTestSettingsConfigurable(
         commitPromptProfileDefault = commitPromptProfileDefaultField.text.trim(),
         commitPromptProfilesYaml = commitPromptProfilesYamlField.text,
         branchDiffPromptProfileDefault = branchDiffPromptProfileDefaultField.text.trim(),
-        branchDiffPromptProfilesYaml = branchDiffPromptProfilesYamlField.text
+        branchDiffPromptProfilesYaml = branchDiffPromptProfilesYamlField.text,
+        codeGeneratePromptProfileDefault = codeGeneratePromptProfileDefaultField.text.trim(),
+        codeGeneratePromptProfilesYaml = codeGeneratePromptProfilesYamlField.text,
+        codeReviewPromptProfileDefault = codeReviewPromptProfileDefaultField.text.trim(),
+        codeReviewPromptProfilesYaml = codeReviewPromptProfilesYamlField.text
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -708,6 +732,10 @@ class AiTestSettingsConfigurable(
         commitPromptProfilesYamlField.text = state.commitPromptProfilesYaml
         branchDiffPromptProfileDefaultField.text = state.branchDiffPromptProfileDefault
         branchDiffPromptProfilesYamlField.text = state.branchDiffPromptProfilesYaml
+        codeGeneratePromptProfileDefaultField.text = state.codeGeneratePromptProfileDefault
+        codeGeneratePromptProfilesYamlField.text = state.codeGeneratePromptProfilesYaml
+        codeReviewPromptProfileDefaultField.text = state.codeReviewPromptProfileDefault
+        codeReviewPromptProfilesYamlField.text = state.codeReviewPromptProfilesYaml
 
         refreshPromptManager()
         toggleTemplateCards()
@@ -730,6 +758,8 @@ class AiTestSettingsConfigurable(
         requirePromptProfiles("Test prompts YAML", state.generationPromptProfilesYaml)
         requirePromptProfiles("Commit prompts YAML", state.commitPromptProfilesYaml)
         requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
+        requirePromptProfiles("Code generate prompts YAML", state.codeGeneratePromptProfilesYaml)
+        requirePromptProfiles("Code review prompts YAML", state.codeReviewPromptProfilesYaml)
     }
 
     private fun requireTemplate(label: String, url: String, body: String, responsePath: String) {

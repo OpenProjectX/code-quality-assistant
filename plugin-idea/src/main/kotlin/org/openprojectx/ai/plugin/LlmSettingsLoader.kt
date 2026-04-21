@@ -115,6 +115,20 @@ object LlmSettingsLoader {
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY
                     )
                 )
+            ),
+            codeGeneratePromptProfileDefault = prompts.map("codeGenerateProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            codeGeneratePromptProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    prompts.map("codeGenerateProfiles").map("items"),
+                    AiPromptDefaults.CODE_GENERATE
+                )
+            ),
+            codeReviewPromptProfileDefault = prompts.map("codeReviewProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
+            codeReviewPromptProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    prompts.map("codeReviewProfiles").map("items"),
+                    AiPromptDefaults.CODE_REVIEW
+                )
             )
         )
     }
@@ -178,6 +192,18 @@ object LlmSettingsLoader {
                     profileMap = prompts.map("branchDiffSummaryProfiles"),
                     defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
                     globalCategory = "branchDiff",
+                    project = project
+                ),
+                codeGenerate = parsePromptProfileSet(
+                    profileMap = prompts.map("codeGenerateProfiles"),
+                    defaultTemplate = AiPromptDefaults.CODE_GENERATE,
+                    globalCategory = "codeGenerate",
+                    project = project
+                ),
+                codeReview = parsePromptProfileSet(
+                    profileMap = prompts.map("codeReviewProfiles"),
+                    defaultTemplate = AiPromptDefaults.CODE_REVIEW,
+                    globalCategory = "codeReview",
                     project = project
                 )
             )
@@ -468,6 +494,16 @@ object LlmSettingsLoader {
                 )
             ),
             defaultTemplate = model.branchDiffPrompt
+        )
+        prompts["codeGenerateProfiles"] = buildPromptProfileMap(
+            selected = model.codeGeneratePromptProfileDefault,
+            yamlText = model.codeGeneratePromptProfilesYaml,
+            defaultTemplate = AiPromptDefaults.CODE_GENERATE
+        )
+        prompts["codeReviewProfiles"] = buildPromptProfileMap(
+            selected = model.codeReviewPromptProfileDefault,
+            yamlText = model.codeReviewPromptProfilesYaml,
+            defaultTemplate = AiPromptDefaults.CODE_REVIEW
         )
         return prompts
     }

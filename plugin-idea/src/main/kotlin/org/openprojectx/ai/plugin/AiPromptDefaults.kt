@@ -75,6 +75,36 @@ object AiPromptDefaults {
         Git diff:
         {{diff}}
     """
+
+    const val CODE_GENERATE = """
+        You are a senior software engineer.
+
+        Generate improved or new code based on the selected snippet.
+
+        Requirements:
+        - Return only the final code/result content
+        - Keep style consistent with the input code
+        - Prefer minimal, safe, and compilable changes
+        - Do not include extra explanations unless required by the prompt
+
+        Selected code:
+        {{selectedCode}}
+    """
+
+    const val CODE_REVIEW = """
+        You are a senior code reviewer.
+
+        Review the selected code and provide actionable feedback.
+
+        Requirements:
+        - Focus on correctness, readability, maintainability, and potential bugs
+        - Use concise markdown bullet points
+        - Include suggested fixes when useful
+        - Do not include unrelated commentary
+
+        Selected code:
+        {{selectedCode}}
+    """
     val GENERATION_WRAPPER: String = PromptBuilder.DEFAULT_WRAPPER_TEMPLATE
     val GENERATION_REST_ASSURED: String = PromptBuilder.DEFAULT_REST_ASSURED_RULES
     val GENERATION_KARATE: String = PromptBuilder.DEFAULT_KARATE_RULES

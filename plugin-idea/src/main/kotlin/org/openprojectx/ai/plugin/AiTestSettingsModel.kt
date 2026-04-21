@@ -41,5 +41,9 @@ data class AiTestSettingsModel(
     val commitPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
     val commitPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.COMMIT_MESSAGE.replace("\n", "\n  ")}",
     val branchDiffPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
-    val branchDiffPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.BRANCH_DIFF_SUMMARY.replace("\n", "\n  ")}"
+    val branchDiffPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.BRANCH_DIFF_SUMMARY.replace("\n", "\n  ")}",
+    val codeGeneratePromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
+    val codeGeneratePromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.CODE_GENERATE.replace("\n", "\n  ")}",
+    val codeReviewPromptProfileDefault: String = PromptProfileSet.DEFAULT_NAME,
+    val codeReviewPromptProfilesYaml: String = "${PromptProfileSet.DEFAULT_NAME}: |\n  ${AiPromptDefaults.CODE_REVIEW.replace("\n", "\n  ")}"
 )
