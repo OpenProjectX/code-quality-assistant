@@ -69,7 +69,7 @@
                 class="org.openprojectx.ai.plugin.CodeGenerateReviewAction"
                 text="Code Generate &amp; Review"
                 description="Send selected code with a selected prompt to LLM and show result in AI Context Box">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
         </action>
     </actions>
 </idea-plugin>
