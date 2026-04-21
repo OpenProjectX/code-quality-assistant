@@ -163,9 +163,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val model = LlmSettingsLoader.loadSettingsModel(project)
             PromptCategory.entries.forEach { category ->
                 val map = mapForCategory(model, category)
-                val global = map.keys.firstOrNull()
                 map.keys.forEach { name ->
-                    listModel.addElement(PromptItem(category, name, name == global))
+                    listModel.addElement(PromptItem(category, name, isGlobalPromptName(name)))
                 }
             }
             listModel.addElement(PromptItem(PromptCategory.TEST, "new prompt", isGlobal = false, isNew = true))
@@ -323,5 +322,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             add(JBScrollPane(promptList).apply { border = BorderFactory.createLineBorder(borderColor) }, BorderLayout.WEST)
             add(detail, BorderLayout.CENTER)
         }
+    }
+
+    private fun isGlobalPromptName(name: String): Boolean {
+        return name.startsWith("[ADA]") || name.startsWith("[repo]") || name.startsWith("global/")
     }
 }

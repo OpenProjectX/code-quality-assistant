@@ -2,14 +2,27 @@ package org.openprojectx.ai.plugin
 
 
 import com.intellij.openapi.project.Project
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.openprojectx.ai.plugin.core.Framework
 import org.openprojectx.ai.plugin.core.GenerationPromptTemplate
+import org.openprojectx.ai.plugin.pr.GitRemoteParser
 import org.openprojectx.ai.plugin.llm.LlmAuthConfig
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.TemplateRequestConfig
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.format.DateTimeParseException
+import java.util.Base64
 
 object LlmSettingsLoader {
 
@@ -17,6 +30,22 @@ object LlmSettingsLoader {
     private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
     private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
     private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
+    private val json by lazy { Json { ignoreUnknownKeys = true } }
+
+    private data class BitbucketPromptRepoConfig(
+        val enabled: Boolean,
+        val repoUrl: String,
+        val branch: String,
+        val token: String
+    )
+
+    private data class GlobalPromptMeta(
+        val category: String,
+        val name: String,
+        val updatedAt: Instant,
+        val template: String,
+        val sourcePriority: Int
+    )
 
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
@@ -42,6 +71,7 @@ object LlmSettingsLoader {
         val http = llm["http"] as? Map<*, *>
         val generation = root["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val remoteRepo = prompts.map("remoteRepo")
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val defaults = generation["defaults"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val common = generation["common"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
@@ -88,6 +118,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "test",
+                    parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                         prompts.map("generationProfiles").map("items"),
                         AiPromptDefaults.GENERATION_WRAPPER
@@ -99,6 +130,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "commit",
+                    parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
                     AiPromptDefaults.COMMIT_MESSAGE
@@ -110,6 +142,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "branchDiff",
+                    parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY
@@ -118,18 +151,32 @@ object LlmSettingsLoader {
             ),
             codeGeneratePromptProfileDefault = prompts.map("codeGenerateProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeGeneratePromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
-                    prompts.map("codeGenerateProfiles").map("items"),
-                    AiPromptDefaults.CODE_GENERATE
+                applyGlobalProfiles(
+                    project,
+                    "codeGenerate",
+                    parseBitbucketPromptRepoConfig(remoteRepo),
+                    parsePromptProfileItems(
+                        prompts.map("codeGenerateProfiles").map("items"),
+                        AiPromptDefaults.CODE_GENERATE
+                    )
                 )
             ),
             codeReviewPromptProfileDefault = prompts.map("codeReviewProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeReviewPromptProfilesYaml = dumpPromptProfilesYaml(
-                parsePromptProfileItems(
-                    prompts.map("codeReviewProfiles").map("items"),
-                    AiPromptDefaults.CODE_REVIEW
+                applyGlobalProfiles(
+                    project,
+                    "codeReview",
+                    parseBitbucketPromptRepoConfig(remoteRepo),
+                    parsePromptProfileItems(
+                        prompts.map("codeReviewProfiles").map("items"),
+                        AiPromptDefaults.CODE_REVIEW
+                    )
                 )
-            )
+            ),
+            bitbucketPromptRepoEnabled = remoteRepo["enabled"] as? Boolean ?: false,
+            bitbucketPromptRepoUrl = remoteRepo.string("url"),
+            bitbucketPromptRepoBranch = remoteRepo.string("branch").ifBlank { "main" },
+            bitbucketPromptRepoToken = remoteRepo.string("token")
         )
     }
 
@@ -164,6 +211,7 @@ object LlmSettingsLoader {
 
     private fun parsePromptOverrides(project: Project, root: Map<*, *>): PromptOverrides {
         val prompts = root["prompts"] as? Map<*, *> ?: return PromptOverrides()
+        val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
         val generation = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
         return PromptOverrides(
@@ -180,31 +228,36 @@ object LlmSettingsLoader {
                     profileMap = prompts.map("generationProfiles"),
                     defaultTemplate = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
                     globalCategory = "test",
-                    project = project
+                    project = project,
+                    remoteRepoConfig = remoteRepo
                 ),
                 commitMessage = parsePromptProfileSet(
                     profileMap = prompts.map("commitMessageProfiles"),
                     defaultTemplate = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
                     globalCategory = "commit",
-                    project = project
+                    project = project,
+                    remoteRepoConfig = remoteRepo
                 ),
                 branchDiffSummary = parsePromptProfileSet(
                     profileMap = prompts.map("branchDiffSummaryProfiles"),
                     defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
                     globalCategory = "branchDiff",
-                    project = project
+                    project = project,
+                    remoteRepoConfig = remoteRepo
                 ),
                 codeGenerate = parsePromptProfileSet(
                     profileMap = prompts.map("codeGenerateProfiles"),
                     defaultTemplate = AiPromptDefaults.CODE_GENERATE,
                     globalCategory = "codeGenerate",
-                    project = project
+                    project = project,
+                    remoteRepoConfig = remoteRepo
                 ),
                 codeReview = parsePromptProfileSet(
                     profileMap = prompts.map("codeReviewProfiles"),
                     defaultTemplate = AiPromptDefaults.CODE_REVIEW,
                     globalCategory = "codeReview",
-                    project = project
+                    project = project,
+                    remoteRepoConfig = remoteRepo
                 )
             )
         )
@@ -445,6 +498,12 @@ object LlmSettingsLoader {
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
         val prompts = existing.toMutableLinkedMap()
+        val remoteRepoConfig = BitbucketPromptRepoConfig(
+            enabled = model.bitbucketPromptRepoEnabled,
+            repoUrl = model.bitbucketPromptRepoUrl,
+            branch = model.bitbucketPromptRepoBranch,
+            token = model.bitbucketPromptRepoToken
+        )
         prompts["generation"] = linkedMapOf<String, Any>(
             "wrapper" to model.generationPromptWrapper,
             "restAssuredRules" to model.generationPromptRestAssured,
@@ -459,6 +518,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "test",
+                    remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.generationPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.generationPromptWrapper
@@ -473,6 +533,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "commit",
+                    remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.commitPrompt
@@ -487,6 +548,7 @@ object LlmSettingsLoader {
                 applyGlobalProfiles(
                     project,
                     "branchDiff",
+                    remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.branchDiffPrompt
@@ -497,19 +559,50 @@ object LlmSettingsLoader {
         )
         prompts["codeGenerateProfiles"] = buildPromptProfileMap(
             selected = model.codeGeneratePromptProfileDefault,
-            yamlText = model.codeGeneratePromptProfilesYaml,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalProfiles(
+                    project,
+                    "codeGenerate",
+                    remoteRepoConfig,
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.codeGeneratePromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        AiPromptDefaults.CODE_GENERATE
+                    )
+                )
+            ),
             defaultTemplate = AiPromptDefaults.CODE_GENERATE
         )
         prompts["codeReviewProfiles"] = buildPromptProfileMap(
             selected = model.codeReviewPromptProfileDefault,
-            yamlText = model.codeReviewPromptProfilesYaml,
+            yamlText = dumpPromptProfilesYaml(
+                applyGlobalProfiles(
+                    project,
+                    "codeReview",
+                    remoteRepoConfig,
+                    parsePromptProfileItems(
+                        Yaml().load<Any?>(model.codeReviewPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+                        AiPromptDefaults.CODE_REVIEW
+                    )
+                )
+            ),
             defaultTemplate = AiPromptDefaults.CODE_REVIEW
+        )
+        prompts["remoteRepo"] = linkedMapOf<String, Any>(
+            "enabled" to model.bitbucketPromptRepoEnabled,
+            "url" to model.bitbucketPromptRepoUrl,
+            "branch" to model.bitbucketPromptRepoBranch,
+            "token" to model.bitbucketPromptRepoToken
         )
         return prompts
     }
 
-    private fun applyGlobalProfiles(project: Project, category: String, items: Map<String, String>): Map<String, String> {
-        val globalPrompts = loadGlobalPrompts(project)[category].orEmpty()
+    private fun applyGlobalProfiles(
+        project: Project,
+        category: String,
+        remoteRepoConfig: BitbucketPromptRepoConfig,
+        items: Map<String, String>
+    ): Map<String, String> {
+        val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)[category].orEmpty()
         if (globalPrompts.isEmpty()) return items
         val normalized = linkedMapOf<String, String>()
         globalPrompts.forEach { (name, content) ->
@@ -523,25 +616,49 @@ object LlmSettingsLoader {
         return normalized
     }
 
-    private fun loadGlobalPrompts(project: Project): Map<String, Map<String, String>> {
+    private fun loadGlobalPrompts(project: Project, remoteRepoConfig: BitbucketPromptRepoConfig): Map<String, Map<String, String>> {
         val basePath = project.basePath ?: return emptyMap()
         val junit = readPromptFile("$basePath/prompts/generate-junit-prompt.md")
         val karate = readPromptFile("$basePath/prompts/generate-karate-prompt.md")
         val diffReview = readPromptFile("$basePath/prompts/git-diff-review-prompt.md")
             ?: readPromptFile("$basePath/prompts/diff-review.md")
+        val entries = mutableListOf<GlobalPromptMeta>()
+        junit?.let {
+            entries += GlobalPromptMeta("test", GLOBAL_JUNIT_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
+        }
+        karate?.let {
+            entries += GlobalPromptMeta("test", GLOBAL_KARATE_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
+        }
+        diffReview?.let {
+            entries += GlobalPromptMeta("commit", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
+            entries += GlobalPromptMeta("branchDiff", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
+        }
+        entries += fetchBitbucketGlobalPromptEntries(remoteRepoConfig)
 
-        return mapOf(
-            "test" to linkedMapOf<String, String>().apply {
-                junit?.let { put(GLOBAL_JUNIT_PROFILE, it) }
-                karate?.let { put(GLOBAL_KARATE_PROFILE, it) }
-            },
-            "commit" to linkedMapOf<String, String>().apply {
-                diffReview?.let { put(GLOBAL_DIFF_REVIEW_PROFILE, it) }
-            },
-            "branchDiff" to linkedMapOf<String, String>().apply {
-                diffReview?.let { put(GLOBAL_DIFF_REVIEW_PROFILE, it) }
+        return entries
+            .groupBy { it.category }
+            .mapValues { (_, categoryEntries) ->
+                val newestByName = linkedMapOf<String, GlobalPromptMeta>()
+                categoryEntries.forEach { entry ->
+                    val existing = newestByName[entry.name]
+                    if (existing == null ||
+                        entry.updatedAt.isAfter(existing.updatedAt) ||
+                        (entry.updatedAt == existing.updatedAt && entry.sourcePriority > existing.sourcePriority)
+                    ) {
+                        newestByName[entry.name] = entry
+                    }
+                }
+                newestByName.values
+                    .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
+                    .associateTo(linkedMapOf()) { meta ->
+                        val key = if (meta.sourcePriority > 1) {
+                            "global/${meta.name} [${meta.updatedAt}]"
+                        } else {
+                            meta.name
+                        }
+                        key to meta.template
+                    }
             }
-        )
     }
 
     private fun readPromptFile(path: String): String? {
@@ -554,11 +671,13 @@ object LlmSettingsLoader {
         profileMap: Map<*, *>,
         defaultTemplate: String,
         globalCategory: String,
-        project: Project
+        project: Project,
+        remoteRepoConfig: BitbucketPromptRepoConfig
     ): PromptProfileSet {
         val items = applyGlobalProfiles(
             project,
             globalCategory,
+            remoteRepoConfig,
             parsePromptProfileItems(profileMap.map("items"), defaultTemplate)
         )
         val selected = profileMap.string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME }
@@ -655,6 +774,122 @@ object LlmSettingsLoader {
                 }
             }
         return result
+    }
+
+    private fun parseBitbucketPromptRepoConfig(map: Map<*, *>): BitbucketPromptRepoConfig {
+        return BitbucketPromptRepoConfig(
+            enabled = map["enabled"] as? Boolean ?: false,
+            repoUrl = map.string("url"),
+            branch = map.string("branch").ifBlank { "main" },
+            token = map.string("token")
+        )
+    }
+
+    private fun fetchBitbucketGlobalPromptEntries(config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
+        if (!config.enabled || config.repoUrl.isBlank()) return emptyList()
+        return runCatching {
+            val repo = GitRemoteParser.parse(config.repoUrl)
+            val filePaths = loadBitbucketPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
+            filePaths.mapNotNull { path ->
+                val content = loadBitbucketPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
+                parseGlobalPromptMeta(path, content)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseGlobalPromptMeta(path: String, content: String): GlobalPromptMeta? {
+        if (!path.startsWith("prompts/") || !path.endsWith(".md")) return null
+        val text = content.trim()
+        if (text.isBlank()) return null
+        val nameMatch = Regex("(?im)^name\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val timeMatch = Regex("(?im)^time\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val typeMatch = Regex("(?im)^type\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+
+        val category = resolveCategory(path, typeMatch) ?: return null
+        val name = nameMatch?.takeIf { it.isNotBlank() } ?: File(path).nameWithoutExtension
+        val time = parseInstantOrEpoch(timeMatch)
+        return GlobalPromptMeta(
+            category = category,
+            name = name,
+            updatedAt = time,
+            template = text,
+            sourcePriority = 2
+        )
+    }
+
+    private fun parseInstantOrEpoch(raw: String?): Instant {
+        if (raw.isNullOrBlank()) return Instant.EPOCH
+        return try {
+            Instant.parse(raw)
+        } catch (_: DateTimeParseException) {
+            Instant.EPOCH
+        }
+    }
+
+    private fun resolveCategory(path: String, typeRaw: String?): String? {
+        val type = typeRaw?.trim()?.lowercase()
+        if (type == "test" || type == "commit" || type == "branchdiff" || type == "codegenerate" || type == "codereview") {
+            return when (type) {
+                "branchdiff" -> "branchDiff"
+                "codegenerate" -> "codeGenerate"
+                "codereview" -> "codeReview"
+                else -> type
+            }
+        }
+        val lowerPath = path.lowercase()
+        return when {
+            lowerPath.contains("junit") || lowerPath.contains("karate") || lowerPath.contains("test") -> "test"
+            lowerPath.contains("commit") -> "commit"
+            lowerPath.contains("diff") || lowerPath.contains("branch") -> "branchDiff"
+            lowerPath.contains("code-generate") || lowerPath.contains("code_generate") -> "codeGenerate"
+            lowerPath.contains("code-review") || lowerPath.contains("code_review") -> "codeReview"
+            else -> null
+        }
+    }
+
+    private fun loadBitbucketPromptFilePaths(
+        host: String,
+        projectKey: String,
+        repoSlug: String,
+        branch: String,
+        token: String
+    ): List<String> {
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
+        val body = bitbucketGet(url, token)
+        val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
+        return values.mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it.startsWith("prompts/") && it.endsWith(".md") }
+    }
+
+    private fun loadBitbucketPromptRaw(
+        host: String,
+        projectKey: String,
+        repoSlug: String,
+        path: String,
+        branch: String,
+        token: String
+    ): String {
+        val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
+        return bitbucketGet(url, token)
+    }
+
+    private fun bitbucketGet(url: String, token: String): String {
+        val conn = URI(url).toURL().openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 20_000
+        val normalized = token.trim()
+        if (normalized.isNotBlank()) {
+            if (normalized.contains(":")) {
+                val basic = Base64.getEncoder().encodeToString(normalized.toByteArray(Charsets.UTF_8))
+                conn.setRequestProperty("Authorization", "Basic $basic")
+            } else {
+                conn.setRequestProperty("Authorization", "Bearer $normalized")
+            }
+        }
+        return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
 
     private fun Map<*, *>?.string(key: String): String =

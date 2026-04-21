@@ -85,6 +85,10 @@ class AiTestSettingsConfigurable(
     private lateinit var codeGeneratePromptProfilesYamlField: JTextArea
     private lateinit var codeReviewPromptProfileDefaultField: JTextField
     private lateinit var codeReviewPromptProfilesYamlField: JTextArea
+    private lateinit var bitbucketPromptRepoEnabledField: JCheckBox
+    private lateinit var bitbucketPromptRepoUrlField: JTextField
+    private lateinit var bitbucketPromptRepoBranchField: JTextField
+    private lateinit var bitbucketPromptRepoTokenField: JPasswordField
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -177,6 +181,10 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfilesYamlField = textArea(12)
         codeReviewPromptProfileDefaultField = JTextField()
         codeReviewPromptProfilesYamlField = textArea(12)
+        bitbucketPromptRepoEnabledField = JCheckBox("Enable Bitbucket prompt repository")
+        bitbucketPromptRepoUrlField = JTextField()
+        bitbucketPromptRepoBranchField = JTextField("main")
+        bitbucketPromptRepoTokenField = JPasswordField()
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -321,6 +329,12 @@ class AiTestSettingsConfigurable(
             "Branch diff summary prompt" to JScrollPane(branchDiffPromptField),
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
+        add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
+            "" to bitbucketPromptRepoEnabledField,
+            "Repo URL" to bitbucketPromptRepoUrlField,
+            "Branch" to bitbucketPromptRepoBranchField,
+            "Token / PAT" to bitbucketPromptRepoTokenField
+        )))
         add(unifiedPromptManagerSection())
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -439,9 +453,8 @@ class AiTestSettingsConfigurable(
         val group = ButtonGroup()
         PromptCategory.entries.forEach { category ->
             val map = maps.getValue(category)
-            val globalName = map.keys.firstOrNull()
             map.keys.forEach { name ->
-                val isGlobal = name == globalName
+                val isGlobal = isGlobalPromptName(name)
                 val checkbox = JCheckBox(
                     if (isGlobal) "🌐 $name  [${category.label}]  (Global)" else "📄 $name  [${category.label}]"
                 ).apply {
@@ -686,7 +699,11 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfileDefault = codeGeneratePromptProfileDefaultField.text.trim(),
         codeGeneratePromptProfilesYaml = codeGeneratePromptProfilesYamlField.text,
         codeReviewPromptProfileDefault = codeReviewPromptProfileDefaultField.text.trim(),
-        codeReviewPromptProfilesYaml = codeReviewPromptProfilesYamlField.text
+        codeReviewPromptProfilesYaml = codeReviewPromptProfilesYamlField.text,
+        bitbucketPromptRepoEnabled = bitbucketPromptRepoEnabledField.isSelected,
+        bitbucketPromptRepoUrl = bitbucketPromptRepoUrlField.text.trim(),
+        bitbucketPromptRepoBranch = bitbucketPromptRepoBranchField.text.trim(),
+        bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim()
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -736,6 +753,10 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfilesYamlField.text = state.codeGeneratePromptProfilesYaml
         codeReviewPromptProfileDefaultField.text = state.codeReviewPromptProfileDefault
         codeReviewPromptProfilesYamlField.text = state.codeReviewPromptProfilesYaml
+        bitbucketPromptRepoEnabledField.isSelected = state.bitbucketPromptRepoEnabled
+        bitbucketPromptRepoUrlField.text = state.bitbucketPromptRepoUrl
+        bitbucketPromptRepoBranchField.text = state.bitbucketPromptRepoBranch
+        bitbucketPromptRepoTokenField.text = state.bitbucketPromptRepoToken
 
         refreshPromptManager()
         toggleTemplateCards()
@@ -760,6 +781,9 @@ class AiTestSettingsConfigurable(
         requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
         requirePromptProfiles("Code generate prompts YAML", state.codeGeneratePromptProfilesYaml)
         requirePromptProfiles("Code review prompts YAML", state.codeReviewPromptProfilesYaml)
+        if (state.bitbucketPromptRepoEnabled && state.bitbucketPromptRepoUrl.isBlank()) {
+            throw IllegalArgumentException("Bitbucket prompt repo URL is required when enabled")
+        }
     }
 
     private fun requireTemplate(label: String, url: String, body: String, responsePath: String) {
@@ -796,6 +820,10 @@ class AiTestSettingsConfigurable(
             isPrettyFlow = true
         }
         return Yaml(options).dump(value).trimEnd()
+    }
+
+    private fun isGlobalPromptName(name: String): Boolean {
+        return name.startsWith("[ADA]") || name.startsWith("[repo]") || name.startsWith("global/")
     }
 
     private fun updatePathLabel() {
