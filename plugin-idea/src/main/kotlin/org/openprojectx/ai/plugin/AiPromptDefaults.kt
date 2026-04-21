@@ -89,6 +89,9 @@ object AiPromptDefaults {
 
         Selected code:
         {{selectedCode}}
+
+        Extra requirements from user:
+        {{extraRequirements}}
     """
 
     const val CODE_REVIEW = """
@@ -104,6 +107,9 @@ object AiPromptDefaults {
 
         Selected code:
         {{selectedCode}}
+
+        Extra requirements from user:
+        {{extraRequirements}}
     """
     val GENERATION_WRAPPER: String = PromptBuilder.DEFAULT_WRAPPER_TEMPLATE
     val GENERATION_REST_ASSURED: String = PromptBuilder.DEFAULT_REST_ASSURED_RULES

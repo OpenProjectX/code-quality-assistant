@@ -53,15 +53,12 @@ class ContextBoxStateService(private val project: Project) {
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
     }
 
-    fun recordCodePromptResult(promptType: String, promptName: String, selectedCode: String, result: String) {
+    fun recordCodePromptResult(promptType: String, promptName: String, result: String) {
         val now = LocalDateTime.now().format(formatter)
         latestResult = buildString {
             appendLine("Type: $promptType")
             appendLine("Prompt: $promptName")
             appendLine("Time: $now")
-            appendLine()
-            appendLine("Selected Code:")
-            appendLine(selectedCode.trim().ifBlank { "(empty)" })
             appendLine()
             appendLine("LLM Result:")
             append(result.trim().ifBlank { "(empty response)" })

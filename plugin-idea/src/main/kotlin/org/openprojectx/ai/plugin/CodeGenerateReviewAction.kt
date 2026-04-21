@@ -52,9 +52,10 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
             return
         }
 
-        val dialog = CodeGenerateReviewDialog(project, selectedCode, promptOptions)
+        val dialog = CodeGenerateReviewDialog(project, promptOptions)
         if (!dialog.showAndGet()) return
         val selectedPrompt = dialog.selectedPrompt() ?: return
+        val extraRequirements = dialog.extraRequirements().ifBlank { "None" }
 
         savePromptSelection(project, selectedPrompt)
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Code Generate & Review", false) {
@@ -64,14 +65,16 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
                     val provider = LlmProviderFactory.create(LlmSettingsLoader.load(project))
                     val finalPrompt = AiPromptDefaults.render(
                         selectedPrompt.template,
-                        mapOf("selectedCode" to selectedCode)
+                        mapOf(
+                            "selectedCode" to selectedCode,
+                            "extraRequirements" to extraRequirements
+                        )
                     )
                     val response = runBlocking { provider.generateCode(finalPrompt) }
                     ApplicationManager.getApplication().invokeLater {
                         ContextBoxStateService.getInstance(project).recordCodePromptResult(
                             promptType = selectedPrompt.category.label,
                             promptName = selectedPrompt.name,
-                            selectedCode = selectedCode,
                             result = response
                         )
                         ToolWindowManager.getInstance(project).getToolWindow("AI Context Box")?.show(null)
@@ -113,18 +116,14 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
 
 private class CodeGenerateReviewDialog(
     project: com.intellij.openapi.project.Project,
-    selectedCode: String,
     private val promptOptions: List<CodeGenerateReviewAction.PromptOption>
 ) : DialogWrapper(project) {
 
-    private val codeArea = JTextArea(12, 80).apply {
-        text = selectedCode
+    private val promptCombo = JComboBox(promptOptions.toTypedArray())
+    private val requirementArea = JTextArea(6, 80).apply {
         lineWrap = true
         wrapStyleWord = true
-        isEditable = false
-        caretPosition = 0
     }
-    private val promptCombo = JComboBox(promptOptions.toTypedArray())
 
     init {
         title = "Code Generate & Review"
@@ -134,13 +133,15 @@ private class CodeGenerateReviewDialog(
     override fun createCenterPanel(): JComponent {
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JLabel("Selected Code"))
-            add(JScrollPane(codeArea))
             add(JLabel("Prompt"))
             add(promptCombo)
+            add(JLabel("Extra Requirements (optional)"))
+            add(JScrollPane(requirementArea))
         }
     }
 
     fun selectedPrompt(): CodeGenerateReviewAction.PromptOption? =
         promptCombo.selectedItem as? CodeGenerateReviewAction.PromptOption
+
+    fun extraRequirements(): String = requirementArea.text.trim()
 }
