@@ -1,6 +1,7 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.Project
+import git4idea.repo.GitRepositoryManager
 import kotlinx.coroutines.runBlocking
 
 class AiCommitService(private val project: Project) {
@@ -20,6 +21,16 @@ class AiCommitService(private val project: Project) {
                 LlmSettingsLoader.loadConfig(project).prompts.profiles.commitMessage,
                 AiPromptDefaults.COMMIT_MESSAGE
             )
-        return AiPromptDefaults.render(template, mapOf("diff" to diff))
+        return AiPromptDefaults.render(
+            template,
+            mapOf(
+                "diff" to diff,
+                "branchName" to resolveCurrentBranchName()
+            )
+        )
+    }
+
+    private fun resolveCurrentBranchName(): String {
+        return GitRepositoryManager.getInstance(project).repositories.firstOrNull()?.currentBranchName ?: "unknown"
     }
 }

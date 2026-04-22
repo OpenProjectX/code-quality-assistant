@@ -12,6 +12,7 @@ object AiPromptDefaults {
         - Use Conventional Commits style when appropriate
         - Output only the commit message
         - First line must be <= 72 characters if possible
+        - If current branch name contains a JIRA key like ABC-123, prefix commit subject with "ABC-123: "
         - Focus on intent and user-visible/codebase-visible change
         - Do not include markdown fences
         - Do not explain your answer
@@ -21,6 +22,9 @@ object AiPromptDefaults {
 
         Optional body:
         - bullet points only if really needed
+
+        Current branch:
+        {{branchName}}
 
         Git diff:
         {{diff}}
