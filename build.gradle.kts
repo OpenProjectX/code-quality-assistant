@@ -157,7 +157,8 @@ val releaseLifecycleTasks = listOf(
     ":commitNewVersion"
 )
 
-val isNestedReleaseBuild = gradle.parent != null && rootProject.name.endsWith("-release")
+val isNestedReleaseBuild = gradle.parent != null &&
+    providers.gradleProperty("release.releasing").orNull == "true"
 
 if (isNestedReleaseBuild) {
     apply(plugin = "net.researchgate.release")
