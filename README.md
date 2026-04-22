@@ -121,6 +121,85 @@ generation:
 - `OPENAI_API_KEY` - Your OpenAI API key (or any OpenAI-compatible provider)
 - Use `${ENV_VAR}` syntax in config for secrets
 
+## Prompt Types & Prompt File Samples
+
+### Current Prompt Types
+
+The plugin currently supports these prompt categories:
+
+- `test` — Contract-based test generation (Rest Assured / Karate)
+- `commit` — Commit message generation
+- `branchDiff` — Branch diff analysis / summary
+- `codeGenerate` — Selected code generation / rewrite
+- `codeReview` — Selected code review
+
+> Note: Pull Request generation uses a dedicated prompt template (`prompts.pullRequest`) but not a prompt-profile category.
+
+### Simple Local Prompt File Sample
+
+You can add prompt files under the project `prompts/` folder.  
+For Bitbucket-shared prompts, the same content format can be used.
+
+```md
+name: API Error Focused Review
+type: codeReview
+time: 2026-04-22T10:00:00Z
+
+You are a senior reviewer.
+Focus on:
+- error handling
+- edge cases
+- backward compatibility
+
+Selected code:
+{{selectedCode}}
+```
+
+### Bitbucket Repo Prompt Source Sample
+
+Configure prompt repo in settings (UI), which is persisted in `.ai-test.yaml`:
+
+```yaml
+prompts:
+  remoteRepo:
+    enabled: true
+    url: "https://bitbucket.example.com/scm/team/shared-prompts.git"
+    branch: "main"
+    token: "${BITBUCKET_TOKEN}"
+```
+
+### Bitbucket Prompt File Layout Sample
+
+In your Bitbucket repo, place prompt files under `prompts/`:
+
+```text
+shared-prompts/
+└── prompts/
+    ├── code-review-error-focus.md
+    ├── code-generate-refactor.md
+    └── branch-diff-risk-check.md
+```
+
+Each `.md` file should contain metadata header lines + prompt body:
+
+```md
+name: Refactor Assistant
+type: codeGenerate
+time: 2026-04-22T12:30:00Z
+
+Refactor the selected code for readability while preserving behavior.
+Selected code:
+{{selectedCode}}
+```
+
+Rules used by the plugin:
+
+- Reads `prompts/*.md` (Bitbucket repo path is `prompts/`).
+- Uses `type`, `name`, `time` metadata when present.
+- For same `type + name`, keeps the latest by `time`.
+- Multiple different names in the same `type` are all kept as global prompts.
+- Repo prompts have higher precedence than local project prompt-folder prompts when conflict happens.
+
 ## Usage
 
 1. Open any contract file (`.yaml`, `.json` for OpenAPI)
