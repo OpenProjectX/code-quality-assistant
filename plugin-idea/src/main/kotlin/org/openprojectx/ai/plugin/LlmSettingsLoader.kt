@@ -36,7 +36,9 @@ object LlmSettingsLoader {
         val enabled: Boolean,
         val repoUrl: String,
         val branch: String,
-        val token: String
+        val token: String,
+        val username: String,
+        val password: String
     )
 
     private data class GlobalPromptMeta(
@@ -176,7 +178,9 @@ object LlmSettingsLoader {
             bitbucketPromptRepoEnabled = remoteRepo["enabled"] as? Boolean ?: false,
             bitbucketPromptRepoUrl = remoteRepo.string("url"),
             bitbucketPromptRepoBranch = remoteRepo.string("branch").ifBlank { "main" },
-            bitbucketPromptRepoToken = remoteRepo.string("token")
+            bitbucketPromptRepoToken = remoteRepo.string("token"),
+            bitbucketPromptRepoUsername = remoteRepo.string("username"),
+            bitbucketPromptRepoPassword = remoteRepo.string("password")
         )
     }
 
@@ -502,7 +506,9 @@ object LlmSettingsLoader {
             enabled = model.bitbucketPromptRepoEnabled,
             repoUrl = model.bitbucketPromptRepoUrl,
             branch = model.bitbucketPromptRepoBranch,
-            token = model.bitbucketPromptRepoToken
+            token = model.bitbucketPromptRepoToken,
+            username = model.bitbucketPromptRepoUsername,
+            password = model.bitbucketPromptRepoPassword
         )
         prompts["generation"] = linkedMapOf<String, Any>(
             "wrapper" to model.generationPromptWrapper,
@@ -591,7 +597,9 @@ object LlmSettingsLoader {
             "enabled" to model.bitbucketPromptRepoEnabled,
             "url" to model.bitbucketPromptRepoUrl,
             "branch" to model.bitbucketPromptRepoBranch,
-            "token" to model.bitbucketPromptRepoToken
+            "token" to model.bitbucketPromptRepoToken,
+            "username" to model.bitbucketPromptRepoUsername,
+            "password" to model.bitbucketPromptRepoPassword
         )
         return prompts
     }
@@ -781,17 +789,19 @@ object LlmSettingsLoader {
             enabled = map["enabled"] as? Boolean ?: false,
             repoUrl = map.string("url"),
             branch = map.string("branch").ifBlank { "main" },
-            token = map.string("token")
+            token = map.string("token"),
+            username = map.string("username"),
+            password = map.string("password")
         )
     }
 
     private fun fetchBitbucketGlobalPromptEntries(config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
-        if (!config.enabled || config.repoUrl.isBlank()) return emptyList()
+        if (config.repoUrl.isBlank()) return emptyList()
         return runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
-            val filePaths = loadBitbucketPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
+            val filePaths = loadBitbucketPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
             filePaths.mapNotNull { path ->
-                val content = loadBitbucketPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
+                val content = loadBitbucketPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
                 parseGlobalPromptMeta(path, content)
             }
         }.getOrDefault(emptyList())
@@ -852,11 +862,11 @@ object LlmSettingsLoader {
         projectKey: String,
         repoSlug: String,
         branch: String,
-        token: String
+        config: BitbucketPromptRepoConfig
     ): List<String> {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
-        val body = bitbucketGet(url, token)
+        val body = bitbucketGet(url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
         return values.mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it.startsWith("prompts/") && it.endsWith(".md") }
     }
@@ -867,20 +877,20 @@ object LlmSettingsLoader {
         repoSlug: String,
         path: String,
         branch: String,
-        token: String
+        config: BitbucketPromptRepoConfig
     ): String {
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
-        return bitbucketGet(url, token)
+        return bitbucketGet(url, config)
     }
 
-    private fun bitbucketGet(url: String, token: String): String {
+    private fun bitbucketGet(url: String, config: BitbucketPromptRepoConfig): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.connectTimeout = 10_000
         conn.readTimeout = 20_000
-        val normalized = token.trim()
+        val normalized = config.token.trim()
         if (normalized.isNotBlank()) {
             if (normalized.contains(":")) {
                 val basic = Base64.getEncoder().encodeToString(normalized.toByteArray(Charsets.UTF_8))
@@ -888,6 +898,10 @@ object LlmSettingsLoader {
             } else {
                 conn.setRequestProperty("Authorization", "Bearer $normalized")
             }
+        } else if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            val basicRaw = "${config.username}:${config.password}"
+            val basic = Base64.getEncoder().encodeToString(basicRaw.toByteArray(Charsets.UTF_8))
+            conn.setRequestProperty("Authorization", "Basic $basic")
         }
         return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
     }

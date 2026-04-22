@@ -85,9 +85,10 @@ class AiTestSettingsConfigurable(
     private lateinit var codeGeneratePromptProfilesYamlField: JTextArea
     private lateinit var codeReviewPromptProfileDefaultField: JTextField
     private lateinit var codeReviewPromptProfilesYamlField: JTextArea
-    private lateinit var bitbucketPromptRepoEnabledField: JCheckBox
     private lateinit var bitbucketPromptRepoUrlField: JTextField
     private lateinit var bitbucketPromptRepoBranchField: JTextField
+    private lateinit var bitbucketPromptRepoUsernameField: JTextField
+    private lateinit var bitbucketPromptRepoPasswordField: JPasswordField
     private lateinit var bitbucketPromptRepoTokenField: JPasswordField
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
@@ -181,9 +182,10 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfilesYamlField = textArea(12)
         codeReviewPromptProfileDefaultField = JTextField()
         codeReviewPromptProfilesYamlField = textArea(12)
-        bitbucketPromptRepoEnabledField = JCheckBox("Enable Bitbucket prompt repository")
         bitbucketPromptRepoUrlField = JTextField()
         bitbucketPromptRepoBranchField = JTextField("main")
+        bitbucketPromptRepoUsernameField = JTextField()
+        bitbucketPromptRepoPasswordField = JPasswordField()
         bitbucketPromptRepoTokenField = JPasswordField()
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
@@ -291,10 +293,12 @@ class AiTestSettingsConfigurable(
         add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
         add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
         add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
-            "" to bitbucketPromptRepoEnabledField,
+            "Provider" to JLabel("Bitbucket"),
             "Repo URL" to bitbucketPromptRepoUrlField,
             "Branch" to bitbucketPromptRepoBranchField,
-            "Token / PAT" to bitbucketPromptRepoTokenField
+            "Username" to bitbucketPromptRepoUsernameField,
+            "Password / App Password" to bitbucketPromptRepoPasswordField,
+            "Token / PAT (optional)" to bitbucketPromptRepoTokenField
         )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -700,10 +704,12 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfilesYaml = codeGeneratePromptProfilesYamlField.text,
         codeReviewPromptProfileDefault = codeReviewPromptProfileDefaultField.text.trim(),
         codeReviewPromptProfilesYaml = codeReviewPromptProfilesYamlField.text,
-        bitbucketPromptRepoEnabled = bitbucketPromptRepoEnabledField.isSelected,
+        bitbucketPromptRepoEnabled = true,
         bitbucketPromptRepoUrl = bitbucketPromptRepoUrlField.text.trim(),
         bitbucketPromptRepoBranch = bitbucketPromptRepoBranchField.text.trim(),
-        bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim()
+        bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim(),
+        bitbucketPromptRepoUsername = bitbucketPromptRepoUsernameField.text.trim(),
+        bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim()
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -753,10 +759,11 @@ class AiTestSettingsConfigurable(
         codeGeneratePromptProfilesYamlField.text = state.codeGeneratePromptProfilesYaml
         codeReviewPromptProfileDefaultField.text = state.codeReviewPromptProfileDefault
         codeReviewPromptProfilesYamlField.text = state.codeReviewPromptProfilesYaml
-        bitbucketPromptRepoEnabledField.isSelected = state.bitbucketPromptRepoEnabled
         bitbucketPromptRepoUrlField.text = state.bitbucketPromptRepoUrl
         bitbucketPromptRepoBranchField.text = state.bitbucketPromptRepoBranch
         bitbucketPromptRepoTokenField.text = state.bitbucketPromptRepoToken
+        bitbucketPromptRepoUsernameField.text = state.bitbucketPromptRepoUsername
+        bitbucketPromptRepoPasswordField.text = state.bitbucketPromptRepoPassword
 
         refreshPromptManager()
         toggleTemplateCards()
@@ -781,8 +788,11 @@ class AiTestSettingsConfigurable(
         requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
         requirePromptProfiles("Code generate prompts YAML", state.codeGeneratePromptProfilesYaml)
         requirePromptProfiles("Code review prompts YAML", state.codeReviewPromptProfilesYaml)
-        if (state.bitbucketPromptRepoEnabled && state.bitbucketPromptRepoUrl.isBlank()) {
-            throw IllegalArgumentException("Bitbucket prompt repo URL is required when enabled")
+        if (state.bitbucketPromptRepoUrl.isNotBlank()
+            && state.bitbucketPromptRepoToken.isBlank()
+            && (state.bitbucketPromptRepoUsername.isBlank() || state.bitbucketPromptRepoPassword.isBlank())
+        ) {
+            throw IllegalArgumentException("Bitbucket prompt repo requires Token or Username + Password")
         }
     }
 
