@@ -290,6 +290,21 @@ class AiTestSettingsConfigurable(
     private fun loginTab(): JComponent = JScrollPane(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        val usage = ButtonUsageReportService.getInstance(project)
+        val updateBitbucketPromptsButton = JButton("Update Bitbucket Prompts").apply {
+            addActionListener {
+                usage.record("settings.bitbucket_prompt_repo.update")
+                if (!saveCurrentState()) return@addActionListener
+                try {
+                    val latest = LlmSettingsLoader.loadSettingsModel(project)
+                    applyState(latest)
+                    initialState = latest
+                    Notifications.info(project, "Bitbucket Prompt Repo", "Prompt sync completed. Latest prompts have been loaded.")
+                } catch (ex: Exception) {
+                    Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
+                }
+            }
+        }
         add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
         add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
         add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
@@ -298,7 +313,10 @@ class AiTestSettingsConfigurable(
             "Branch" to bitbucketPromptRepoBranchField,
             "Username" to bitbucketPromptRepoUsernameField,
             "Password / App Password" to bitbucketPromptRepoPasswordField,
-            "Token / PAT (optional)" to bitbucketPromptRepoTokenField
+            "Token / PAT (optional)" to bitbucketPromptRepoTokenField,
+            "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(updateBitbucketPromptsButton)
+            }
         )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
