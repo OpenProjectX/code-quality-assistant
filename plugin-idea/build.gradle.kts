@@ -109,6 +109,9 @@ dependencies {
     implementation(libs.bundles.kotlinxEcosystem)
 
     implementation("ch.qos.logback:logback-classic:1.5.32")
+
+    implementation(platform("org.bsc.langgraph4j:langgraph4j-bom:1.8.13"))
+    implementation("org.bsc.langgraph4j:langgraph4j-core")
 }
 
 publishing {
