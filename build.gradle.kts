@@ -182,9 +182,10 @@ if (isNestedReleaseBuild) {
 
         buildName = "${project.name}-release"
         dir = rootDir
-        tasks = releaseLifecycleTasks
+        setTasks(releaseLifecycleTasks)
 
         startParameter = gradle.startParameter.newBuild().apply {
+            setTaskNames(releaseLifecycleTasks)
             projectProperties = projectProperties +
                 mapOf(
                     "org.gradle.configuration-cache" to "false",
