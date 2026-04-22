@@ -2,11 +2,16 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
+import kotlinx.coroutines.runBlocking
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.FlowLayout
@@ -16,6 +21,7 @@ import java.awt.GridBagLayout
 import java.awt.Insets
 import javax.swing.BorderFactory
 import javax.swing.DefaultListModel
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JList
 import javax.swing.JLabel
@@ -51,6 +57,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             caretColor = fgColor
             border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
         }
+        val extraRequirementField = JTextField().apply {
+            background = Color.WHITE
+            foreground = Color.BLACK
+            border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            toolTipText = "Enter extra requirement and click Send"
+        }
+        val sendButton = JButton("Send")
+        val clearButton = JButton("Clear")
 
         fun styledScrollPane(component: java.awt.Component): JBScrollPane =
             JBScrollPane(component).apply {
@@ -59,15 +73,81 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 border = BorderFactory.createLineBorder(borderColor)
             }
 
+        fun buildFollowUpPrompt(snapshot: ContextBoxStateService.Snapshot, extraRequirement: String): String {
+            return """
+                You are continuing from previous AI Context Box output.
+
+                Previous latest result:
+                ${snapshot.latestResult}
+
+                Extra requirement:
+                $extraRequirement
+
+                Provide an updated response only.
+            """.trimIndent()
+        }
+
         val panel = JPanel(BorderLayout()).apply {
+            add(JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(JLabel("Context History"), BorderLayout.WEST)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    isOpaque = false
+                    add(clearButton)
+                }, BorderLayout.EAST)
+                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            }, BorderLayout.NORTH)
             add(styledScrollPane(resultArea), BorderLayout.CENTER)
+            add(JPanel(BorderLayout(8, 0)).apply {
+                border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+                add(extraRequirementField, BorderLayout.CENTER)
+                add(sendButton, BorderLayout.EAST)
+                isOpaque = false
+            }, BorderLayout.SOUTH)
             background = bgColor
             foreground = fgColor
         }
 
         fun render(snapshot: ContextBoxStateService.Snapshot) {
-            resultArea.text = snapshot.latestResult
-            resultArea.caretPosition = 0
+            resultArea.text = if (snapshot.history.isEmpty()) {
+                "No result yet."
+            } else {
+                snapshot.history.joinToString("\n\n────────────\n\n")
+            }
+            resultArea.caretPosition = resultArea.document.length
+        }
+
+        clearButton.addActionListener {
+            stateService.clearHistory()
+        }
+        sendButton.addActionListener {
+            val extraRequirement = extraRequirementField.text.trim()
+            if (extraRequirement.isBlank()) return@addActionListener
+            val snapshot = stateService.snapshot()
+            val prompt = buildFollowUpPrompt(snapshot, extraRequirement)
+            sendButton.isEnabled = false
+
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Context Box Follow-up", false) {
+                override fun run(indicator: ProgressIndicator) {
+                    try {
+                        indicator.text = "Calling LLM..."
+                        val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+                            val provider = LlmProviderFactory.create(settings)
+                            runBlocking { provider.generateCode(prompt) }
+                        }
+                        ApplicationManager.getApplication().invokeLater {
+                            stateService.recordFollowUp(extraRequirement, response)
+                            extraRequirementField.text = ""
+                            sendButton.isEnabled = true
+                        }
+                    } catch (ex: Exception) {
+                        ApplicationManager.getApplication().invokeLater {
+                            sendButton.isEnabled = true
+                            Notifications.error(project, "Context Box Follow-up failed", ex.message ?: ex.toString())
+                        }
+                    }
+                }
+            })
         }
 
         render(stateService.snapshot())
