@@ -18,6 +18,8 @@ class GenerateCommitMessageAction : AnAction("Generate Commit Message") {
             Notifications.error(project, "Generate Commit Message", "Commit message box is not available.")
             return
         }
+        val selectedPrompt = LlmSettingsLoader.loadConfig(project).prompts.profiles.commitMessage.selected
+        ButtonUsageReportService.getInstance(project).recordPromptUsage("commit.message", selectedPrompt)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating Commit Message", false) {
             override fun run(indicator: ProgressIndicator) {

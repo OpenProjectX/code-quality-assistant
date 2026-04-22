@@ -145,6 +145,7 @@ class GenerateTestsDialog(
 
         return UiResult(
             framework = framework,
+            generationPromptProfileName = generationPromptProfileCombo.selectedItem?.toString().orEmpty(),
             generationPromptWrapperOverride = generationPromptProfiles[generationPromptProfileCombo.selectedItem?.toString().orEmpty()],
             location = location.text.trim(),
             className = clsField.text.trim(),
@@ -156,6 +157,7 @@ class GenerateTestsDialog(
 
     data class UiResult(
         val framework: Framework,
+        val generationPromptProfileName: String,
         val generationPromptWrapperOverride: String?,
         val location: String,
         val className: String,

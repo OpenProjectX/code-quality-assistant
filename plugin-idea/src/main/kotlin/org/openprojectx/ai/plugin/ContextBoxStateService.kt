@@ -11,7 +11,8 @@ import java.time.format.DateTimeFormatter
 class ContextBoxStateService(private val project: Project) {
 
     data class Snapshot(
-        val latestResult: String
+        val latestResult: String,
+        val history: List<String>
     )
 
     companion object {
@@ -21,13 +22,16 @@ class ContextBoxStateService(private val project: Project) {
     }
 
     private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    private var latestResult: String = "No result yet."
+    private val history = mutableListOf<String>()
 
-    fun snapshot(): Snapshot = Snapshot(latestResult)
+    fun snapshot(): Snapshot {
+        val latest = history.lastOrNull() ?: "No result yet."
+        return Snapshot(latestResult = latest, history = history.toList())
+    }
 
     fun recordGeneration(className: String, targetPath: String, diff: String) {
         val now = LocalDateTime.now().format(formatter)
-        latestResult = buildString {
+        appendResult(buildString {
             appendLine("Type: Generated Code")
             appendLine("Time: $now")
             appendLine("Class: $className")
@@ -35,13 +39,12 @@ class ContextBoxStateService(private val project: Project) {
             appendLine()
             appendLine("Code Diff:")
             append(diff.ifBlank { "No diff generated." })
-        }.trimEnd()
-        project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
+        }.trimEnd())
     }
 
     fun recordBranchSummary(targetBranch: String, sourceBranch: String, summary: String) {
         val now = LocalDateTime.now().format(formatter)
-        latestResult = buildString {
+        appendResult(buildString {
             appendLine("Type: Branch Analysis")
             appendLine("Time: $now")
             appendLine("Target Branch: $targetBranch")
@@ -49,7 +52,40 @@ class ContextBoxStateService(private val project: Project) {
             appendLine()
             appendLine("Analysis:")
             append(summary.trim())
-        }.trimEnd()
+        }.trimEnd())
+    }
+
+    fun recordCodePromptResult(promptType: String, promptName: String, result: String) {
+        val now = LocalDateTime.now().format(formatter)
+        appendResult(buildString {
+            appendLine("Type: $promptType")
+            appendLine("Prompt: $promptName")
+            appendLine("Time: $now")
+            appendLine()
+            appendLine("LLM Result:")
+            append(result.trim().ifBlank { "(empty response)" })
+        }.trimEnd())
+    }
+
+    fun recordFollowUp(extraRequirement: String, result: String) {
+        val now = LocalDateTime.now().format(formatter)
+        appendResult(buildString {
+            appendLine("Type: Follow-up")
+            appendLine("Time: $now")
+            appendLine("Extra Requirement: ${extraRequirement.trim().ifBlank { "(none)" }}")
+            appendLine()
+            appendLine("LLM Result:")
+            append(result.trim().ifBlank { "(empty response)" })
+        }.trimEnd())
+    }
+
+    fun clearHistory() {
+        history.clear()
+        project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
+    }
+
+    private fun appendResult(result: String) {
+        history += result
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
     }
 }

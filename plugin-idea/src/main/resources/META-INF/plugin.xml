@@ -64,5 +64,12 @@
             <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
             <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
         </action>
+        <action
+                id="org.openprojectx.ai.plugin.CodeGenerateReviewAction"
+                class="org.openprojectx.ai.plugin.CodeGenerateReviewAction"
+                text="Code Generate &amp; Review"
+                description="Send selected code with a selected prompt to LLM and show result in AI Context Box">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </action>
     </actions>
 </idea-plugin>
