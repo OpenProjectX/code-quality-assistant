@@ -128,68 +128,71 @@ signing {
     }
 }
 
-// Only apply the release plugin when actually running the release task.
+// Drive release through an explicit nested build.
 //
-// How the release plugin (v3.x) works across nested builds
-// ─────────────────────────────────────────────────────────
-// Outer build (gradle.parent == null, task "release" requested):
-//   • The plugin is applied and registers tasks: createScmAdapter, initScmAdapter,
-//     checkCommitNeeded, unSnapshotVersion, beforeReleaseBuild, afterReleaseBuild, …
-//   • The plugin's GradleBuild task spawns a *nested* Gradle invocation (shows up in
-//     error messages as project ':ai-test-plugin-release') to run ALL those tasks plus
-//     the configured buildTasks (:plugin-idea:publishPlugin) in one sequence.
+// The researchgate release plugin is not configuration-cache compatible on Gradle 9.x,
+// and its default outer "release" task spawns another GradleBuild that can recurse into
+// a second nested build. The failure shows up as:
+//   :ai-test-plugin-release:ai-test-plugin-release:beforeReleaseBuild not found
 //
-// Nested build (gradle.parent != null, parent is the release build):
-//   • Needs the plugin applied so that createScmAdapter / beforeReleaseBuild / … exist.
-//   • Must NOT inherit buildTasks: the build tasks (:plugin-idea:publishPlugin) are
-//     already executing inline in this very build; if buildTasks is kept, the plugin
-//     spawns a *second* nested build (double-nested, ':ai-test-plugin-release:…')
-//     which then fails looking for beforeReleaseBuild or publishPlugin.
-//   • Must not store a configuration cache, because the plugin's BuildEventsListenerRegistry
-//     usage is incompatible; we mark every task incompatible to suppress cache storage.
-//
-// Unrelated nested builds (gradle.parent != null, parent NOT running "release"):
-//   • Plugin is NOT applied → no cache poisoning, no side effects.
+// To keep the plugin contained, the outer build defines its own GradleBuild task and only
+// applies the plugin inside the nested "<root>-release" build.
 
-fun isReleaseTaskRequested(taskNames: List<String>) =
-    taskNames.any { it == "release" || it.endsWith(":release") }
+val releaseLifecycleTasks = listOf(
+    ":createScmAdapter",
+    ":initScmAdapter",
+    ":checkCommitNeeded",
+    ":checkUpdateNeeded",
+    ":checkoutMergeToReleaseBranch",
+    ":unSnapshotVersion",
+    ":confirmReleaseVersion",
+    ":checkSnapshotDependencies",
+    ":beforeReleaseBuild",
+    ":plugin-idea:publishPlugin",
+    ":afterReleaseBuild",
+    ":preTagCommit",
+    ":createReleaseTag",
+    ":checkoutMergeFromReleaseBranch",
+    ":updateVersion",
+    ":commitNewVersion"
+)
 
-val isOuterReleaseBuild = gradle.parent == null &&
-    isReleaseTaskRequested(gradle.startParameter.taskNames)
-val isNestedReleaseBuild = gradle.parent != null &&
-    isReleaseTaskRequested(gradle.parent!!.startParameter.taskNames)
+val isNestedReleaseBuild = gradle.parent != null && rootProject.name.endsWith("-release")
 
-if (isOuterReleaseBuild || isNestedReleaseBuild) {
+if (isNestedReleaseBuild) {
     apply(plugin = "net.researchgate.release")
 
     configure<net.researchgate.release.ReleaseExtension> {
-        if (isOuterReleaseBuild) {
-            // Outer build: tell the plugin which build tasks to execute via GradleBuild.
-            buildTasks.set(listOf(":plugin-idea:publishPlugin"))
-        } else {
-            // Nested build: buildTasks are already running inline in this invocation.
-            // Clear the list so the plugin does NOT spawn another nested GradleBuild.
-            buildTasks.set(emptyList())
-        }
-        // Tag format: e.g. "0.1.8"
+        // The nested build already runs the release lifecycle. Clearing buildTasks prevents
+        // runBuildTasks from spawning a second nested build.
+        buildTasks.set(emptyList())
         tagTemplate.set("\${version}")
         git {
             requireBranch.set("main")
         }
     }
 
-    if (isOuterReleaseBuild) {
-        // Mark the release task as config-cache-incompatible so Gradle skips caching
-        // for the outer release build entirely.
-        tasks.named("release") {
-            notCompatibleWithConfigurationCache("net.researchgate.release plugin is not configuration cache compatible")
+    tasks.configureEach {
+        notCompatibleWithConfigurationCache("net.researchgate.release nested build is not configuration cache compatible")
+    }
+} else {
+    tasks.register<GradleBuild>("release") {
+        group = "Release"
+        description = "Verify project, release, and update version to next."
+
+        buildName = "${project.name}-release"
+        dir = rootDir
+        tasks = releaseLifecycleTasks
+
+        startParameter = gradle.startParameter.newBuild().apply {
+            projectProperties = projectProperties +
+                mapOf(
+                    "org.gradle.configuration-cache" to "false",
+                    "release.releasing" to "true"
+                )
+            systemPropertiesArgs = systemPropertiesArgs + ("org.gradle.configuration-cache" to "false")
         }
-    } else {
-        // In the nested release build the plugin's BuildEventsListenerRegistry usage
-        // is still incompatible. Mark every task so Gradle never tries to store a cache
-        // entry for this invocation.
-        tasks.configureEach {
-            notCompatibleWithConfigurationCache("net.researchgate.release nested build is not configuration cache compatible")
-        }
+
+        notCompatibleWithConfigurationCache("release uses a nested Gradle build with configuration cache disabled")
     }
 }
