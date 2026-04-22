@@ -160,6 +160,9 @@ val releaseLifecycleTasks = listOf(
 val isNestedReleaseBuild = gradle.parent != null &&
     providers.gradleProperty("release.releasing").orNull == "true"
 
+val outerProjectProperties = gradle.startParameter.projectProperties
+val outerSystemProperties = gradle.startParameter.systemPropertiesArgs
+
 if (isNestedReleaseBuild) {
     apply(plugin = "net.researchgate.release")
 
@@ -187,12 +190,12 @@ if (isNestedReleaseBuild) {
 
         startParameter = gradle.startParameter.newBuild().apply {
             setTaskNames(releaseLifecycleTasks)
-            projectProperties = projectProperties +
+            projectProperties = outerProjectProperties +
                 mapOf(
                     "org.gradle.configuration-cache" to "false",
                     "release.releasing" to "true"
                 )
-            systemPropertiesArgs = systemPropertiesArgs + ("org.gradle.configuration-cache" to "false")
+            systemPropertiesArgs = outerSystemProperties + ("org.gradle.configuration-cache" to "false")
         }
 
         notCompatibleWithConfigurationCache("release uses a nested Gradle build with configuration cache disabled")
