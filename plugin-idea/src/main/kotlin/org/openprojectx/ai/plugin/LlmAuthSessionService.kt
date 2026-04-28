@@ -1,5 +1,8 @@
 package org.openprojectx.ai.plugin
 
+import com.intellij.credentialStore.CredentialAttributes
+import com.intellij.credentialStore.Credentials
+import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -25,7 +28,7 @@ class LlmAuthSessionService(
         val auth = settings.auth ?: return settings
         sessionApiKey?.let { return settings.copy(apiKey = it) }
 
-        val credentials = promptCredentials()
+        val credentials = promptCredentials(settings)
         val apiKey = runBlocking {
             TemplateRequestExecutor(HttpClients.shared(settings.httpDisableTlsVerification)).execute(
                 config = auth.login,
@@ -86,10 +89,16 @@ class LlmAuthSessionService(
         }
     }
 
-    private fun promptCredentials(): LoginCredentials {
+    private fun promptCredentials(settings: LlmSettings): LoginCredentials {
         lateinit var credentials: LoginCredentials
+        val saved = loadSavedCredentials(settings)
         ApplicationManager.getApplication().invokeAndWait {
-            val dialog = LlmLoginDialog(project)
+            val dialog = LlmLoginDialog(
+                project = project,
+                initialUsername = saved?.userName.orEmpty(),
+                initialPassword = saved?.getPasswordAsString().orEmpty(),
+                rememberByDefault = saved != null
+            )
             if (!dialog.showAndGet()) {
                 error("LLM login cancelled")
             }
@@ -101,8 +110,34 @@ class LlmAuthSessionService(
             if (credentials.password.isBlank()) {
                 error("LLM login requires a password")
             }
+            if (credentials.remember) {
+                saveCredentials(settings, credentials)
+            } else {
+                clearSavedCredentials(settings)
+            }
         }
         return credentials
+    }
+
+    private fun loadSavedCredentials(settings: LlmSettings): Credentials? {
+        return PasswordSafe.instance.get(getCredentialAttributes(settings))
+    }
+
+    private fun saveCredentials(settings: LlmSettings, credentials: LoginCredentials) {
+        PasswordSafe.instance.set(
+            getCredentialAttributes(settings),
+            Credentials(credentials.username, credentials.password)
+        )
+    }
+
+    private fun clearSavedCredentials(settings: LlmSettings) {
+        PasswordSafe.instance.set(getCredentialAttributes(settings), null)
+    }
+
+    private fun getCredentialAttributes(settings: LlmSettings): CredentialAttributes {
+        val endpointKey = settings.endpoint ?: settings.auth?.login?.url ?: "default"
+        val serviceName = "OpenProjectX.AI.Login.$endpointKey"
+        return CredentialAttributes(serviceName)
     }
 
     companion object {
