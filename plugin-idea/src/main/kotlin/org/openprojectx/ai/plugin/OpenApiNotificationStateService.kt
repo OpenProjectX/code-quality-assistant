@@ -31,4 +31,5 @@ sealed interface GenerationUiState {
     data object Idle : GenerationUiState
     data object Generating : GenerationUiState
     data object Done : GenerationUiState
+    data object Dismissed : GenerationUiState
 }

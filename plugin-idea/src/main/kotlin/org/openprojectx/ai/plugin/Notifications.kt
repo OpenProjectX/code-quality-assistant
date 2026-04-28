@@ -12,6 +12,7 @@ object Notifications {
     private const val GROUP_ID = "OpenProjectX Notifications"
 
     fun info(project: Project?, title: String, message: String) {
+        RuntimeLogStore.append("INFO | $title | $message")
         NotificationGroupManager.getInstance()
             .getNotificationGroup(GROUP_ID)
             .createNotification(title, message, NotificationType.INFORMATION)
@@ -19,6 +20,7 @@ object Notifications {
     }
 
     fun warn(project: Project?, title: String, message: String) {
+        RuntimeLogStore.append("WARN | $title | $message")
         NotificationGroupManager.getInstance()
             .getNotificationGroup(GROUP_ID)
             .createNotification(title, message, NotificationType.WARNING)
@@ -26,6 +28,7 @@ object Notifications {
     }
 
     fun error(project: Project?, title: String, message: String) {
+        RuntimeLogStore.append("ERROR | $title | $message")
         NotificationGroupManager.getInstance()
             .getNotificationGroup(GROUP_ID)
             .createNotification(title, message, NotificationType.ERROR)

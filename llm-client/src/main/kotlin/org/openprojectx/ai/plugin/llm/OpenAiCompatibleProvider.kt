@@ -13,34 +13,46 @@ class OpenAiCompatibleProvider(
 ) : LlmProvider {
 
     override suspend fun generateCode(prompt: String): String {
-        val endpoint = settings.endpoint
-            ?: error("llm.endpoint is required for provider='${settings.provider}'")
-        val apiKey = settings.apiKey
-            ?: error("llm.apiKey or llm.apiKeyEnv is required for provider='${settings.provider}'")
+        try {
+            val endpoint = settings.endpoint
+                ?: error("llm.endpoint is required for provider='${settings.provider}'")
+            val apiKey = settings.apiKey
+                ?: error("llm.apiKey or llm.apiKeyEnv is required for provider='${settings.provider}'")
+            LlmRuntimeLogger.info("Request start | provider=${settings.provider} | endpoint=$endpoint")
 
-        val req = ChatCompletionsRequest(
-            model = settings.model,
-            messages = listOf(
-                Message("system", "You generate code only."),
-                Message("user", prompt)
-            ),
-            temperature = 0.1
-        )
+            val req = ChatCompletionsRequest(
+                model = settings.model,
+                messages = listOf(
+                    Message("system", "You generate code only."),
+                    Message("user", prompt)
+                ),
+                temperature = 0.1
+            )
 
-        val response = http.post(endpoint) {
-            header(HttpHeaders.Authorization, "Bearer $apiKey")
-            contentType(ContentType.Application.Json)
-            setBody(req)
+            val response = http.post(endpoint) {
+                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            LlmRuntimeLogger.info("Response received | endpoint=$endpoint | status=${response.status.value}")
+
+            if (response.status == HttpStatusCode.Unauthorized) {
+                LlmRuntimeLogger.error("Unauthorized response | endpoint=$endpoint")
+                throw LlmUnauthorizedException("Unauthorized LLM request to $endpoint")
+            }
+
+            val resp: ChatCompletionsResponse = response.body()
+            val result = resp.choices.firstOrNull()?.message?.content
+                ?: error("Empty LLM response")
+            LlmRuntimeLogger.info(
+                "Response parsed | choices=${resp.choices.size} | contentLength=${result.length} | preview=${result.take(200)}"
+            )
+
+            return result
+        } catch (t: Throwable) {
+            LlmRuntimeLogger.error("Request failed | provider=${settings.provider} | error=${t.message ?: t::class.java.simpleName}")
+            throw t
         }
-
-        if (response.status == HttpStatusCode.Unauthorized) {
-            throw LlmUnauthorizedException("Unauthorized LLM request to $endpoint")
-        }
-
-        val resp: ChatCompletionsResponse = response.body()
-
-        return resp.choices.firstOrNull()?.message?.content
-            ?: error("Empty LLM response")
     }
 
     @Serializable

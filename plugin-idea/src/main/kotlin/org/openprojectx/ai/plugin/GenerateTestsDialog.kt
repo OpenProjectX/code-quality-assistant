@@ -69,44 +69,36 @@ class GenerateTestsDialog(
     }
 
     private fun applyDefaults(framework: Framework) {
-        val generation = config.generation
-        val resolved = generation.defaultsFor(framework)
         val derivedJavaMainTestLocation = JavaHeuristics.deriveTestLocationForMainJava(sourceFile, project.basePath)
         val derivedJavaPackageName = JavaHeuristics.derivePackageNameForJava(sourceFile, project.basePath)
-        val isJavaSourceInput = JavaHeuristics.looksLikeJavaSource(sourceFile, contractText)
 
         location.text = if (framework == Framework.REST_ASSURED && !derivedJavaMainTestLocation.isNullOrBlank()) {
             derivedJavaMainTestLocation
         } else {
-            resolved.location
+            AiTestDefaults.defaultLocation(framework)
         }
-        clsField.text = if (isJavaSourceInput) {
-            defaultJavaTestClassName(sourceFile.nameWithoutExtension)
-        } else {
-            generation.defaultClassName
-        }
-        baseUrlField.text = generation.defaultBaseUrl
-        notesArea.text = generation.defaultNotes
+        clsField.text = defaultJavaTestClassName(sourceFile.nameWithoutExtension)
+        baseUrlField.text = ""
+        notesArea.text = ""
         packageNameField.text = if (framework == Framework.REST_ASSURED && !derivedJavaPackageName.isNullOrBlank()) {
             derivedJavaPackageName
         } else {
-            resolved.packageName.orEmpty()
+            AiTestDefaults.defaultPackageName(framework).orEmpty()
         }
     }
 
     private fun applyFrameworkDefaults(framework: Framework) {
-        val resolved = config.generation.defaultsFor(framework)
         val derivedJavaMainTestLocation = JavaHeuristics.deriveTestLocationForMainJava(sourceFile, project.basePath)
         val derivedJavaPackageName = JavaHeuristics.derivePackageNameForJava(sourceFile, project.basePath)
         location.text = if (framework == Framework.REST_ASSURED && !derivedJavaMainTestLocation.isNullOrBlank()) {
             derivedJavaMainTestLocation
         } else {
-            resolved.location
+            AiTestDefaults.defaultLocation(framework)
         }
         packageNameField.text = if (framework == Framework.REST_ASSURED && !derivedJavaPackageName.isNullOrBlank()) {
             derivedJavaPackageName
         } else {
-            resolved.packageName.orEmpty()
+            AiTestDefaults.defaultPackageName(framework).orEmpty()
         }
     }
 
@@ -130,7 +122,7 @@ class GenerateTestsDialog(
 
     private fun defaultJavaTestClassName(sourceClassName: String): String {
         val trimmed = sourceClassName.trim()
-        if (trimmed.isEmpty()) return config.generation.defaultClassName
+        if (trimmed.isEmpty()) return AiTestDefaults.DEFAULT_CLASS_NAME
         return if (trimmed.endsWith("Test")) trimmed else "${trimmed}Test"
     }
 

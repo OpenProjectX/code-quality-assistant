@@ -5,7 +5,7 @@ import org.openprojectx.ai.plugin.Notifications
 
 class PostPushPullRequestService(private val project: Project) {
 
-    fun createIfEnabled(options: PullRequestUiOptions, token: String) {
+    fun createIfEnabled(options: PullRequestUiOptions) {
         if (!options.createAfterPush) return
 
         val repo = GitRepositoryContextService.resolve(project)
@@ -24,8 +24,7 @@ class PostPushPullRequestService(private val project: Project) {
             remoteUrl = repo.remoteUrl,
             sourceBranch = repo.currentBranch,
             targetBranch = options.targetBranch,
-            diff = diff,
-            providerToken = token
+            diff = diff
         )
 
         Notifications.info(

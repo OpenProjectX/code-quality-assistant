@@ -21,34 +21,51 @@ class TemplateRequestExecutor(
     private val handlebars = Handlebars()
 
     suspend fun execute(config: TemplateRequestConfig, variables: Map<String, Any>): String {
-        val renderedUrl = render(config.url, variables)
-        val renderedHeaders = config.headers.mapValues { (_, value) -> render(value, variables) }
-        val renderedBody = render(config.body, variables)
+        try {
+            val renderedUrl = render(config.url, variables)
+            val renderedHeaders = config.headers.mapValues { (_, value) -> render(value, variables) }
+            val renderedBody = render(config.body, variables)
+            LlmRuntimeLogger.info("Template request start | method=${config.method.uppercase()} | url=$renderedUrl")
 
-        val response = http.request {
-            url(renderedUrl)
-            method = HttpMethod.parse(config.method.uppercase())
+            val response = http.request {
+                url(renderedUrl)
+                method = HttpMethod.parse(config.method.uppercase())
 
-            renderedHeaders.forEach { (name, value) ->
-                header(name, value)
+                renderedHeaders.forEach { (name, value) ->
+                    header(name, value)
+                }
+
+                if (renderedHeaders.keys.none { it.equals("Content-Type", ignoreCase = true) }) {
+                    contentType(ContentType.Application.Json)
+                }
+
+                setBody(renderedBody)
             }
+            LlmRuntimeLogger.info("Template response received | url=$renderedUrl | status=${response.status.value}")
 
-            if (renderedHeaders.keys.none { it.equals("Content-Type", ignoreCase = true) }) {
-                contentType(ContentType.Application.Json)
-            }
+            val responseText = readBodyOrThrow(response, config)
+            LlmRuntimeLogger.info(
+                "Template response body received | url=$renderedUrl | length=${responseText.length} | preview=${responseText.take(200)}"
+            )
 
-            setBody(renderedBody)
+            val extracted = JsonPath.read<String>(responseText, config.responsePath)
+                ?: error("Template responsePath '${config.responsePath}' returned null")
+            LlmRuntimeLogger.info(
+                "Template response extracted | path=${config.responsePath} | length=${extracted.length} | preview=${extracted.take(200)}"
+            )
+            return extracted
+        } catch (t: Throwable) {
+            LlmRuntimeLogger.error(
+                "Template request failed | method=${config.method.uppercase()} | url=${config.url} | error=${t.message ?: t::class.java.simpleName}"
+            )
+            throw t
         }
-
-        val responseText = readBodyOrThrow(response, config)
-
-        return JsonPath.read<String>(responseText, config.responsePath)
-            ?: error("Template responsePath '${config.responsePath}' returned null")
     }
 
     private suspend fun readBodyOrThrow(response: HttpResponse, config: TemplateRequestConfig): String {
         val responseText = response.bodyAsText()
         if (response.status == HttpStatusCode.Unauthorized) {
+            LlmRuntimeLogger.error("Template unauthorized | url=${config.url} | status=${response.status.value}")
             throw LlmUnauthorizedException("Unauthorized request for template '${config.url}'")
         }
         return responseText

@@ -4,21 +4,28 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.logging.DEFAULT
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.serialization.kotlinx.json.json
+import com.intellij.openapi.diagnostic.Logger as IdeaLogger
 import kotlinx.serialization.json.Json
 import org.openprojectx.ai.plugin.llm.LlmProvider
+import org.openprojectx.ai.plugin.llm.LlmRuntimeLogger
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.OpenAiCompatibleProvider
 import org.openprojectx.ai.plugin.llm.TemplateLlmProvider
 import java.util.concurrent.TimeUnit
 
 object LlmProviderFactory {
+    private val ideaLog = IdeaLogger.getInstance(LlmProviderFactory::class.java)
 
     fun create(settings: LlmSettings): LlmProvider {
+        LlmRuntimeLogger.sink = { message ->
+            ideaLog.info(message)
+            RuntimeLogStore.append(message)
+        }
+
         val http = HttpClient(OkHttp) {
             engine {
                 config {
@@ -41,7 +48,11 @@ object LlmProviderFactory {
 //                requestTimeoutMillis = TimeUnit.SECONDS.toMillis(settings.timeoutSeconds)
             }
             install(Logging) {
-                logger = Logger.DEFAULT  // prints to stdout
+                logger = object : Logger {
+                    override fun log(message: String) {
+                        LlmRuntimeLogger.info("HTTP | $message")
+                    }
+                }
                 level = LogLevel.ALL     // headers + body
             }
         }

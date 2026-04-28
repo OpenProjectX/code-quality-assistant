@@ -3,6 +3,8 @@ global: true
 category:
   - commit
   - branchDiff
+type: branchDiff
+time: 2026-04-28T00:00:00Z
 name: get diff review
 ---
 

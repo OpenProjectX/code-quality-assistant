@@ -38,7 +38,7 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
         val state = stateService.getState(file.path)
 
         return EditorNotificationPanel(fileEditor).apply {
-            border = JBUI.Borders.empty(10, 0)
+            border = JBUI.Borders.empty(10, 12)
 
             when (state) {
                 GenerationUiState.Idle -> {
@@ -55,13 +55,18 @@ class OpenApiEditorNotificationProvider : EditorNotifications.Provider<EditorNot
                     text = "Tests generated successfully"
                     icon(OpenProjectXIcons.GenerateTests)
                 }
+
+                GenerationUiState.Dismissed -> {
+                    return null
+                }
             }
 
             createActionLabel("Generate Tests By AI") {
-                stateService.setState(file.path, GenerationUiState.Generating)
-                EditorNotifications.getInstance(project).updateNotifications(file)
-
                 GenerateTestsDialog.open(project, file, contractText)
+            }
+            createActionLabel("Close") {
+                stateService.setState(file.path, GenerationUiState.Dismissed)
+                EditorNotifications.getInstance(project).updateNotifications(file)
             }
         }
     }

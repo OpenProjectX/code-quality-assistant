@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.openprojectx.ai.plugin.HttpClients
+import org.openprojectx.ai.plugin.GitCredentialHelper
 import org.openprojectx.ai.plugin.LlmAuthSessionService
 import org.openprojectx.ai.plugin.LlmProviderFactory
 import org.openprojectx.ai.plugin.LlmSettingsLoader
@@ -19,9 +20,16 @@ class AiPullRequestService(private val project: Project) {
         sourceBranch: String,
         targetBranch: String,
         diff: String,
-        providerToken: String
+        summaryComment: String? = null
     ): PullRequestResult {
         val repository = GitRemoteParser.parse(remoteUrl)
+        val settings = LlmSettingsLoader.loadSettingsModel(project)
+        val credential = GitCredentialHelper.resolve(remoteUrl)
+        val auth = PullRequestAuth(
+            token = settings.bitbucketPromptRepoToken.takeIf { it.isNotBlank() },
+            username = credential?.username,
+            password = credential?.password
+        )
 
         val prompt = PullRequestPromptBuilder.build(
             template = LlmSettingsLoader.loadConfig(project).prompts.pullRequest,
@@ -40,11 +48,11 @@ class AiPullRequestService(private val project: Project) {
         val provider = GitHostingProviderFactory.create(
             type = repository.provider,
             http = HttpClients.shared(),
-            token = providerToken
+            auth = auth
         )
 
         return runBlocking {
-            provider.createPullRequest(
+            val result = provider.createPullRequest(
                 PullRequestRequest(
                     repository = repository,
                     sourceBranch = sourceBranch,
@@ -53,6 +61,14 @@ class AiPullRequestService(private val project: Project) {
                     description = generated.description.trim()
                 )
             )
+            if (!summaryComment.isNullOrBlank() && !result.id.isNullOrBlank()) {
+                provider.addComment(
+                    repository = repository,
+                    pullRequestId = result.id,
+                    text = summaryComment.trim()
+                )
+            }
+            result
         }
     }
 

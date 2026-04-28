@@ -37,6 +37,14 @@
                 description="Choose a configured prompt to generate commit message">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </group>
+        <action
+                id="org.openprojectx.ai.plugin.PushAndCreatePrAction"
+                class="org.openprojectx.ai.plugin.PushAndCreatePrAction"
+                text="Push and Create PR"
+                description="Push current branch and create a pull request with AI summary comment">
+            <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
+            <add-to-group group-id="CheckinActionsToolbar" anchor="last"/>
+        </action>
         <group
                 id="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
                 class="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
@@ -53,16 +61,6 @@
                 text="Summarize [Probe Vcs.Log.Toolbar.Internal]"
                 description="Summarize [Probe Vcs.Log.Toolbar.Internal]">
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
-        </action>
-        <action
-                id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
-                class="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
-                text="Analyze Current vs Selected"
-                description="Analyze changes between current branch and selected branch/commit">
-            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Vcs.Log.Branches.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
-            <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
         </action>
         <action
                 id="org.openprojectx.ai.plugin.CodeGenerateReviewAction"

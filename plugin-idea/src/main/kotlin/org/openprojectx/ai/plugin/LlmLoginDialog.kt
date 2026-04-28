@@ -4,18 +4,27 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import java.awt.BorderLayout
 import javax.swing.JComponent
+import javax.swing.JCheckBox
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JTextField
 
-class LlmLoginDialog(project: Project) : DialogWrapper(project) {
+class LlmLoginDialog(
+    project: Project,
+    initialUsername: String = "",
+    initialPassword: String = "",
+    rememberByDefault: Boolean = true
+) : DialogWrapper(project) {
 
     private val usernameField = JTextField()
     private val passwordField = JPasswordField()
+    private val rememberCheckBox = JCheckBox("Remember credentials (stored securely)", rememberByDefault)
 
     init {
         title = "LLM Login"
+        usernameField.text = initialUsername
+        passwordField.text = initialPassword
         init()
     }
 
@@ -24,12 +33,14 @@ class LlmLoginDialog(project: Project) : DialogWrapper(project) {
         panel.layout = javax.swing.BoxLayout(panel, javax.swing.BoxLayout.Y_AXIS)
         panel.add(labeled("Username", usernameField))
         panel.add(labeled("Password", passwordField))
+        panel.add(rememberCheckBox)
         return panel
     }
 
     fun credentials(): LoginCredentials = LoginCredentials(
         username = usernameField.text.trim(),
-        password = String(passwordField.password)
+        password = String(passwordField.password),
+        remember = rememberCheckBox.isSelected
     )
 
     private fun labeled(label: String, component: JComponent): JComponent {
@@ -42,5 +53,6 @@ class LlmLoginDialog(project: Project) : DialogWrapper(project) {
 
 data class LoginCredentials(
     val username: String,
-    val password: String
+    val password: String,
+    val remember: Boolean = true
 )
