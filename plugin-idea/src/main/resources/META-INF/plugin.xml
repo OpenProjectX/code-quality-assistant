@@ -55,16 +55,6 @@
             <add-to-group group-id="Vcs.Log.Toolbar.Internal" anchor="last"/>
         </action>
         <action
-                id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
-                class="org.openprojectx.ai.plugin.SummarizeProbeVcsLogContextMenuAction"
-                text="Analyze Current vs Selected"
-                description="Analyze changes between current branch and selected branch/commit">
-            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Vcs.Log.Branches.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
-            <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
-        </action>
-        <action
                 id="org.openprojectx.ai.plugin.CodeGenerateReviewAction"
                 class="org.openprojectx.ai.plugin.CodeGenerateReviewAction"
                 text="Code Generate &amp; Review"
