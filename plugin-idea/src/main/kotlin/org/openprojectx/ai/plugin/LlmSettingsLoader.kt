@@ -806,14 +806,14 @@ object LlmSettingsLoader {
     }
 
     private fun parseGlobalPromptMeta(path: String, content: String): GlobalPromptMeta? {
-        if (!path.startsWith("prompts/") || !path.endsWith(".md")) return null
+        if (!isPromptMarkdownPath(path)) return null
         val text = content.trim()
         if (text.isBlank()) return null
         val nameMatch = Regex("(?im)^name\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
         val timeMatch = Regex("(?im)^time\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
         val typeMatch = Regex("(?im)^type\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
 
-        val category = resolveCategory(path, typeMatch) ?: return null
+        val category = resolveCategory(path, typeMatch) ?: "test"
         val name = nameMatch?.takeIf { it.isNotBlank() } ?: File(path).nameWithoutExtension
         val time = parseInstantOrEpoch(timeMatch)
         return GlobalPromptMeta(
@@ -844,6 +844,25 @@ object LlmSettingsLoader {
                 else -> type
             }
         }
+
+        val normalized = path.replace('\\', '/').lowercase()
+        val rootPrefix = when {
+            normalized.startsWith("prompts/") -> "prompts/"
+            normalized.startsWith("prompt/") -> "prompt/"
+            else -> ""
+        }
+        if (rootPrefix.isNotEmpty()) {
+            val relative = normalized.removePrefix(rootPrefix)
+            val firstSegment = relative.substringBefore('/')
+            when (firstSegment) {
+                "test", "tests" -> return "test"
+                "commit", "commits" -> return "commit"
+                "branchdiff", "branch-diff", "branch_diff" -> return "branchDiff"
+                "codegenerate", "code-generate", "code_generate" -> return "codeGenerate"
+                "codereview", "code-review", "code_review" -> return "codeReview"
+            }
+        }
+
         val lowerPath = path.lowercase()
         return when {
             lowerPath.contains("junit") || lowerPath.contains("karate") || lowerPath.contains("test") -> "test"
@@ -853,6 +872,11 @@ object LlmSettingsLoader {
             lowerPath.contains("code-review") || lowerPath.contains("code_review") -> "codeReview"
             else -> null
         }
+    }
+
+    private fun isPromptMarkdownPath(path: String): Boolean {
+        val normalized = path.replace('\\', '/').lowercase()
+        return (normalized.startsWith("prompts/") || normalized.startsWith("prompt/")) && normalized.endsWith(".md")
     }
 
     private fun loadBitbucketPromptFilePaths(
@@ -866,7 +890,8 @@ object LlmSettingsLoader {
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
         val body = bitbucketGet(url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
-        return values.mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it.startsWith("prompts/") && it.endsWith(".md") }
+        return values.mapNotNull { it.jsonPrimitive.contentOrNull }
+            .filter { isPromptMarkdownPath(it) }
     }
 
     private fun loadBitbucketPromptRaw(
