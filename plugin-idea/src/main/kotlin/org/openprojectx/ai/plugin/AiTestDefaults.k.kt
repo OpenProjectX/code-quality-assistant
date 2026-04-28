@@ -3,7 +3,7 @@ package org.openprojectx.ai.plugin
 import org.openprojectx.ai.plugin.core.Framework
 
 object AiTestDefaults {
-    val DEFAULT_FRAMEWORK: Framework = Framework.KARATE
+    val DEFAULT_FRAMEWORK: Framework = Framework.REST_ASSURED
     const val DEFAULT_CLASS_NAME: String = "OpenApiGeneratedTests"
     const val DEFAULT_BASE_URL: String = ""
     const val DEFAULT_NOTES: String = ""

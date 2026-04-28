@@ -27,6 +27,7 @@ import java.util.Base64
 object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
+    private val userHome: String = System.getProperty("user.home")
     private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
     private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
     private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
@@ -49,20 +50,84 @@ object LlmSettingsLoader {
         val sourcePriority: Int
     )
 
+    data class PromptUpdateStatus(
+        val configured: Boolean,
+        val remoteCount: Int,
+        val cachedCount: Int,
+        val hasUpdates: Boolean,
+        val message: String
+    )
+
     fun load(project: Project): LlmSettings = loadConfig(project).llm
 
     fun readConfigText(project: Project): String {
-        val configFile = findOrCreateConfigFile(project.basePath ?: error("Project basePath is null"))
+        val configFile = findOrCreateConfigFile()
         return configFile.readText(Charsets.UTF_8)
     }
 
     fun writeConfigText(project: Project, text: String) {
-        val configFile = findOrCreateConfigFile(project.basePath ?: error("Project basePath is null"))
+        val configFile = findOrCreateConfigFile()
         configFile.writeText(text, Charsets.UTF_8)
     }
 
     fun configFilePath(project: Project): String =
-        findOrCreateConfigFile(project.basePath ?: error("Project basePath is null")).absolutePath
+        findOrCreateConfigFile().absolutePath
+
+    fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
+        val model = loadSettingsModel(project)
+        if (model.bitbucketPromptRepoUrl.isBlank()) {
+            return PromptUpdateStatus(
+                configured = false,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = "Bitbucket prompt repo URL is not configured."
+            )
+        }
+
+        return runCatching {
+            val remoteConfig = BitbucketPromptRepoConfig(
+                enabled = model.bitbucketPromptRepoEnabled,
+                repoUrl = model.bitbucketPromptRepoUrl,
+                branch = model.bitbucketPromptRepoBranch,
+                token = model.bitbucketPromptRepoToken,
+                username = model.bitbucketPromptRepoUsername,
+                password = model.bitbucketPromptRepoPassword
+            )
+            val remoteGlobalKeys = loadGlobalPrompts(project, remoteConfig)
+                .values
+                .flatMap { it.keys }
+                .filter { it.startsWith("global/") }
+                .toSet()
+            val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
+            val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = remoteGlobalKeys.size,
+                cachedCount = cachedGlobalKeys.size,
+                hasUpdates = hasUpdates,
+                message = if (hasUpdates) {
+                    "New prompt updates are available."
+                } else {
+                    "Prompt cache is up to date."
+                }
+            )
+        }.getOrElse { ex ->
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = ex.message ?: ex.toString()
+            )
+        }
+    }
+
+    fun pullBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
+        val latest = loadSettingsModel(project)
+        saveSettingsModel(project, latest)
+        return checkBitbucketPromptUpdates(project)
+    }
 
     fun loadSettingsModel(project: Project): AiTestSettingsModel {
         val root = readRootMap(project)
@@ -71,15 +136,10 @@ object LlmSettingsLoader {
         val auth = llm["auth"] as? Map<*, *>
         val login = auth?.get("login") as? Map<*, *>
         val http = llm["http"] as? Map<*, *>
-        val generation = root["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val ui = root["ui"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteRepo = prompts.map("remoteRepo")
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val defaults = generation["defaults"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val common = generation["common"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val frameworks = generation["frameworks"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val restAssured = frameworks[Framework.REST_ASSURED.id] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val karate = frameworks[Framework.KARATE.id] as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
         return AiTestSettingsModel(
             llmProvider = llm.string("provider").ifBlank { "openai-compatible" },
@@ -89,6 +149,7 @@ object LlmSettingsLoader {
             llmApiKey = llm.string("apiKey"),
             llmApiKeyEnv = llm.string("apiKeyEnv"),
             httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: false,
+            showLogTab = ui["showLogTab"] as? Boolean ?: false,
             llmTemplateEnabled = template != null,
             llmTemplateMethod = template.string("method").ifBlank { "POST" },
             llmTemplateUrl = template.string("url"),
@@ -101,14 +162,6 @@ object LlmSettingsLoader {
             loginHeaders = headersToText(login?.get("headers") as? Map<*, *>),
             loginBody = login.string("body"),
             loginResponsePath = login.string("responsePath"),
-            defaultFramework = Framework.fromIdOrNull(defaults.string("framework")) ?: AiTestDefaults.DEFAULT_FRAMEWORK,
-            defaultClassName = defaults.string("className").ifBlank { AiTestDefaults.DEFAULT_CLASS_NAME },
-            defaultBaseUrl = defaults.string("baseUrl"),
-            defaultNotes = defaults.string("notes"),
-            commonLocation = common.string("location"),
-            restAssuredLocation = restAssured.string("location"),
-            restAssuredPackageName = restAssured.string("packageName"),
-            karateLocation = karate.string("location"),
             generationPromptWrapper = promptGeneration.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
             generationPromptRestAssured = promptGeneration.string("restAssuredRules").ifBlank { AiPromptDefaults.GENERATION_REST_ASSURED },
             generationPromptKarate = promptGeneration.string("karateRules").ifBlank { AiPromptDefaults.GENERATION_KARATE },
@@ -187,15 +240,15 @@ object LlmSettingsLoader {
     fun saveSettingsModel(project: Project, model: AiTestSettingsModel) {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
-        root["generation"] = buildGenerationMap(root["generation"] as? Map<*, *>, model)
+        root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
+        root.remove("generation")
         root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
         writeRootMap(project, root)
     }
 
     fun loadConfig(project: Project): AiTestConfig {
-        val basePath = project.basePath ?: error("Project basePath is null")
-        val configFile = findConfigFile(basePath)
-            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} at project root.")
+        val configFile = findConfigFile()
+            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} at $userHome.")
 
         val text = configFile.readText(Charsets.UTF_8)
         val yaml = Yaml()
@@ -344,62 +397,23 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun parseGenerationConfig(root: Map<*, *>): GenerationConfig {
-        val generation = root["generation"] as? Map<*, *> ?: return GenerationConfig()
-
-        val defaults = generation["defaults"] as? Map<*, *>
-        val common = generation["common"] as? Map<*, *>
-        val frameworks = generation["frameworks"] as? Map<*, *>
-
-        val defaultFramework = ((defaults?.get("framework") as? String)?.trim())
-            ?.let { Framework.fromIdOrNull(it) }
-            ?: AiTestDefaults.DEFAULT_FRAMEWORK
-
-        val defaultClassName = (defaults?.get("className") as? String)?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: AiTestDefaults.DEFAULT_CLASS_NAME
-
-        val defaultBaseUrl = (defaults?.get("baseUrl") as? String)?.trim()
-            ?: AiTestDefaults.DEFAULT_BASE_URL
-
-        val defaultNotes = (defaults?.get("notes") as? String)?.trim()
-            ?: AiTestDefaults.DEFAULT_NOTES
-
-        val commonDefaults = CommonGenerationDefaults(
-            location = (common?.get("location") as? String)?.trim()?.takeIf { it.isNotEmpty() }
-        )
-
-        val frameworkDefaults = Framework.entries.associateWith { framework ->
-            val raw = frameworks?.get(framework.id) as? Map<*, *>
-            FrameworkGenerationDefaults(
-                location = (raw?.get("location") as? String)?.trim()?.takeIf { it.isNotEmpty() },
-                packageName = (raw?.get("packageName") as? String)?.trim()?.takeIf { it.isNotEmpty() }
-            )
-        }.filterValues { it.location != null || it.packageName != null }
-
-        return GenerationConfig(
-            defaultFramework = defaultFramework,
-            defaultClassName = defaultClassName,
-            defaultBaseUrl = defaultBaseUrl,
-            defaultNotes = defaultNotes,
-            common = commonDefaults,
-            frameworks = frameworkDefaults
-        )
+    private fun parseGenerationConfig(@Suppress("UNUSED_PARAMETER") root: Map<*, *>): GenerationConfig {
+        return GenerationConfig()
     }
 
-    private fun findConfigFile(basePath: String): File? {
+    private fun findConfigFile(): File? {
         for (name in configNames) {
-            val f = File(basePath, name)
+            val f = File(userHome, name)
             if (f.exists() && f.isFile) return f
         }
         return null
     }
 
-    private fun findOrCreateConfigFile(basePath: String): File {
-        val existing = findConfigFile(basePath)
+    private fun findOrCreateConfigFile(): File {
+        val existing = findConfigFile()
         if (existing != null) return existing
 
-        val file = File(basePath, ".ai-test.yaml")
+        val file = File(userHome, ".ai-test.yaml")
         if (!file.exists()) {
             file.writeText(defaultConfigTemplate(), Charsets.UTF_8)
         }
@@ -413,20 +427,6 @@ object LlmSettingsLoader {
           model: gpt-4.1
           apiKeyEnv: OPENAI_API_KEY
 
-        generation:
-          defaults:
-            framework: karate
-            className: OpenApiGeneratedTests
-            baseUrl: ""
-            notes: ""
-          common:
-            location: src/test/resources/karate
-          frameworks:
-            restassured:
-              location: src/test/java
-              packageName: org.openprojectx.ai.plugin.generated
-            karate:
-              location: src/test/resources/karate
     """.trimIndent() + "\n"
 
     private fun buildLlmMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
@@ -471,33 +471,6 @@ object LlmSettingsLoader {
         }
 
         return llm
-    }
-
-    private fun buildGenerationMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
-        val generation = existing.toMutableLinkedMap()
-
-        generation["defaults"] = linkedMapOf<String, Any>(
-            "framework" to model.defaultFramework.id,
-            "className" to model.defaultClassName,
-            "baseUrl" to model.defaultBaseUrl,
-            "notes" to model.defaultNotes
-        )
-
-        generation["common"] = linkedMapOf<String, Any>(
-            "location" to model.commonLocation
-        )
-
-        generation["frameworks"] = linkedMapOf<String, Any>(
-            Framework.REST_ASSURED.id to linkedMapOf<String, Any>(
-                "location" to model.restAssuredLocation,
-                "packageName" to model.restAssuredPackageName
-            ),
-            Framework.KARATE.id to linkedMapOf<String, Any>(
-                "location" to model.karateLocation
-            )
-        )
-
-        return generation
     }
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
@@ -602,6 +575,12 @@ object LlmSettingsLoader {
             "password" to model.bitbucketPromptRepoPassword
         )
         return prompts
+    }
+
+    private fun buildUiMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
+        val ui = existing.toMutableLinkedMap()
+        ui["showLogTab"] = model.showLogTab
+        return ui
     }
 
     private fun applyGlobalProfiles(
@@ -745,7 +724,6 @@ object LlmSettingsLoader {
     }
 
     private fun readRootMap(project: Project): Map<String, Any?> {
-        if (project.basePath == null) return emptyMap()
         val text = readConfigText(project)
         val root = Yaml().load<Any?>(text) as? Map<*, *>
         return root.toMutableLinkedMap()
@@ -932,5 +910,24 @@ object LlmSettingsLoader {
         } else {
             target[key] = value
         }
+    }
+
+    private fun readCachedGlobalPromptKeys(project: Project): Set<String> {
+        val root = readRootMap(project)
+        val prompts = root["prompts"] as? Map<*, *> ?: return emptySet()
+        val profileKeys = listOf(
+            "generationProfiles",
+            "commitMessageProfiles",
+            "branchDiffSummaryProfiles",
+            "codeGenerateProfiles",
+            "codeReviewProfiles"
+        )
+        return profileKeys
+            .flatMap { key ->
+                val items = (prompts[key] as? Map<*, *>)?.map("items") ?: emptyMap<Any?, Any?>()
+                items.keys.mapNotNull { it?.toString() }
+            }
+            .filter { it.startsWith("global/") }
+            .toSet()
     }
 }

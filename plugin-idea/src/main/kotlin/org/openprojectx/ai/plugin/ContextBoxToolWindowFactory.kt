@@ -162,6 +162,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val tabs = JTabbedPane().apply {
             addTab("Context Box", panel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
+                addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
+            }
         }
 
         val content = ContentFactory.getInstance().createContent(tabs, "", false)
@@ -277,6 +280,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
         val saveButton = javax.swing.JButton("Save")
         val deleteButton = javax.swing.JButton("Delete")
+        val checkUpdateButton = javax.swing.JButton("Check Update")
+        val pullUpdateButton = javax.swing.JButton("Pull Update")
 
         saveButton.addActionListener {
             usage.record("context_box.prompt_manager.save")
@@ -366,6 +371,43 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             promptList.selectedIndex = listModel.size() - 1
         }
 
+        checkUpdateButton.addActionListener {
+            usage.record("context_box.prompt_manager.check_update")
+            val status = LlmSettingsLoader.checkBitbucketPromptUpdates(project)
+            if (!status.configured) {
+                Notifications.warn(project, "Prompt Manager", status.message)
+                return@addActionListener
+            }
+            if (status.hasUpdates) {
+                Notifications.info(
+                    project,
+                    "Prompt Manager",
+                    "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                )
+            } else {
+                Notifications.info(
+                    project,
+                    "Prompt Manager",
+                    "No updates. Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                )
+            }
+        }
+
+        pullUpdateButton.addActionListener {
+            usage.record("context_box.prompt_manager.pull_update")
+            val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+            if (!status.configured) {
+                Notifications.warn(project, "Prompt Manager", status.message)
+                return@addActionListener
+            }
+            refreshList()
+            Notifications.info(
+                project,
+                "Prompt Manager",
+                "Prompt pull completed. Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+            )
+        }
+
         val detail = JPanel(GridBagLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(borderColor),
@@ -388,7 +430,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             add(JBScrollPane(contentField), gbc)
             gbc.gridx = 1; gbc.gridy = 3; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
             add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                add(saveButton); add(deleteButton)
+                add(saveButton); add(deleteButton); add(checkUpdateButton); add(pullUpdateButton)
                 isOpaque = false
             }, gbc)
         }
@@ -401,6 +443,56 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             background = bgColor
             add(JBScrollPane(promptList).apply { border = BorderFactory.createLineBorder(borderColor) }, BorderLayout.WEST)
             add(detail, BorderLayout.CENTER)
+        }
+    }
+
+    private fun createLogPanel(
+        bgColor: Color,
+        fgColor: Color,
+        borderColor: Color,
+        commonFont: Font
+    ): JPanel {
+        val logArea = JTextArea().apply {
+            isEditable = false
+            lineWrap = false
+            wrapStyleWord = false
+            font = commonFont
+            background = bgColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        }
+
+        fun render() {
+            logArea.text = RuntimeLogStore.snapshot().joinToString("\n")
+            logArea.caretPosition = logArea.document.length
+        }
+
+        val refreshButton = JButton("Refresh").apply {
+            addActionListener { render() }
+        }
+        val clearButton = JButton("Clear").apply {
+            addActionListener {
+                RuntimeLogStore.clear()
+                render()
+            }
+        }
+
+        render()
+
+        return JPanel(BorderLayout()).apply {
+            background = bgColor
+            foreground = fgColor
+            add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 6)).apply {
+                isOpaque = false
+                add(refreshButton)
+                add(clearButton)
+            }, BorderLayout.NORTH)
+            add(JBScrollPane(logArea).apply {
+                viewport.background = bgColor
+                background = bgColor
+                border = BorderFactory.createLineBorder(borderColor)
+            }, BorderLayout.CENTER)
         }
     }
 
