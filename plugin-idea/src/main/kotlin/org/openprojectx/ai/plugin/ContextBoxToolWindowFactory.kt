@@ -430,7 +430,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             add(JBScrollPane(contentField), gbc)
             gbc.gridx = 1; gbc.gridy = 3; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
             add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                add(saveButton); add(deleteButton); add(checkUpdateButton); add(pullUpdateButton)
+                add(saveButton); add(deleteButton)
                 isOpaque = false
             }, gbc)
         }
@@ -441,6 +441,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         return JPanel(BorderLayout(8, 8)).apply {
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
             background = bgColor
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                isOpaque = false
+                add(checkUpdateButton)
+                add(pullUpdateButton)
+            }, BorderLayout.NORTH)
             add(JBScrollPane(promptList).apply { border = BorderFactory.createLineBorder(borderColor) }, BorderLayout.WEST)
             add(detail, BorderLayout.CENTER)
         }
