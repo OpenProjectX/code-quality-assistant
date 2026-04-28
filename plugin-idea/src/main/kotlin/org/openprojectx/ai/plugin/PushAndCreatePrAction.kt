@@ -41,12 +41,6 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
         settings.targetBranch = targetBranch
         PullRequestSettingsState.getInstance(project).loadState(settings)
 
-        val providerToken = LlmSettingsLoader.loadSettingsModel(project).bitbucketPromptRepoToken
-        if (providerToken.isBlank()) {
-            Notifications.error(project, "Push and Create PR", "Bitbucket token is required in Settings > Login.")
-            return
-        }
-
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Push and Create PR", false) {
             override fun run(indicator: ProgressIndicator) {
                 try {
@@ -73,7 +67,6 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
                         sourceBranch = repoContext.currentBranch,
                         targetBranch = targetBranch,
                         diff = diff,
-                        providerToken = providerToken,
                         summaryComment = summary
                     )
 

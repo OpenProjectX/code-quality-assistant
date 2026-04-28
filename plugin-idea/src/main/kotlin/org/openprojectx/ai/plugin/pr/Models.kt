@@ -42,3 +42,9 @@ data class PullRequestUiOptions(
     val createAfterPush: Boolean,
     val targetBranch: String
 )
+
+data class PullRequestAuth(
+    val token: String? = null,
+    val username: String? = null,
+    val password: String? = null
+)

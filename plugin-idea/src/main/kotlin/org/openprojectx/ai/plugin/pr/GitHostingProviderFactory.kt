@@ -7,10 +7,10 @@ object GitHostingProviderFactory {
     fun create(
         type: GitHostingProviderType,
         http: HttpClient,
-        token: String
+        auth: PullRequestAuth
     ): GitHostingProvider {
         return when (type) {
-            GitHostingProviderType.BITBUCKET -> BitbucketPullRequestProvider(http, token)
+            GitHostingProviderType.BITBUCKET -> BitbucketPullRequestProvider(http, auth)
             GitHostingProviderType.GITHUB -> error("GitHub pull request creation is not implemented yet")
             GitHostingProviderType.GITLAB -> error("GitLab merge request creation is not implemented yet")
         }
