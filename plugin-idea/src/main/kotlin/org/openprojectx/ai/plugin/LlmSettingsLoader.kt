@@ -73,6 +73,26 @@ object LlmSettingsLoader {
     fun configFilePath(project: Project): String =
         findOrCreateConfigFile().absolutePath
 
+    fun importConfigFromRepo(project: Project): String {
+        val basePath = project.basePath ?: error("Project base path is unavailable")
+        val candidates = listOf(
+            "config/ai-test.yaml",
+            "config/ai-test.yml",
+            "config/ai-text.yaml",
+            "config/ai-text.yml",
+            "config/al-test.yaml",
+            "config/al-test.yml"
+        )
+        val source = candidates
+            .map { File(basePath, it) }
+            .firstOrNull { it.exists() && it.isFile }
+            ?: error("Cannot find repo config. Expected one of: ${candidates.joinToString()} under $basePath")
+
+        val target = findOrCreateConfigFile()
+        target.writeText(source.readText(Charsets.UTF_8), Charsets.UTF_8)
+        return source.absolutePath
+    }
+
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
         val model = loadSettingsModel(project)
         if (model.bitbucketPromptRepoUrl.isBlank()) {

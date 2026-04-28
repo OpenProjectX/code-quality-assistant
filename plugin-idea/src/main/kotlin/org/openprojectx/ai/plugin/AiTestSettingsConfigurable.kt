@@ -218,6 +218,27 @@ class AiTestSettingsConfigurable(
                         reset()
                     }
                 })
+                add(JButton("Import Repo Config").apply {
+                    addActionListener {
+                        usage.record("settings.toolbar.import_repo_config")
+                        runCatching {
+                            LlmSettingsLoader.importConfigFromRepo(project)
+                        }.onSuccess { sourcePath ->
+                            reset()
+                            Messages.showInfoMessage(
+                                project,
+                                "Imported config from: $sourcePath",
+                                "AI Test Generator"
+                            )
+                        }.onFailure { ex ->
+                            Messages.showErrorDialog(
+                                project,
+                                ex.message ?: ex.toString(),
+                                "AI Test Generator"
+                            )
+                        }
+                    }
+                })
             }, BorderLayout.EAST)
         }
 

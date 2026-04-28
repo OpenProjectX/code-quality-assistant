@@ -1,0 +1,21 @@
+# Template for repository config import.
+# Put this file at: config/ai-test.yaml (recommended)
+# The settings screen can import it via: "Import Repo Config".
+
+llm:
+  provider: openai-compatible
+  endpoint: https://api.openai.com/v1/chat/completions
+  model: gpt-4.1
+  apiKeyEnv: OPENAI_API_KEY
+  timeoutSeconds: 120
+
+ui:
+  showLogTab: true
+
+prompts:
+  commitMessage: |
+    Summarize the staged git diff and produce a concise commit message.
+  pullRequest: |
+    Generate PR title and description from this branch diff.
+  branchDiffSummary: |
+    Summarize key changes, risks, and testing notes from this branch diff.
