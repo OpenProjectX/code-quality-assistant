@@ -11,6 +11,7 @@ import io.ktor.serialization.kotlinx.json.json
 import com.intellij.openapi.diagnostic.Logger as IdeaLogger
 import kotlinx.serialization.json.Json
 import org.openprojectx.ai.plugin.llm.LlmProvider
+import org.openprojectx.ai.plugin.llm.LlmRuntimeLogger
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.OpenAiCompatibleProvider
 import org.openprojectx.ai.plugin.llm.TemplateLlmProvider
@@ -20,6 +21,11 @@ object LlmProviderFactory {
     private val ideaLog = IdeaLogger.getInstance(LlmProviderFactory::class.java)
 
     fun create(settings: LlmSettings): LlmProvider {
+        LlmRuntimeLogger.sink = { message ->
+            ideaLog.info(message)
+            RuntimeLogStore.append(message)
+        }
+
         val http = HttpClient(OkHttp) {
             engine {
                 config {
@@ -44,8 +50,7 @@ object LlmProviderFactory {
             install(Logging) {
                 logger = object : Logger {
                     override fun log(message: String) {
-                        ideaLog.info(message)
-                        RuntimeLogStore.append(message)
+                        LlmRuntimeLogger.info("HTTP | $message")
                     }
                 }
                 level = LogLevel.ALL     // headers + body
