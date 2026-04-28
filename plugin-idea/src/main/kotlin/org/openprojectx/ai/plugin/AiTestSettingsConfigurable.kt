@@ -1,15 +1,21 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.options.SearchableConfigurable
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.LocalFileSystem
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.File
 import javax.swing.BorderFactory
 import javax.swing.ButtonGroup
 import javax.swing.BoxLayout
@@ -33,6 +39,7 @@ class AiTestSettingsConfigurable(
 ) : SearchableConfigurable {
     private var rootPanel: JPanel? = null
     private var pathLabel: JLabel? = null
+    private var configPath: String = ""
 
     private lateinit var providerField: JComboBox<String>
     private lateinit var modelField: JTextField
@@ -214,7 +221,15 @@ class AiTestSettingsConfigurable(
             }, BorderLayout.EAST)
         }
 
-        pathLabel = JLabel()
+        pathLabel = JLabel().apply {
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Click to open config file"
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent?) {
+                    openConfigFileInEditor()
+                }
+            })
+        }
 
         rootPanel = JPanel(BorderLayout(0, 8)).apply {
             add(toolbar, BorderLayout.NORTH)
@@ -806,8 +821,19 @@ class AiTestSettingsConfigurable(
     }
 
     private fun updatePathLabel() {
-        if (project.basePath == null) return
-        pathLabel?.text = "Project config: ${LlmSettingsLoader.configFilePath(project)}"
+        configPath = LlmSettingsLoader.configFilePath(project)
+        pathLabel?.text = "<html>Config: <a href='open'>$configPath</a></html>"
+    }
+
+    private fun openConfigFileInEditor() {
+        if (configPath.isBlank()) return
+        val ioFile = File(configPath)
+        val vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+        if (vFile == null) {
+            Messages.showErrorDialog(project, "Cannot find config file: $configPath", "AI Test Generator")
+            return
+        }
+        FileEditorManager.getInstance(project).openFile(vFile, true)
     }
 
     private fun saveCurrentState(): Boolean {
