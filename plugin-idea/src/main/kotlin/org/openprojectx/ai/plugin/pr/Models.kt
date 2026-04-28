@@ -28,6 +28,7 @@ enum class GitHostingProviderType {
 
 interface GitHostingProvider {
     suspend fun createPullRequest(request: PullRequestRequest): PullRequestResult
+    suspend fun addComment(repository: RepositoryRef, pullRequestId: String, text: String) {}
 }
 
 data class PullRequestConfig(

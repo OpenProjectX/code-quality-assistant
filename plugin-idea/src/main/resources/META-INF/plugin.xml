@@ -37,6 +37,13 @@
                 description="Choose a configured prompt to generate commit message">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </group>
+        <action
+                id="org.openprojectx.ai.plugin.PushAndCreatePrAction"
+                class="org.openprojectx.ai.plugin.PushAndCreatePrAction"
+                text="Push and Create PR"
+                description="Push current branch and create a pull request with AI summary comment">
+            <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
+        </action>
         <group
                 id="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
                 class="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"

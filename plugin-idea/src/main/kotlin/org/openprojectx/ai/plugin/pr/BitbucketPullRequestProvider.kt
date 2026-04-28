@@ -49,6 +49,17 @@ class BitbucketPullRequestProvider(
         )
     }
 
+    override suspend fun addComment(repository: RepositoryRef, pullRequestId: String, text: String) {
+        val apiUrl =
+            "https://${repository.host}/rest/api/1.0/projects/${repository.projectKey}/repos/${repository.repoSlug}/pull-requests/$pullRequestId/comments"
+
+        http.post(apiUrl) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(CreateBitbucketCommentRequest(text = text))
+        }.body<CreateBitbucketCommentResponse>()
+    }
+
     @Serializable
     data class CreateBitbucketPrRequest(
         val title: String,
@@ -81,6 +92,16 @@ class BitbucketPullRequestProvider(
     data class CreateBitbucketPrResponse(
         val id: Long? = null,
         val links: Links
+    )
+
+    @Serializable
+    data class CreateBitbucketCommentRequest(
+        val text: String
+    )
+
+    @Serializable
+    data class CreateBitbucketCommentResponse(
+        val id: Long? = null
     )
 
     @Serializable

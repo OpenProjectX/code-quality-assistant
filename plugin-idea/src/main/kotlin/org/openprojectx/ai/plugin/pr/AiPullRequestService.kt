@@ -19,7 +19,8 @@ class AiPullRequestService(private val project: Project) {
         sourceBranch: String,
         targetBranch: String,
         diff: String,
-        providerToken: String
+        providerToken: String,
+        summaryComment: String? = null
     ): PullRequestResult {
         val repository = GitRemoteParser.parse(remoteUrl)
 
@@ -44,7 +45,7 @@ class AiPullRequestService(private val project: Project) {
         )
 
         return runBlocking {
-            provider.createPullRequest(
+            val result = provider.createPullRequest(
                 PullRequestRequest(
                     repository = repository,
                     sourceBranch = sourceBranch,
@@ -53,6 +54,14 @@ class AiPullRequestService(private val project: Project) {
                     description = generated.description.trim()
                 )
             )
+            if (!summaryComment.isNullOrBlank() && !result.id.isNullOrBlank()) {
+                provider.addComment(
+                    repository = repository,
+                    pullRequestId = result.id,
+                    text = summaryComment.trim()
+                )
+            }
+            result
         }
     }
 
