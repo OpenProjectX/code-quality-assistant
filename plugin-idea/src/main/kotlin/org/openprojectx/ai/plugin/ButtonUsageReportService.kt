@@ -42,11 +42,14 @@ class ButtonUsageReportService(private val project: Project) {
     @Synchronized
     private fun save() {
         val root = readRootMap()
-        val projects = (root["projects"] as? Map<*, *>)
-            ?.mapKeys { it.key?.toString().orEmpty() }
-            ?.mapValues { (_, value) -> (value as? Map<*, *>)?.toMutableMap() ?: linkedMapOf<Any?, Any?>() }
-            ?.toMutableMap()
-            ?: linkedMapOf()
+        val projects = linkedMapOf<String, Any>()
+        (root["projects"] as? Map<*, *>)
+            ?.forEach { (key, value) ->
+                val name = key?.toString()?.trim().orEmpty()
+                if (name.isNotBlank() && value != null) {
+                    projects[name] = value
+                }
+            }
 
         projects[projectKey()] = linkedMapOf<String, Any>(
             "project" to (project.name.ifBlank { "unknown" }),
