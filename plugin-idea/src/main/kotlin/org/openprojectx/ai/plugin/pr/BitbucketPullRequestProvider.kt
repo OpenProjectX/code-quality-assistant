@@ -10,10 +10,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.util.Base64
 
 class BitbucketPullRequestProvider(
     private val http: HttpClient,
-    private val token: String
+    private val auth: PullRequestAuth
 ) : GitHostingProvider {
 
     override suspend fun createPullRequest(request: PullRequestRequest): PullRequestResult {
@@ -38,7 +39,7 @@ class BitbucketPullRequestProvider(
         )
 
         val response: CreateBitbucketPrResponse = http.post(apiUrl) {
-            header(HttpHeaders.Authorization, "Bearer $token")
+            applyAuthorizationHeader()
             contentType(ContentType.Application.Json)
             setBody(payload)
         }.body()
@@ -47,6 +48,33 @@ class BitbucketPullRequestProvider(
             url = response.links.self.firstOrNull()?.href.orEmpty(),
             id = response.id?.toString()
         )
+    }
+
+    override suspend fun addComment(repository: RepositoryRef, pullRequestId: String, text: String) {
+        val apiUrl =
+            "https://${repository.host}/rest/api/1.0/projects/${repository.projectKey}/repos/${repository.repoSlug}/pull-requests/$pullRequestId/comments"
+
+        http.post(apiUrl) {
+            applyAuthorizationHeader()
+            contentType(ContentType.Application.Json)
+            setBody(CreateBitbucketCommentRequest(text = text))
+        }.body<CreateBitbucketCommentResponse>()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.applyAuthorizationHeader() {
+        when {
+            !auth.username.isNullOrBlank() && !auth.password.isNullOrBlank() -> {
+                val raw = "${auth.username}:${auth.password}"
+                val basic = Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.UTF_8))
+                header(HttpHeaders.Authorization, "Basic $basic")
+            }
+            !auth.token.isNullOrBlank() -> {
+                header(HttpHeaders.Authorization, "Bearer ${auth.token}")
+            }
+            else -> {
+                error("Bitbucket authentication is required. Configure a token or ensure Git credentials are available for this repository.")
+            }
+        }
     }
 
     @Serializable
@@ -81,6 +109,16 @@ class BitbucketPullRequestProvider(
     data class CreateBitbucketPrResponse(
         val id: Long? = null,
         val links: Links
+    )
+
+    @Serializable
+    data class CreateBitbucketCommentRequest(
+        val text: String
+    )
+
+    @Serializable
+    data class CreateBitbucketCommentResponse(
+        val id: Long? = null
     )
 
     @Serializable

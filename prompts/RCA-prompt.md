@@ -1,6 +1,8 @@
 ---
 global: true
 category: analysis
+type: codeReview
+time: 2026-04-28T00:00:00Z
 name: rca
 ---
 

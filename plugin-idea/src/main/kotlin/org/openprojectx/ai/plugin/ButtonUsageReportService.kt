@@ -41,13 +41,27 @@ class ButtonUsageReportService(private val project: Project) {
 
     @Synchronized
     private fun save() {
-        val root = linkedMapOf<String, Any>(
+        val root = readRootMap()
+        val projects = linkedMapOf<String, Any>()
+        (root["projects"] as? Map<*, *>)
+            ?.forEach { (key, value) ->
+                val name = key?.toString()?.trim().orEmpty()
+                if (name.isNotBlank() && value != null) {
+                    projects[name] = value
+                }
+            }
+
+        projects[projectKey()] = linkedMapOf<String, Any>(
             "project" to (project.name.ifBlank { "unknown" }),
             "updatedAt" to Instant.now().toString(),
             "buttonUsageCounts" to counts,
             "promptFeatureUsageCounts" to promptFeatureCounts,
             "promptUsageCounts" to promptUsageCounts
         )
+
+        root["updatedAt"] = Instant.now().toString()
+        root["projects"] = projects
+
         val options = DumperOptions().apply {
             defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
             indent = 2
@@ -60,30 +74,50 @@ class ButtonUsageReportService(private val project: Project) {
     }
 
     private fun reportPath(): Path {
-        val base = project.basePath?.let { Path.of(it) } ?: Path.of(".")
-        return base.resolve(".ai-test-button-usage-report.yaml")
+        val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() }
+            ?: System.getenv("HOME")?.takeIf { it.isNotBlank() }
+            ?: "."
+        return Path.of(userHome).resolve(".ai-test-button-usage-report.yaml")
+    }
+
+    private fun projectKey(): String {
+        return project.basePath?.ifBlank { project.name } ?: project.name
+    }
+
+    private fun readRootMap(): MutableMap<String, Any> {
+        val path = reportPath()
+        if (!Files.exists(path)) return linkedMapOf()
+        val loaded = Yaml().load<Any?>(Files.readString(path)) as? Map<*, *> ?: return linkedMapOf()
+        val result = linkedMapOf<String, Any>()
+        loaded.forEach { (k, v) ->
+            val key = k?.toString()?.trim().orEmpty()
+            if (key.isNotBlank() && v != null) {
+                result[key] = v
+            }
+        }
+        return result
     }
 
     init {
         runCatching {
-            val path = reportPath()
-            if (!Files.exists(path)) return@runCatching
-            val root = Yaml().load<Any?>(Files.readString(path)) as? Map<*, *> ?: return@runCatching
-            val usage = root["buttonUsageCounts"] as? Map<*, *> ?: return@runCatching
+            val root = readRootMap()
+            val projects = root["projects"] as? Map<*, *> ?: return@runCatching
+            val current = projects[projectKey()] as? Map<*, *> ?: return@runCatching
+            val usage = current["buttonUsageCounts"] as? Map<*, *> ?: return@runCatching
             usage.forEach { (k, v) ->
                 val key = k?.toString()?.trim().orEmpty()
                 val value = v?.toString()?.toIntOrNull() ?: 0
                 if (key.isNotBlank()) counts[key] = value
             }
 
-            val promptFeatureUsage = root["promptFeatureUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            val promptFeatureUsage = current["promptFeatureUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
             promptFeatureUsage.forEach { (k, v) ->
                 val key = k?.toString()?.trim().orEmpty()
                 val value = v?.toString()?.toIntOrNull() ?: 0
                 if (key.isNotBlank()) promptFeatureCounts[key] = value
             }
 
-            val promptUsage = root["promptUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            val promptUsage = current["promptUsageCounts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
             promptUsage.forEach { (k, v) ->
                 val key = k?.toString()?.trim().orEmpty()
                 val value = v?.toString()?.toIntOrNull() ?: 0

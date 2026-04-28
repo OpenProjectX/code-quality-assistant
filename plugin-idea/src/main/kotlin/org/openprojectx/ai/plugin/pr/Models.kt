@@ -28,6 +28,7 @@ enum class GitHostingProviderType {
 
 interface GitHostingProvider {
     suspend fun createPullRequest(request: PullRequestRequest): PullRequestResult
+    suspend fun addComment(repository: RepositoryRef, pullRequestId: String, text: String) {}
 }
 
 data class PullRequestConfig(
@@ -40,4 +41,10 @@ data class PullRequestConfig(
 data class PullRequestUiOptions(
     val createAfterPush: Boolean,
     val targetBranch: String
+)
+
+data class PullRequestAuth(
+    val token: String? = null,
+    val username: String? = null,
+    val password: String? = null
 )

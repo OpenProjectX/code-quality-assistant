@@ -1,6 +1,8 @@
 ---
 global: true
 category: test
+type: test
+time: 2026-04-28T00:00:00Z
 name: junit
 ---
 

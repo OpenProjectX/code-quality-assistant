@@ -1,16 +1,21 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.options.SearchableConfigurable
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import org.openprojectx.ai.plugin.core.Framework
+import com.intellij.openapi.vfs.LocalFileSystem
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.File
 import javax.swing.BorderFactory
 import javax.swing.ButtonGroup
 import javax.swing.BoxLayout
@@ -34,6 +39,7 @@ class AiTestSettingsConfigurable(
 ) : SearchableConfigurable {
     private var rootPanel: JPanel? = null
     private var pathLabel: JLabel? = null
+    private var configPath: String = ""
 
     private lateinit var providerField: JComboBox<String>
     private lateinit var modelField: JTextField
@@ -42,6 +48,7 @@ class AiTestSettingsConfigurable(
     private lateinit var apiKeyField: JPasswordField
     private lateinit var apiKeyEnvField: JTextField
     private lateinit var httpDisableTlsVerification: JCheckBox
+    private lateinit var showLogTabCheckbox: JCheckBox
 
     private lateinit var llmTemplateEnabled: JCheckBox
     private lateinit var llmTemplateMethod: JComboBox<String>
@@ -61,14 +68,6 @@ class AiTestSettingsConfigurable(
     private lateinit var loginPanel: JPanel
     private lateinit var loginCardPanel: JPanel
 
-    private lateinit var defaultFrameworkField: JComboBox<Framework>
-    private lateinit var defaultClassNameField: JTextField
-    private lateinit var defaultBaseUrlField: JTextField
-    private lateinit var defaultNotesField: JTextArea
-    private lateinit var commonLocationField: JTextField
-    private lateinit var restAssuredLocationField: JTextField
-    private lateinit var restAssuredPackageNameField: JTextField
-    private lateinit var karateLocationField: JTextField
     private lateinit var generationPromptWrapperField: JTextArea
     private lateinit var generationPromptRestAssuredField: JTextArea
     private lateinit var generationPromptKarateField: JTextArea
@@ -127,6 +126,7 @@ class AiTestSettingsConfigurable(
         apiKeyField = JPasswordField()
         apiKeyEnvField = JTextField()
         httpDisableTlsVerification = JCheckBox("Disable TLS certificate verification (insecure, use only on trusted networks)")
+        showLogTabCheckbox = JCheckBox("Show Log tab in AI Context Box")
 
         llmTemplateEnabled = JCheckBox("Use template-based LLM request")
         llmTemplateMethod = methodCombo()
@@ -158,14 +158,6 @@ class AiTestSettingsConfigurable(
             title = "Login Request Template"
         )
 
-        defaultFrameworkField = JComboBox(Framework.entries.toTypedArray())
-        defaultClassNameField = JTextField()
-        defaultBaseUrlField = JTextField()
-        defaultNotesField = textArea(5)
-        commonLocationField = JTextField()
-        restAssuredLocationField = JTextField()
-        restAssuredPackageNameField = JTextField()
-        karateLocationField = JTextField()
         generationPromptWrapperField = textArea(10)
         generationPromptRestAssuredField = textArea(12)
         generationPromptKarateField = textArea(10)
@@ -198,7 +190,6 @@ class AiTestSettingsConfigurable(
             addTab("LLM", llmTab())
             addTab("Prompts", promptsTab())
             addTab("Login", loginTab())
-            addTab("Generation", generationTab())
         }
 
         val toolbar = JPanel(BorderLayout()).apply {
@@ -227,10 +218,39 @@ class AiTestSettingsConfigurable(
                         reset()
                     }
                 })
+                add(JButton("Import Repo Config").apply {
+                    addActionListener {
+                        usage.record("settings.toolbar.import_repo_config")
+                        runCatching {
+                            LlmSettingsLoader.importConfigFromRepo(project)
+                        }.onSuccess { sourcePath ->
+                            reset()
+                            Messages.showInfoMessage(
+                                project,
+                                "Imported config from: $sourcePath",
+                                "AI Test Generator"
+                            )
+                        }.onFailure { ex ->
+                            Messages.showErrorDialog(
+                                project,
+                                ex.message ?: ex.toString(),
+                                "AI Test Generator"
+                            )
+                        }
+                    }
+                })
             }, BorderLayout.EAST)
         }
 
-        pathLabel = JLabel()
+        pathLabel = JLabel().apply {
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Click to open config file"
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent?) {
+                    openConfigFileInEditor()
+                }
+            })
+        }
 
         rootPanel = JPanel(BorderLayout(0, 8)).apply {
             add(toolbar, BorderLayout.NORTH)
@@ -284,6 +304,9 @@ class AiTestSettingsConfigurable(
         add(formSection("HTTP", listOf(
             "" to httpDisableTlsVerification
         )))
+        add(formSection("UI", listOf(
+            "" to showLogTabCheckbox
+        )))
         add(sectionWithToggle(llmTemplateEnabled, llmTemplatePanel).also { llmTemplateCardPanel = it })
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -317,27 +340,6 @@ class AiTestSettingsConfigurable(
             "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                 add(updateBitbucketPromptsButton)
             }
-        )))
-    }).apply { border = BorderFactory.createEmptyBorder() }
-
-    private fun generationTab(): JComponent = JScrollPane(JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
-        add(formSection("Defaults", listOf(
-            "Framework" to defaultFrameworkField,
-            "Class name" to defaultClassNameField,
-            "Base URL" to defaultBaseUrlField,
-            "Notes" to JScrollPane(defaultNotesField)
-        )))
-        add(formSection("Common Output", listOf(
-            "Shared location" to commonLocationField
-        )))
-        add(formSection("Rest Assured", listOf(
-            "Location" to restAssuredLocationField,
-            "Package name" to restAssuredPackageNameField
-        )))
-        add(formSection("Karate", listOf(
-            "Location" to karateLocationField
         )))
     }).apply { border = BorderFactory.createEmptyBorder() }
 
@@ -686,6 +688,7 @@ class AiTestSettingsConfigurable(
         llmApiKey = String(apiKeyField.password).trim(),
         llmApiKeyEnv = apiKeyEnvField.text.trim(),
         httpDisableTlsVerification = httpDisableTlsVerification.isSelected,
+        showLogTab = showLogTabCheckbox.isSelected,
         llmTemplateEnabled = llmTemplateEnabled.isSelected,
         llmTemplateMethod = llmTemplateMethod.selectedItem?.toString().orEmpty(),
         llmTemplateUrl = llmTemplateUrl.text.trim(),
@@ -698,14 +701,6 @@ class AiTestSettingsConfigurable(
         loginHeaders = loginHeaders.text.trim(),
         loginBody = loginBody.text,
         loginResponsePath = loginResponsePath.text.trim(),
-        defaultFramework = defaultFrameworkField.selectedItem as? Framework ?: AiTestDefaults.DEFAULT_FRAMEWORK,
-        defaultClassName = defaultClassNameField.text.trim(),
-        defaultBaseUrl = defaultBaseUrlField.text.trim(),
-        defaultNotes = defaultNotesField.text,
-        commonLocation = commonLocationField.text.trim(),
-        restAssuredLocation = restAssuredLocationField.text.trim(),
-        restAssuredPackageName = restAssuredPackageNameField.text.trim(),
-        karateLocation = karateLocationField.text.trim(),
         generationPromptWrapper = generationPromptWrapperField.text,
         generationPromptRestAssured = generationPromptRestAssuredField.text,
         generationPromptKarate = generationPromptKarateField.text,
@@ -738,6 +733,7 @@ class AiTestSettingsConfigurable(
         apiKeyField.setText(state.llmApiKey)
         apiKeyEnvField.text = state.llmApiKeyEnv
         httpDisableTlsVerification.isSelected = state.httpDisableTlsVerification
+        showLogTabCheckbox.isSelected = state.showLogTab
 
         llmTemplateEnabled.isSelected = state.llmTemplateEnabled
         llmTemplateMethod.selectedItem = state.llmTemplateMethod
@@ -752,15 +748,6 @@ class AiTestSettingsConfigurable(
         loginHeaders.text = state.loginHeaders
         loginBody.text = state.loginBody
         loginResponsePath.text = state.loginResponsePath
-
-        defaultFrameworkField.selectedItem = state.defaultFramework
-        defaultClassNameField.text = state.defaultClassName
-        defaultBaseUrlField.text = state.defaultBaseUrl
-        defaultNotesField.text = state.defaultNotes
-        commonLocationField.text = state.commonLocation
-        restAssuredLocationField.text = state.restAssuredLocation
-        restAssuredPackageNameField.text = state.restAssuredPackageName
-        karateLocationField.text = state.karateLocation
         generationPromptWrapperField.text = state.generationPromptWrapper
         generationPromptRestAssuredField.text = state.generationPromptRestAssured
         generationPromptKarateField.text = state.generationPromptKarate
@@ -855,8 +842,19 @@ class AiTestSettingsConfigurable(
     }
 
     private fun updatePathLabel() {
-        if (project.basePath == null) return
-        pathLabel?.text = "Project config: ${LlmSettingsLoader.configFilePath(project)}"
+        configPath = LlmSettingsLoader.configFilePath(project)
+        pathLabel?.text = "<html>Config: <a href='open'>$configPath</a></html>"
+    }
+
+    private fun openConfigFileInEditor() {
+        if (configPath.isBlank()) return
+        val ioFile = File(configPath)
+        val vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+        if (vFile == null) {
+            Messages.showErrorDialog(project, "Cannot find config file: $configPath", "AI Test Generator")
+            return
+        }
+        FileEditorManager.getInstance(project).openFile(vFile, true)
     }
 
     private fun saveCurrentState(): Boolean {
