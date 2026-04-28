@@ -8,17 +8,12 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vcs.VcsDataKeys
-import com.intellij.ui.IconManager
 import org.openprojectx.ai.plugin.pr.AiPullRequestService
 import org.openprojectx.ai.plugin.pr.GitRepositoryContextService
 import org.openprojectx.ai.plugin.pr.PullRequestSettingsState
 import java.io.File
 
 class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
-
-    init {
-        templatePresentation.icon = IconManager.getInstance().getIcon("/icons/blue-bulb.svg", javaClass)
-    }
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible =
