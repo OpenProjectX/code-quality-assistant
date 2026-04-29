@@ -1,6 +1,7 @@
 package org.openprojectx.ai.plugin
 
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -677,7 +678,13 @@ object LlmSettingsLoader {
             entries += GlobalPromptMeta("commit", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
             entries += GlobalPromptMeta("branchDiff", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
         }
-        entries += fetchBitbucketGlobalPromptEntries(project, remoteRepoConfig)
+        val app = ApplicationManager.getApplication()
+        val shouldFetchRemote = app == null || !app.isDispatchThread
+        if (shouldFetchRemote) {
+            entries += fetchBitbucketGlobalPromptEntries(project, remoteRepoConfig)
+        } else {
+            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Skip remote prompt fetch on EDT to avoid slow operation violation.")
+        }
 
         return entries
             .groupBy { it.category }
