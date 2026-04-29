@@ -676,7 +676,7 @@ object LlmSettingsLoader {
             entries += GlobalPromptMeta("commit", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
             entries += GlobalPromptMeta("branchDiff", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
         }
-        entries += fetchBitbucketGlobalPromptEntries(remoteRepoConfig)
+        entries += fetchBitbucketGlobalPromptEntries(project, remoteRepoConfig)
 
         return entries
             .groupBy { it.category }
@@ -829,7 +829,7 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun fetchBitbucketGlobalPromptEntries(config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
+    private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
         if (config.repoUrl.isBlank()) return emptyList()
         return runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
