@@ -983,7 +983,15 @@ object LlmSettingsLoader {
             val basic = Base64.getEncoder().encodeToString(basicRaw.toByteArray(Charsets.UTF_8))
             conn.setRequestProperty("Authorization", "Basic $basic")
         }
-        return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val code = conn.responseCode
+        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            .orEmpty()
+        if (code !in 200..299) {
+            error("Bitbucket API request failed ($code) for $url. Response: ${body.ifBlank { "<empty>" }}")
+        }
+        return body
     }
 
     private fun Map<*, *>?.string(key: String): String =

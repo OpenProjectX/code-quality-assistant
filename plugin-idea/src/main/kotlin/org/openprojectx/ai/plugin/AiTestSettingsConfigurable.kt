@@ -233,7 +233,7 @@ class AiTestSettingsConfigurable(
                         }.onFailure { ex ->
                             Messages.showErrorDialog(
                                 project,
-                                ex.message ?: ex.toString(),
+                                detailedErrorMessage("Import repo config failed", ex),
                                 "AI Test Generator"
                             )
                         }
@@ -865,6 +865,14 @@ class AiTestSettingsConfigurable(
             Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
             false
         }
+    }
+
+    private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
+        val details = generateSequence(throwable) { it.cause }
+            .mapNotNull { it.message?.trim()?.takeIf { msg -> msg.isNotEmpty() } }
+            .distinct()
+            .joinToString(" | caused by: ")
+        return if (details.isBlank()) prefix else "$prefix: $details"
     }
 
     private fun methodCombo(): JComboBox<String> = JComboBox(arrayOf("POST", "GET", "PUT", "PATCH", "DELETE"))

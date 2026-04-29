@@ -70,7 +70,7 @@ class LlmAuthSessionService(
             loginNow()
             Messages.showInfoMessage(project, "LLM login succeeded.", "AI Test Generator")
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
+            Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "AI Test Generator")
         }
     }
 
@@ -158,5 +158,13 @@ class LlmAuthSessionService(
 
     companion object {
         fun getInstance(project: Project): LlmAuthSessionService = project.service()
+    }
+
+    private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
+        val details = generateSequence(throwable) { it.cause }
+            .mapNotNull { it.message?.trim()?.takeIf { msg -> msg.isNotEmpty() } }
+            .distinct()
+            .joinToString(" | caused by: ")
+        return if (details.isBlank()) prefix else "$prefix: $details"
     }
 }
