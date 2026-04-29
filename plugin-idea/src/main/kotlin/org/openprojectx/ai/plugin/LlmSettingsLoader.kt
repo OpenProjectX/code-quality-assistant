@@ -1025,7 +1025,7 @@ object LlmSettingsLoader {
     ): String {
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
         val encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8)
-        val url = "https://$host/$owner/$repo/raw/$encodedBranch/$encodedPath"
+        val url = "https://api.$host/repos/$owner/$repo/contents/$encodedPath?ref=$encodedBranch"
         return githubGet(url, token)
     }
 
@@ -1038,7 +1038,7 @@ object LlmSettingsLoader {
         if (normalized.isNotBlank()) {
             conn.setRequestProperty("Authorization", "Bearer $normalized")
         }
-        conn.setRequestProperty("Accept", "application/vnd.github.v3.raw")
+        conn.setRequestProperty("Accept", "application/vnd.github.raw+json")
         val code = conn.responseCode
         val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader(Charsets.UTF_8)
