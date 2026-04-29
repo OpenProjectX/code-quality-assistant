@@ -156,7 +156,7 @@ object LlmSettingsLoader {
                 username = model.bitbucketPromptRepoUsername,
                 password = model.bitbucketPromptRepoPassword
             )
-            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
+            RuntimeLogStore.append("INFO | Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteGlobalKeys = loadGlobalPrompts(project, remoteConfig)
                 .values
@@ -167,9 +167,9 @@ object LlmSettingsLoader {
             val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
             val addedPromptKeys = (remoteGlobalKeys - cachedGlobalKeys).sorted()
             if (addedPromptKeys.isNotEmpty()) {
-                RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Added prompts: ${addedPromptKeys.joinToString()}")
+                RuntimeLogStore.append("INFO | Prompt Repo | Added prompts: ${addedPromptKeys.joinToString()}")
             }
-            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Update check result remoteCount=${remoteGlobalKeys.size} cachedCount=${cachedGlobalKeys.size} hasUpdates=$hasUpdates")
+            RuntimeLogStore.append("INFO | Prompt Repo | Update check result remoteCount=${remoteGlobalKeys.size} cachedCount=${cachedGlobalKeys.size} hasUpdates=$hasUpdates")
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = remoteGlobalKeys.size,
@@ -186,7 +186,7 @@ object LlmSettingsLoader {
                 }
             )
         }.getOrElse { ex ->
-            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | Update check failed: ${ex.message ?: ex}")
+            RuntimeLogStore.append("ERROR | Prompt Repo | Update check failed: ${ex.message ?: ex}")
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = 0,
@@ -874,9 +874,17 @@ object LlmSettingsLoader {
         if (config.repoUrl.isBlank()) return emptyList()
         return runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
-            val filePaths = loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            val filePaths = when (repo.provider) {
+                GitHostingProviderType.BITBUCKET -> loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
+                else -> emptyList()
+            }
             filePaths.mapNotNull { path ->
-                val content = loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                val content = when (repo.provider) {
+                    GitHostingProviderType.BITBUCKET -> loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                    GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
+                    else -> return@mapNotNull null
+                }
                 parseGlobalPromptMeta(path, content)
             }
         }.getOrDefault(emptyList())
@@ -884,7 +892,11 @@ object LlmSettingsLoader {
 
     private fun validateBitbucketPromptRepoConnection(project: Project, config: BitbucketPromptRepoConfig) {
         val repo = GitRemoteParser.parse(config.repoUrl)
-        val filePaths = loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+        val filePaths = when (repo.provider) {
+            GitHostingProviderType.BITBUCKET -> loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
+            else -> emptyList()
+        }
 
         val firstLevelDirs = filePaths
             .map { it.replace('\\', '/').substringBefore('/') }
@@ -893,7 +905,7 @@ object LlmSettingsLoader {
             .sorted()
 
         RuntimeLogStore.append(
-            "INFO | Bitbucket Prompt Repo | Reachable repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${config.branch} firstLevelDirs=${if (firstLevelDirs.isEmpty()) "<none>" else firstLevelDirs.joinToString(",")}" 
+            "INFO | Prompt Repo | Reachable provider=${repo.provider} repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${config.branch} firstLevelDirs=${if (firstLevelDirs.isEmpty()) "<none>" else firstLevelDirs.joinToString(",")}" 
         )
     }
 
@@ -1111,6 +1123,25 @@ object LlmSettingsLoader {
             target.remove(key)
         } else {
             target[key] = value
+        }
+    }
+
+    private fun loadGitHubPromptFilePaths(
+        host: String,
+        owner: String,
+        repo: String,
+        branch: String,
+        token: String
+    ): List<String> {
+        val encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8)
+        val url = "https://api.$host/repos/$owner/$repo/git/trees/$encodedBranch?recursive=1"
+        val body = githubGet(url, token)
+        val tree = json.parseToJsonElement(body).jsonObject["tree"]?.jsonArray ?: return emptyList()
+        return tree.mapNotNull { node ->
+            val obj = node.jsonObject
+            val type = obj["type"]?.jsonPrimitive?.contentOrNull
+            val path = obj["path"]?.jsonPrimitive?.contentOrNull
+            if (type == "blob" && path != null && isPromptMarkdownPath(path)) path else null
         }
     }
 
