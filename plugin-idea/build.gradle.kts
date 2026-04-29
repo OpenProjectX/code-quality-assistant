@@ -60,19 +60,19 @@ tasks {
         finalizedBy(":fake-login-server:stopFakeLoginServer")
     }
 
-//    withType<JavaExec>().configureEach {
-//        if (name == "runIde") {
-//            doFirst("removeLegacyCoroutinesJavaagent") {
-//                val filteredArgs = allJvmArgs.filterNot {
-//                    it.contains("coroutines-javaagent-legacy.jar")
-//                }
-//                if (filteredArgs.size != allJvmArgs.size) {
-//                    logger.lifecycle("Removed incompatible coroutines-javaagent-legacy from runIde JVM args.")
-//                    allJvmArgs = filteredArgs
-//                }
-//            }
-//        }
-//    }
+    withType<JavaExec>().configureEach {
+        if (name == "runIde") {
+            doFirst("removeLegacyCoroutinesJavaagent") {
+                val filteredArgs = allJvmArgs.filterNot {
+                    it.contains("coroutines-javaagent-legacy.jar")
+                }
+                if (filteredArgs.size != allJvmArgs.size) {
+                    logger.lifecycle("Removed incompatible coroutines-javaagent-legacy from runIde JVM args.")
+                    allJvmArgs = filteredArgs
+                }
+            }
+        }
+    }
 }
 
 intellijPlatform {

@@ -31,6 +31,7 @@ import javax.swing.JTabbedPane
 import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.SwingConstants
+import org.openprojectx.ai.plugin.pr.GitRemoteParser
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 
@@ -187,9 +188,9 @@ class AiTestSettingsConfigurable(
         loginEnabled.addActionListener { toggleTemplateCards() }
 
         val tabs = JTabbedPane().apply {
+            addTab("Login", loginTab())
             addTab("LLM", llmTab())
             addTab("Prompts", promptsTab())
-            addTab("Login", loginTab())
         }
 
         val toolbar = JPanel(BorderLayout()).apply {
@@ -328,8 +329,6 @@ class AiTestSettingsConfigurable(
                 }
             }
         }
-        add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
-        add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
         add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
             "Provider" to JLabel("Bitbucket"),
             "Repo URL" to bitbucketPromptRepoUrlField,
@@ -341,6 +340,8 @@ class AiTestSettingsConfigurable(
                 add(updateBitbucketPromptsButton)
             }
         )))
+        add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
+        add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
     }.apply { border = BorderFactory.createEmptyBorder() }
 
     private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
@@ -793,11 +794,15 @@ class AiTestSettingsConfigurable(
         requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
         requirePromptProfiles("Code generate prompts YAML", state.codeGeneratePromptProfilesYaml)
         requirePromptProfiles("Code review prompts YAML", state.codeReviewPromptProfilesYaml)
-        if (state.bitbucketPromptRepoUrl.isNotBlank()
-            && state.bitbucketPromptRepoToken.isBlank()
-            && (state.bitbucketPromptRepoUsername.isBlank() || state.bitbucketPromptRepoPassword.isBlank())
-        ) {
-            throw IllegalArgumentException("Bitbucket prompt repo requires Token or Username + Password")
+        if (state.bitbucketPromptRepoUrl.isNotBlank()) {
+            val provider = runCatching { GitRemoteParser.parse(state.bitbucketPromptRepoUrl).provider.name }
+                .getOrElse { ex -> throw IllegalArgumentException("Prompt repo URL is invalid: ${ex.message ?: ex}") }
+            if (provider == "BITBUCKET"
+                && state.bitbucketPromptRepoToken.isBlank()
+                && (state.bitbucketPromptRepoUsername.isBlank() || state.bitbucketPromptRepoPassword.isBlank())
+            ) {
+                throw IllegalArgumentException("Bitbucket prompt repo requires Token or Username + Password")
+            }
         }
     }
 
