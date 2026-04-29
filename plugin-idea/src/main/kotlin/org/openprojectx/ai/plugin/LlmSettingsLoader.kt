@@ -82,50 +82,56 @@ object LlmSettingsLoader {
         val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
         if (remoteRepo.repoUrl.isBlank()) {
             val message = "Cannot import repo config: prompts.remoteRepo.url is not configured."
-            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $message")
+            RuntimeLogStore.append("ERROR | Prompt Repo Import | $message")
             error(message)
         }
 
         val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
-        if (repo.provider != GitHostingProviderType.BITBUCKET) {
-            val message = "Cannot import repo config: prompts.remoteRepo.url must be a Bitbucket repository URL, but was ${repo.provider}."
-            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $message")
-            error(message)
-        }
         val candidatePaths = listOf("config/ai-test.yaml", "config/ai-test.yml", ".ai-test.yaml", ".ai-test.yml")
         RuntimeLogStore.append(
-            "INFO | Bitbucket Prompt Repo | Import start repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
+            "INFO | Prompt Repo Import | Start provider=${repo.provider} repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
         )
 
         var lastError: Throwable? = null
         for (configPath in candidatePaths) {
             val sourceText = runCatching {
-                loadBitbucketPromptRaw(
-                    project = project,
-                    host = repo.host,
-                    projectKey = repo.projectKey,
-                    repoSlug = repo.repoSlug,
-                    path = configPath,
-                    branch = remoteRepo.branch,
-                    config = remoteRepo
-                )
+                when (repo.provider) {
+                    GitHostingProviderType.BITBUCKET -> loadBitbucketPromptRaw(
+                        project = project,
+                        host = repo.host,
+                        projectKey = repo.projectKey,
+                        repoSlug = repo.repoSlug,
+                        path = configPath,
+                        branch = remoteRepo.branch,
+                        config = remoteRepo
+                    )
+                    GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(
+                        host = repo.host,
+                        owner = repo.projectKey,
+                        repo = repo.repoSlug,
+                        path = configPath,
+                        branch = remoteRepo.branch,
+                        token = remoteRepo.token
+                    )
+                    else -> error("Unsupported prompt repo provider: ${repo.provider}. Only Bitbucket and GitHub are supported.")
+                }
             }.onFailure { ex ->
                 lastError = ex
-                RuntimeLogStore.append("WARN | Bitbucket Prompt Repo | Import miss path=$configPath reason=${ex.message ?: ex}")
+                RuntimeLogStore.append("WARN | Prompt Repo Import | Miss provider=${repo.provider} path=$configPath reason=${ex.message ?: ex}")
             }.getOrNull()
 
             if (sourceText != null) {
                 val target = findOrCreateConfigFile()
                 target.writeText(sourceText, Charsets.UTF_8)
-                RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Import success path=$configPath target=${target.absolutePath}")
+                RuntimeLogStore.append("INFO | Prompt Repo Import | Success provider=${repo.provider} path=$configPath target=${target.absolutePath}")
                 return "${remoteRepo.repoUrl}@$configPath"
             }
         }
 
-        val baseMessage = "Cannot import repo config from Bitbucket. Tried: ${candidatePaths.joinToString(", ")}"
+        val baseMessage = "Cannot import repo config. Provider=${repo.provider}. Tried: ${candidatePaths.joinToString(", ")}"
         val detail = lastError?.message?.takeIf { it.isNotBlank() }
         val finalMessage = if (detail != null) "$baseMessage. Last error: $detail" else baseMessage
-        RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $finalMessage")
+        RuntimeLogStore.append("ERROR | Prompt Repo Import | $finalMessage")
         error(finalMessage)
     }
 
@@ -995,6 +1001,41 @@ object LlmSettingsLoader {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
         return bitbucketGet(project, url, config)
+    }
+
+    private fun loadGitHubPromptRaw(
+        host: String,
+        owner: String,
+        repo: String,
+        path: String,
+        branch: String,
+        token: String
+    ): String {
+        val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
+        val encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8)
+        val url = "https://$host/$owner/$repo/raw/$encodedBranch/$encodedPath"
+        return githubGet(url, token)
+    }
+
+    private fun githubGet(url: String, token: String): String {
+        val conn = URI(url).toURL().openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 60_000
+        conn.readTimeout = 60_000
+        val normalized = token.trim()
+        if (normalized.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "Bearer $normalized")
+        }
+        conn.setRequestProperty("Accept", "application/vnd.github.v3.raw")
+        val code = conn.responseCode
+        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            .orEmpty()
+        if (code !in 200..299) {
+            error("GitHub request failed ($code) for $url. Response: ${body.ifBlank { "<empty>" }}")
+        }
+        return body
     }
 
     private fun bitbucketGet(project: Project, url: String, config: BitbucketPromptRepoConfig): String {
