@@ -28,6 +28,7 @@ object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
     private val userHome: String = System.getProperty("user.home")
+    private val appHomeDirName = ".codeimprover"
     private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
     private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
     private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
@@ -283,7 +284,7 @@ object LlmSettingsLoader {
 
     fun loadConfig(project: Project): AiTestConfig {
         val configFile = findConfigFile()
-            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} at $userHome.")
+            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} under ${configHomeDir().absolutePath}.")
 
         val text = configFile.readText(Charsets.UTF_8)
         val yaml = Yaml()
@@ -437,6 +438,11 @@ object LlmSettingsLoader {
     }
 
     private fun findConfigFile(): File? {
+        val appHome = configHomeDir()
+        for (name in configNames) {
+            val f = File(appHome, name)
+            if (f.exists() && f.isFile) return f
+        }
         for (name in configNames) {
             val f = File(userHome, name)
             if (f.exists() && f.isFile) return f
@@ -446,14 +452,29 @@ object LlmSettingsLoader {
 
     private fun findOrCreateConfigFile(): File {
         val existing = findConfigFile()
-        if (existing != null) return existing
+        val targetDir = configHomeDir()
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+        if (existing != null) {
+            val target = File(targetDir, ".ai-test.yaml")
+            if (existing.absolutePath != target.absolutePath) {
+                if (!target.exists()) {
+                    target.writeText(existing.readText(Charsets.UTF_8), Charsets.UTF_8)
+                }
+                return target
+            }
+            return existing
+        }
 
-        val file = File(userHome, ".ai-test.yaml")
+        val file = File(targetDir, ".ai-test.yaml")
         if (!file.exists()) {
             file.writeText(defaultConfigTemplate(), Charsets.UTF_8)
         }
         return file
     }
+
+    private fun configHomeDir(): File = File(userHome, appHomeDirName)
 
     private fun defaultConfigTemplate(): String = """
         llm:
