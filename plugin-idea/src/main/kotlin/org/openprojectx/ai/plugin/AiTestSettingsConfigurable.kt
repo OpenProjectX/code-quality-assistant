@@ -288,7 +288,7 @@ class AiTestSettingsConfigurable(
         pathLabel = null
     }
 
-    private fun llmTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun llmTab(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(formSection("Provider", listOf(
@@ -308,9 +308,9 @@ class AiTestSettingsConfigurable(
             "" to showLogTabCheckbox
         )))
         add(sectionWithToggle(llmTemplateEnabled, llmTemplatePanel).also { llmTemplateCardPanel = it })
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    }.apply { border = BorderFactory.createEmptyBorder() }
 
-    private fun loginTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun loginTab(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         val usage = ButtonUsageReportService.getInstance(project)
@@ -341,9 +341,9 @@ class AiTestSettingsConfigurable(
                 add(updateBitbucketPromptsButton)
             }
         )))
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    }.apply { border = BorderFactory.createEmptyBorder() }
 
-    private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun promptsTab(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
@@ -360,7 +360,7 @@ class AiTestSettingsConfigurable(
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
         add(unifiedPromptManagerSection())
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    }.apply { border = BorderFactory.createEmptyBorder() }
 
     private fun unifiedPromptManagerSection(): JComponent {
         val clearButton = JButton("New / Clear")
