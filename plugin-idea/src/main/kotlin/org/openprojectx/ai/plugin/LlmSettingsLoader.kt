@@ -122,6 +122,7 @@ object LlmSettingsLoader {
                 username = model.bitbucketPromptRepoUsername,
                 password = model.bitbucketPromptRepoPassword
             )
+            validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteGlobalKeys = loadGlobalPrompts(project, remoteConfig)
                 .values
                 .flatMap { it.keys }
@@ -149,6 +150,7 @@ object LlmSettingsLoader {
                 }
             )
         }.getOrElse { ex ->
+            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | Update check failed: ${ex.message ?: ex}")
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = 0,
@@ -627,8 +629,7 @@ object LlmSettingsLoader {
             "url" to model.bitbucketPromptRepoUrl,
             "branch" to model.bitbucketPromptRepoBranch,
             "token" to model.bitbucketPromptRepoToken,
-            "username" to model.bitbucketPromptRepoUsername,
-            "password" to model.bitbucketPromptRepoPassword
+            "username" to model.bitbucketPromptRepoUsername
         )
         return prompts
     }
@@ -840,6 +841,22 @@ object LlmSettingsLoader {
             }
         }.getOrDefault(emptyList())
     }
+
+    private fun validateBitbucketPromptRepoConnection(project: Project, config: BitbucketPromptRepoConfig) {
+        val repo = GitRemoteParser.parse(config.repoUrl)
+        val filePaths = loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+
+        val firstLevelDirs = filePaths
+            .map { it.replace('\\', '/').substringBefore('/') }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+
+        RuntimeLogStore.append(
+            "INFO | Bitbucket Prompt Repo | Reachable repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${config.branch} firstLevelDirs=${if (firstLevelDirs.isEmpty()) "<none>" else firstLevelDirs.joinToString(",")}" 
+        )
+    }
+
 
     private fun parseGlobalPromptMeta(path: String, content: String): GlobalPromptMeta? {
         if (!isPromptMarkdownPath(path)) return null
