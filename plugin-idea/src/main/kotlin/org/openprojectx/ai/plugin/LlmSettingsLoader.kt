@@ -74,7 +74,13 @@ object LlmSettingsLoader {
         findOrCreateConfigFile().absolutePath
 
     fun importConfigFromRepo(project: Project): String {
-        val basePath = project.basePath ?: error("Project base path is unavailable")
+        val root = readRootMap(project)
+        val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
+        if (remoteRepo.repoUrl.isBlank()) {
+            error("Cannot import repo config: prompts.remoteRepo.url is not configured.")
+        }
+        val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
         val candidates = listOf(
             "config/ai-test.yaml",
             "config/ai-test.yml",
@@ -83,14 +89,22 @@ object LlmSettingsLoader {
             "config/al-test.yaml",
             "config/al-test.yml"
         )
-        val source = candidates
-            .map { File(basePath, it) }
-            .firstOrNull { it.exists() && it.isFile }
-            ?: error("Cannot find repo config. Expected one of: ${candidates.joinToString()} under $basePath")
-
+        val resolved = candidates.firstNotNullOfOrNull { path ->
+            runCatching {
+                path to loadBitbucketPromptRaw(
+                    project = project,
+                    host = repo.host,
+                    projectKey = repo.projectKey,
+                    repoSlug = repo.repoSlug,
+                    path = path,
+                    branch = remoteRepo.branch,
+                    config = remoteRepo
+                )
+            }.getOrNull()
+        } ?: error("Cannot find repo config in Bitbucket. Tried: ${candidates.joinToString()}")
         val target = findOrCreateConfigFile()
-        target.writeText(source.readText(Charsets.UTF_8), Charsets.UTF_8)
-        return source.absolutePath
+        target.writeText(resolved.second, Charsets.UTF_8)
+        return "${remoteRepo.repoUrl}@${resolved.first}"
     }
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
