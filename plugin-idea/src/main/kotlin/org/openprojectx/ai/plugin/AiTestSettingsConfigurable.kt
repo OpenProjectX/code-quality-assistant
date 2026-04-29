@@ -343,7 +343,7 @@ class AiTestSettingsConfigurable(
         )))
     }.apply { border = BorderFactory.createEmptyBorder() }
 
-    private fun promptsTab(): JComponent = JPanel().apply {
+    private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
@@ -360,7 +360,7 @@ class AiTestSettingsConfigurable(
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
         add(unifiedPromptManagerSection())
-    }.apply { border = BorderFactory.createEmptyBorder() }
+    }).apply { border = BorderFactory.createEmptyBorder() }
 
     private fun unifiedPromptManagerSection(): JComponent {
         val clearButton = JButton("New / Clear")
