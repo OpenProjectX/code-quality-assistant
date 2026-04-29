@@ -70,7 +70,7 @@ abstract class StartFakeLoginServerTask : DefaultTask() {
 }
 
 abstract class StopFakeLoginServerTask : DefaultTask() {
-    @get:InputFile
+    @get:Input
     @get:Optional
     abstract val pidFile: RegularFileProperty
 
