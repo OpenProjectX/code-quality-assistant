@@ -86,6 +86,11 @@ object LlmSettingsLoader {
         }
 
         val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
+        if (repo.provider != GitHostingProviderType.BITBUCKET) {
+            val message = "Cannot import repo config: prompts.remoteRepo.url must be a Bitbucket repository URL, but was ${repo.provider}."
+            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $message")
+            error(message)
+        }
         val candidatePaths = listOf("config/ai-test.yaml", "config/ai-test.yml", ".ai-test.yaml", ".ai-test.yml")
         RuntimeLogStore.append(
             "INFO | Bitbucket Prompt Repo | Import start repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
@@ -705,8 +710,6 @@ object LlmSettingsLoader {
         val shouldFetchRemote = app == null || !app.isDispatchThread
         if (shouldFetchRemote) {
             entries += fetchBitbucketGlobalPromptEntries(project, remoteRepoConfig)
-        } else {
-            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Skip remote prompt fetch on EDT to avoid slow operation violation.")
         }
 
         return entries
