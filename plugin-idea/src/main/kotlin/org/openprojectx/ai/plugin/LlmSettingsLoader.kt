@@ -158,10 +158,9 @@ object LlmSettingsLoader {
             )
             RuntimeLogStore.append("INFO | Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
-            val remoteGlobalKeys = loadGlobalPrompts(project, remoteConfig)
-                .values
-                .flatMap { it.keys }
-                .filter { it.startsWith("global/") }
+            val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
+            val remoteGlobalKeys = remoteEntries
+                .map { "global/${it.name} [${it.updatedAt}]" }
                 .toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
             val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
@@ -182,7 +181,12 @@ object LlmSettingsLoader {
                         "New prompt updates are available."
                     }
                 } else {
-                    "Prompt cache is up to date."
+                    if (remoteEntries.isEmpty()) {
+                        "Prompt repo is reachable, but no prompt markdown files were found under prompt(s)/ directories."
+                    } else {
+                        val latestUpdatedAt = remoteEntries.maxOfOrNull { it.updatedAt }
+                        "Prompt cache is up to date. Latest remote update: ${latestUpdatedAt ?: Instant.EPOCH}"
+                    }
                 }
             )
         }.getOrElse { ex ->
@@ -870,9 +874,9 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
+    private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {
         if (config.repoUrl.isBlank()) return emptyList()
-        return runCatching {
+        val result = runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
             val filePaths = when (repo.provider) {
                 GitHostingProviderType.BITBUCKET -> loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
@@ -887,7 +891,9 @@ object LlmSettingsLoader {
                 }
                 parseGlobalPromptMeta(path, content)
             }
-        }.getOrDefault(emptyList())
+        }
+        if (strict) return result.getOrThrow()
+        return result.getOrDefault(emptyList())
     }
 
     private fun validateBitbucketPromptRepoConnection(project: Project, config: BitbucketPromptRepoConfig) {
