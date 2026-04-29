@@ -223,7 +223,7 @@ object LlmSettingsLoader {
             llmApiKey = llm.string("apiKey"),
             llmApiKeyEnv = llm.string("apiKeyEnv"),
             httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: false,
-            showLogTab = ui["showLogTab"] as? Boolean ?: false,
+            showLogTab = ui["showLogTab"] as? Boolean ?: true,
             llmTemplateEnabled = template != null,
             llmTemplateMethod = template.string("method").ifBlank { "POST" },
             llmTemplateUrl = template.string("url"),

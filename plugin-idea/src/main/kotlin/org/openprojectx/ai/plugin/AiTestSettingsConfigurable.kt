@@ -126,7 +126,7 @@ class AiTestSettingsConfigurable(
         apiKeyField = JPasswordField()
         apiKeyEnvField = JTextField()
         httpDisableTlsVerification = JCheckBox("Disable TLS certificate verification (insecure, use only on trusted networks)")
-        showLogTabCheckbox = JCheckBox("Show Log tab in AI Context Box")
+        showLogTabCheckbox = JCheckBox("Hide Log tab in AI Context Box")
 
         llmTemplateEnabled = JCheckBox("Use template-based LLM request")
         llmTemplateMethod = methodCombo()
@@ -688,7 +688,7 @@ class AiTestSettingsConfigurable(
         llmApiKey = String(apiKeyField.password).trim(),
         llmApiKeyEnv = apiKeyEnvField.text.trim(),
         httpDisableTlsVerification = httpDisableTlsVerification.isSelected,
-        showLogTab = showLogTabCheckbox.isSelected,
+        showLogTab = !showLogTabCheckbox.isSelected,
         llmTemplateEnabled = llmTemplateEnabled.isSelected,
         llmTemplateMethod = llmTemplateMethod.selectedItem?.toString().orEmpty(),
         llmTemplateUrl = llmTemplateUrl.text.trim(),
@@ -733,7 +733,7 @@ class AiTestSettingsConfigurable(
         apiKeyField.setText(state.llmApiKey)
         apiKeyEnvField.text = state.llmApiKeyEnv
         httpDisableTlsVerification.isSelected = state.httpDisableTlsVerification
-        showLogTabCheckbox.isSelected = state.showLogTab
+        showLogTabCheckbox.isSelected = !state.showLogTab
 
         llmTemplateEnabled.isSelected = state.llmTemplateEnabled
         llmTemplateMethod.selectedItem = state.llmTemplateMethod

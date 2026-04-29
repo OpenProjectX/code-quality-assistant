@@ -8,7 +8,7 @@ data class AiTestSettingsModel(
     val llmApiKey: String = "",
     val llmApiKeyEnv: String = "",
     val httpDisableTlsVerification: Boolean = false,
-    val showLogTab: Boolean = false,
+    val showLogTab: Boolean = true,
     val llmTemplateEnabled: Boolean = false,
     val llmTemplateMethod: String = "POST",
     val llmTemplateUrl: String = "",
