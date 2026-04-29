@@ -86,7 +86,7 @@ object LlmSettingsLoader {
         }
 
         val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
-        val candidatePaths = listOf(".ai-test.yaml", ".ai-test.yml")
+        val candidatePaths = listOf("config/ai-test.yaml", "config/ai-test.yml", ".ai-test.yaml", ".ai-test.yml")
         RuntimeLogStore.append(
             "INFO | Bitbucket Prompt Repo | Import start repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
         )
