@@ -121,13 +121,21 @@ object LlmSettingsLoader {
                 .toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
             val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
+            val addedPromptKeys = (remoteGlobalKeys - cachedGlobalKeys).sorted()
+            if (addedPromptKeys.isNotEmpty()) {
+                RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Added prompts: ${addedPromptKeys.joinToString()}")
+            }
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = remoteGlobalKeys.size,
                 cachedCount = cachedGlobalKeys.size,
                 hasUpdates = hasUpdates,
                 message = if (hasUpdates) {
-                    "New prompt updates are available."
+                    if (addedPromptKeys.isNotEmpty()) {
+                        "New prompt updates are available. Added: ${addedPromptKeys.joinToString()}"
+                    } else {
+                        "New prompt updates are available."
+                    }
                 } else {
                     "Prompt cache is up to date."
                 }
