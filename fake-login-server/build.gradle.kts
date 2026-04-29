@@ -9,6 +9,7 @@ import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.register
+import java.io.File
 import java.net.BindException
 import java.net.ServerSocket
 import java.util.concurrent.TimeUnit
@@ -50,8 +51,8 @@ abstract class StartFakeLoginServerTask : DefaultTask() {
             return
         }
 
-        val javaExec = java.io.File(System.getProperty("java.home"), "bin/java").absolutePath
-        val classpath = (runtimeClasspath.files + setOf(serverJar.get().asFile)).joinToString(java.io.File.pathSeparator) { it.absolutePath }
+        val javaExec = File(System.getProperty("java.home"), "bin/java").absolutePath
+        val classpath = (runtimeClasspath.files + setOf(serverJar.get().asFile)).joinToString(File.pathSeparator) { it.absolutePath }
         val forwardedProps = buildList {
             val value = apiKeyValue.orNull
             if (!value.isNullOrBlank()) add("-D${apiKeyPropertyName.get()}=$value")
