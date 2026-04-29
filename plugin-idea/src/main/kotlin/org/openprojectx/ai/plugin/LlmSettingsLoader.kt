@@ -81,30 +81,23 @@ object LlmSettingsLoader {
             error("Cannot import repo config: prompts.remoteRepo.url is not configured.")
         }
         val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
-        val candidates = listOf(
-            "config/ai-test.yaml",
-            "config/ai-test.yml",
-            "config/ai-text.yaml",
-            "config/ai-text.yml",
-            "config/al-test.yaml",
-            "config/al-test.yml"
-        )
-        val resolved = candidates.firstNotNullOfOrNull { path ->
-            runCatching {
-                path to loadBitbucketPromptRaw(
-                    project = project,
-                    host = repo.host,
-                    projectKey = repo.projectKey,
-                    repoSlug = repo.repoSlug,
-                    path = path,
-                    branch = remoteRepo.branch,
-                    config = remoteRepo
-                )
-            }.getOrNull()
-        } ?: error("Cannot find repo config in Bitbucket. Tried: ${candidates.joinToString()}")
+        val configPath = ".ai-test.yaml"
+        val sourceText = runCatching {
+            loadBitbucketPromptRaw(
+                project = project,
+                host = repo.host,
+                projectKey = repo.projectKey,
+                repoSlug = repo.repoSlug,
+                path = configPath,
+                branch = remoteRepo.branch,
+                config = remoteRepo
+            )
+        }.getOrElse {
+            error("Cannot find repo config in Bitbucket. Expected file: $configPath")
+        }
         val target = findOrCreateConfigFile()
-        target.writeText(resolved.second, Charsets.UTF_8)
-        return "${remoteRepo.repoUrl}@${resolved.first}"
+        target.writeText(sourceText, Charsets.UTF_8)
+        return "${remoteRepo.repoUrl}@$configPath"
     }
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {

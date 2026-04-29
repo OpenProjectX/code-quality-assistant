@@ -1,5 +1,5 @@
 # Template for repository config import.
-# Put this file at: config/ai-test.yaml (recommended)
+# Put this file at: .ai-test.yaml (required for Import Repo Config)
 # The settings screen can import it via: "Import Repo Config".
 
 llm:
