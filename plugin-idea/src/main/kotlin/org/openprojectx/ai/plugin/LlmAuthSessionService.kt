@@ -74,6 +74,22 @@ class LlmAuthSessionService(
         }
     }
 
+    fun loadSavedLoginCredentialsForCurrentSettings(): LoginCredentials? {
+        val settings = LlmSettingsLoader.load(project)
+        return loadSavedCredentials(settings)?.let {
+            LoginCredentials(
+                username = it.userName.orEmpty(),
+                password = it.getPasswordAsString().orEmpty(),
+                remember = true
+            )
+        }?.takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
+    }
+
+    fun promptLoginCredentialsForCurrentSettings(): LoginCredentials {
+        val settings = LlmSettingsLoader.load(project)
+        return promptCredentials(settings)
+    }
+
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
         val baseSettings = LlmSettingsLoader.load(project)
         val resolved = resolve(baseSettings)

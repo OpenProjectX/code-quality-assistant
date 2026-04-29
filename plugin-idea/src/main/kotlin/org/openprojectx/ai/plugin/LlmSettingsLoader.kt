@@ -805,9 +805,9 @@ object LlmSettingsLoader {
         if (config.repoUrl.isBlank()) return emptyList()
         return runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
-            val filePaths = loadBitbucketPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            val filePaths = loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
             filePaths.mapNotNull { path ->
-                val content = loadBitbucketPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                val content = loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
                 parseGlobalPromptMeta(path, content)
             }
         }.getOrDefault(emptyList())
@@ -888,6 +888,7 @@ object LlmSettingsLoader {
     }
 
     private fun loadBitbucketPromptFilePaths(
+        project: Project,
         host: String,
         projectKey: String,
         repoSlug: String,
@@ -896,13 +897,14 @@ object LlmSettingsLoader {
     ): List<String> {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
-        val body = bitbucketGet(url, config)
+        val body = bitbucketGet(project, url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
         return values.mapNotNull { it.jsonPrimitive.contentOrNull }
             .filter { isPromptMarkdownPath(it) }
     }
 
     private fun loadBitbucketPromptRaw(
+        project: Project,
         host: String,
         projectKey: String,
         repoSlug: String,
@@ -913,15 +915,33 @@ object LlmSettingsLoader {
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
-        return bitbucketGet(url, config)
+        return bitbucketGet(project, url, config)
     }
 
-    private fun bitbucketGet(url: String, config: BitbucketPromptRepoConfig): String {
+    private fun bitbucketGet(project: Project, url: String, config: BitbucketPromptRepoConfig): String {
+        val llmAuthService = LlmAuthSessionService.getInstance(project)
+        val savedLoginCredentials = llmAuthService.loadSavedLoginCredentialsForCurrentSettings()
+        val credentialPairs = mutableListOf<Pair<String, String>>()
+        if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            credentialPairs += config.username to config.password
+        }
+        if (savedLoginCredentials != null) {
+            credentialPairs += savedLoginCredentials.username to savedLoginCredentials.password
+        }
+        return runCatching {
+            bitbucketGetWithCredentials(url, config.token, credentialPairs)
+        }.getOrElse {
+            val prompted = llmAuthService.promptLoginCredentialsForCurrentSettings()
+            bitbucketGetWithCredentials(url, config.token, listOf(prompted.username to prompted.password))
+        }
+    }
+
+    private fun bitbucketGetWithCredentials(url: String, token: String, credentialPairs: List<Pair<String, String>>): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 20_000
-        val normalized = config.token.trim()
+        conn.connectTimeout = 60_000
+        conn.readTimeout = 60_000
+        val normalized = token.trim()
         if (normalized.isNotBlank()) {
             if (normalized.contains(":")) {
                 val basic = Base64.getEncoder().encodeToString(normalized.toByteArray(Charsets.UTF_8))
@@ -929,8 +949,9 @@ object LlmSettingsLoader {
             } else {
                 conn.setRequestProperty("Authorization", "Bearer $normalized")
             }
-        } else if (config.username.isNotBlank() && config.password.isNotBlank()) {
-            val basicRaw = "${config.username}:${config.password}"
+        } else if (credentialPairs.isNotEmpty()) {
+            val (username, password) = credentialPairs.first()
+            val basicRaw = "$username:$password"
             val basic = Base64.getEncoder().encodeToString(basicRaw.toByteArray(Charsets.UTF_8))
             conn.setRequestProperty("Authorization", "Basic $basic")
         }
