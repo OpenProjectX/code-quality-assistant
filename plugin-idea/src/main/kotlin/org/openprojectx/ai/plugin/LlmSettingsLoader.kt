@@ -28,6 +28,7 @@ object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
     private val userHome: String = System.getProperty("user.home")
+    private val appHomeDirName = ".codeimprover"
     private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
     private const val GLOBAL_KARATE_PROFILE = "[ADA] karate"
     private const val GLOBAL_DIFF_REVIEW_PROFILE = "[ADA] get diff review"
@@ -74,23 +75,30 @@ object LlmSettingsLoader {
         findOrCreateConfigFile().absolutePath
 
     fun importConfigFromRepo(project: Project): String {
-        val basePath = project.basePath ?: error("Project base path is unavailable")
-        val candidates = listOf(
-            "config/ai-test.yaml",
-            "config/ai-test.yml",
-            "config/ai-text.yaml",
-            "config/ai-text.yml",
-            "config/al-test.yaml",
-            "config/al-test.yml"
-        )
-        val source = candidates
-            .map { File(basePath, it) }
-            .firstOrNull { it.exists() && it.isFile }
-            ?: error("Cannot find repo config. Expected one of: ${candidates.joinToString()} under $basePath")
-
+        val root = readRootMap(project)
+        val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
+        if (remoteRepo.repoUrl.isBlank()) {
+            error("Cannot import repo config: prompts.remoteRepo.url is not configured.")
+        }
+        val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
+        val configPath = ".ai-test.yaml"
+        val sourceText = runCatching {
+            loadBitbucketPromptRaw(
+                project = project,
+                host = repo.host,
+                projectKey = repo.projectKey,
+                repoSlug = repo.repoSlug,
+                path = configPath,
+                branch = remoteRepo.branch,
+                config = remoteRepo
+            )
+        }.getOrElse {
+            error("Cannot find repo config in Bitbucket. Expected file: $configPath")
+        }
         val target = findOrCreateConfigFile()
-        target.writeText(source.readText(Charsets.UTF_8), Charsets.UTF_8)
-        return source.absolutePath
+        target.writeText(sourceText, Charsets.UTF_8)
+        return "${remoteRepo.repoUrl}@$configPath"
     }
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
@@ -121,13 +129,21 @@ object LlmSettingsLoader {
                 .toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
             val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
+            val addedPromptKeys = (remoteGlobalKeys - cachedGlobalKeys).sorted()
+            if (addedPromptKeys.isNotEmpty()) {
+                RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Added prompts: ${addedPromptKeys.joinToString()}")
+            }
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = remoteGlobalKeys.size,
                 cachedCount = cachedGlobalKeys.size,
                 hasUpdates = hasUpdates,
                 message = if (hasUpdates) {
-                    "New prompt updates are available."
+                    if (addedPromptKeys.isNotEmpty()) {
+                        "New prompt updates are available. Added: ${addedPromptKeys.joinToString()}"
+                    } else {
+                        "New prompt updates are available."
+                    }
                 } else {
                     "Prompt cache is up to date."
                 }
@@ -268,7 +284,7 @@ object LlmSettingsLoader {
 
     fun loadConfig(project: Project): AiTestConfig {
         val configFile = findConfigFile()
-            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} at $userHome.")
+            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} under ${configHomeDir().absolutePath}.")
 
         val text = configFile.readText(Charsets.UTF_8)
         val yaml = Yaml()
@@ -422,6 +438,11 @@ object LlmSettingsLoader {
     }
 
     private fun findConfigFile(): File? {
+        val appHome = configHomeDir()
+        for (name in configNames) {
+            val f = File(appHome, name)
+            if (f.exists() && f.isFile) return f
+        }
         for (name in configNames) {
             val f = File(userHome, name)
             if (f.exists() && f.isFile) return f
@@ -431,14 +452,29 @@ object LlmSettingsLoader {
 
     private fun findOrCreateConfigFile(): File {
         val existing = findConfigFile()
-        if (existing != null) return existing
+        val targetDir = configHomeDir()
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+        if (existing != null) {
+            val target = File(targetDir, ".ai-test.yaml")
+            if (existing.absolutePath != target.absolutePath) {
+                if (!target.exists()) {
+                    target.writeText(existing.readText(Charsets.UTF_8), Charsets.UTF_8)
+                }
+                return target
+            }
+            return existing
+        }
 
-        val file = File(userHome, ".ai-test.yaml")
+        val file = File(targetDir, ".ai-test.yaml")
         if (!file.exists()) {
             file.writeText(defaultConfigTemplate(), Charsets.UTF_8)
         }
         return file
     }
+
+    private fun configHomeDir(): File = File(userHome, appHomeDirName)
 
     private fun defaultConfigTemplate(): String = """
         llm:
@@ -640,7 +676,7 @@ object LlmSettingsLoader {
             entries += GlobalPromptMeta("commit", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
             entries += GlobalPromptMeta("branchDiff", GLOBAL_DIFF_REVIEW_PROFILE, Instant.EPOCH, it, sourcePriority = 1)
         }
-        entries += fetchBitbucketGlobalPromptEntries(remoteRepoConfig)
+        entries += fetchBitbucketGlobalPromptEntries(project, remoteRepoConfig)
 
         return entries
             .groupBy { it.category }
@@ -793,13 +829,13 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun fetchBitbucketGlobalPromptEntries(config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
+    private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig): List<GlobalPromptMeta> {
         if (config.repoUrl.isBlank()) return emptyList()
         return runCatching {
             val repo = GitRemoteParser.parse(config.repoUrl)
-            val filePaths = loadBitbucketPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            val filePaths = loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
             filePaths.mapNotNull { path ->
-                val content = loadBitbucketPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                val content = loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
                 parseGlobalPromptMeta(path, content)
             }
         }.getOrDefault(emptyList())
@@ -880,6 +916,7 @@ object LlmSettingsLoader {
     }
 
     private fun loadBitbucketPromptFilePaths(
+        project: Project,
         host: String,
         projectKey: String,
         repoSlug: String,
@@ -888,13 +925,14 @@ object LlmSettingsLoader {
     ): List<String> {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
-        val body = bitbucketGet(url, config)
+        val body = bitbucketGet(project, url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
         return values.mapNotNull { it.jsonPrimitive.contentOrNull }
             .filter { isPromptMarkdownPath(it) }
     }
 
     private fun loadBitbucketPromptRaw(
+        project: Project,
         host: String,
         projectKey: String,
         repoSlug: String,
@@ -905,15 +943,33 @@ object LlmSettingsLoader {
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
-        return bitbucketGet(url, config)
+        return bitbucketGet(project, url, config)
     }
 
-    private fun bitbucketGet(url: String, config: BitbucketPromptRepoConfig): String {
+    private fun bitbucketGet(project: Project, url: String, config: BitbucketPromptRepoConfig): String {
+        val llmAuthService = LlmAuthSessionService.getInstance(project)
+        val savedLoginCredentials = llmAuthService.loadSavedLoginCredentialsForCurrentSettings()
+        val credentialPairs = mutableListOf<Pair<String, String>>()
+        if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            credentialPairs += config.username to config.password
+        }
+        if (savedLoginCredentials != null) {
+            credentialPairs += savedLoginCredentials.username to savedLoginCredentials.password
+        }
+        return runCatching {
+            bitbucketGetWithCredentials(url, config.token, credentialPairs)
+        }.getOrElse {
+            val prompted = llmAuthService.promptLoginCredentialsForCurrentSettings()
+            bitbucketGetWithCredentials(url, config.token, listOf(prompted.username to prompted.password))
+        }
+    }
+
+    private fun bitbucketGetWithCredentials(url: String, token: String, credentialPairs: List<Pair<String, String>>): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 20_000
-        val normalized = config.token.trim()
+        conn.connectTimeout = 60_000
+        conn.readTimeout = 60_000
+        val normalized = token.trim()
         if (normalized.isNotBlank()) {
             if (normalized.contains(":")) {
                 val basic = Base64.getEncoder().encodeToString(normalized.toByteArray(Charsets.UTF_8))
@@ -921,12 +977,21 @@ object LlmSettingsLoader {
             } else {
                 conn.setRequestProperty("Authorization", "Bearer $normalized")
             }
-        } else if (config.username.isNotBlank() && config.password.isNotBlank()) {
-            val basicRaw = "${config.username}:${config.password}"
+        } else if (credentialPairs.isNotEmpty()) {
+            val (username, password) = credentialPairs.first()
+            val basicRaw = "$username:$password"
             val basic = Base64.getEncoder().encodeToString(basicRaw.toByteArray(Charsets.UTF_8))
             conn.setRequestProperty("Authorization", "Basic $basic")
         }
-        return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val code = conn.responseCode
+        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            .orEmpty()
+        if (code !in 200..299) {
+            error("Bitbucket API request failed ($code) for $url. Response: ${body.ifBlank { "<empty>" }}")
+        }
+        return body
     }
 
     private fun Map<*, *>?.string(key: String): String =

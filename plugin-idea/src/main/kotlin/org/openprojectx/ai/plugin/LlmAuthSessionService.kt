@@ -70,8 +70,24 @@ class LlmAuthSessionService(
             loginNow()
             Messages.showInfoMessage(project, "LLM login succeeded.", "AI Test Generator")
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
+            Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "AI Test Generator")
         }
+    }
+
+    fun loadSavedLoginCredentialsForCurrentSettings(): LoginCredentials? {
+        val settings = LlmSettingsLoader.load(project)
+        return loadSavedCredentials(settings)?.let {
+            LoginCredentials(
+                username = it.userName.orEmpty(),
+                password = it.getPasswordAsString().orEmpty(),
+                remember = true
+            )
+        }?.takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
+    }
+
+    fun promptLoginCredentialsForCurrentSettings(): LoginCredentials {
+        val settings = LlmSettingsLoader.load(project)
+        return promptCredentials(settings)
     }
 
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
@@ -142,5 +158,13 @@ class LlmAuthSessionService(
 
     companion object {
         fun getInstance(project: Project): LlmAuthSessionService = project.service()
+    }
+
+    private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
+        val details = generateSequence(throwable) { it.cause }
+            .mapNotNull { it.message?.trim()?.takeIf { msg -> msg.isNotEmpty() } }
+            .distinct()
+            .joinToString(" | caused by: ")
+        return if (details.isBlank()) prefix else "$prefix: $details"
     }
 }

@@ -233,7 +233,7 @@ class AiTestSettingsConfigurable(
                         }.onFailure { ex ->
                             Messages.showErrorDialog(
                                 project,
-                                ex.message ?: ex.toString(),
+                                detailedErrorMessage("Import repo config failed", ex),
                                 "AI Test Generator"
                             )
                         }
@@ -288,7 +288,7 @@ class AiTestSettingsConfigurable(
         pathLabel = null
     }
 
-    private fun llmTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun llmTab(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(formSection("Provider", listOf(
@@ -308,9 +308,9 @@ class AiTestSettingsConfigurable(
             "" to showLogTabCheckbox
         )))
         add(sectionWithToggle(llmTemplateEnabled, llmTemplatePanel).also { llmTemplateCardPanel = it })
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    }.apply { border = BorderFactory.createEmptyBorder() }
 
-    private fun loginTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun loginTab(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         val usage = ButtonUsageReportService.getInstance(project)
@@ -341,7 +341,7 @@ class AiTestSettingsConfigurable(
                 add(updateBitbucketPromptsButton)
             }
         )))
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    }.apply { border = BorderFactory.createEmptyBorder() }
 
     private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -865,6 +865,14 @@ class AiTestSettingsConfigurable(
             Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
             false
         }
+    }
+
+    private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
+        val details = generateSequence(throwable) { it.cause }
+            .mapNotNull { it.message?.trim()?.takeIf { msg -> msg.isNotEmpty() } }
+            .distinct()
+            .joinToString(" | caused by: ")
+        return if (details.isBlank()) prefix else "$prefix: $details"
     }
 
     private fun methodCombo(): JComboBox<String> = JComboBox(arrayOf("POST", "GET", "PUT", "PATCH", "DELETE"))
