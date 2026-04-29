@@ -80,26 +80,47 @@ object LlmSettingsLoader {
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
         if (remoteRepo.repoUrl.isBlank()) {
-            error("Cannot import repo config: prompts.remoteRepo.url is not configured.")
+            val message = "Cannot import repo config: prompts.remoteRepo.url is not configured."
+            RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $message")
+            error(message)
         }
+
         val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
-        val configPath = ".ai-test.yaml"
-        val sourceText = runCatching {
-            loadBitbucketPromptRaw(
-                project = project,
-                host = repo.host,
-                projectKey = repo.projectKey,
-                repoSlug = repo.repoSlug,
-                path = configPath,
-                branch = remoteRepo.branch,
-                config = remoteRepo
-            )
-        }.getOrElse {
-            error("Cannot find repo config in Bitbucket. Expected file: $configPath")
+        val candidatePaths = listOf(".ai-test.yaml", ".ai-test.yml")
+        RuntimeLogStore.append(
+            "INFO | Bitbucket Prompt Repo | Import start repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
+        )
+
+        var lastError: Throwable? = null
+        for (configPath in candidatePaths) {
+            val sourceText = runCatching {
+                loadBitbucketPromptRaw(
+                    project = project,
+                    host = repo.host,
+                    projectKey = repo.projectKey,
+                    repoSlug = repo.repoSlug,
+                    path = configPath,
+                    branch = remoteRepo.branch,
+                    config = remoteRepo
+                )
+            }.onFailure { ex ->
+                lastError = ex
+                RuntimeLogStore.append("WARN | Bitbucket Prompt Repo | Import miss path=$configPath reason=${ex.message ?: ex}")
+            }.getOrNull()
+
+            if (sourceText != null) {
+                val target = findOrCreateConfigFile()
+                target.writeText(sourceText, Charsets.UTF_8)
+                RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Import success path=$configPath target=${target.absolutePath}")
+                return "${remoteRepo.repoUrl}@$configPath"
+            }
         }
-        val target = findOrCreateConfigFile()
-        target.writeText(sourceText, Charsets.UTF_8)
-        return "${remoteRepo.repoUrl}@$configPath"
+
+        val baseMessage = "Cannot import repo config from Bitbucket. Tried: ${candidatePaths.joinToString(", ")}"
+        val detail = lastError?.message?.takeIf { it.isNotBlank() }
+        val finalMessage = if (detail != null) "$baseMessage. Last error: $detail" else baseMessage
+        RuntimeLogStore.append("ERROR | Bitbucket Prompt Repo | $finalMessage")
+        error(finalMessage)
     }
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
@@ -123,6 +144,7 @@ object LlmSettingsLoader {
                 username = model.bitbucketPromptRepoUsername,
                 password = model.bitbucketPromptRepoPassword
             )
+            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteGlobalKeys = loadGlobalPrompts(project, remoteConfig)
                 .values
@@ -135,6 +157,7 @@ object LlmSettingsLoader {
             if (addedPromptKeys.isNotEmpty()) {
                 RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Added prompts: ${addedPromptKeys.joinToString()}")
             }
+            RuntimeLogStore.append("INFO | Bitbucket Prompt Repo | Update check result remoteCount=${remoteGlobalKeys.size} cachedCount=${cachedGlobalKeys.size} hasUpdates=$hasUpdates")
             PromptUpdateStatus(
                 configured = true,
                 remoteCount = remoteGlobalKeys.size,
