@@ -351,7 +351,7 @@ class AiTestSettingsConfigurable(
             "Username" to bitbucketPromptRepoUsernameField,
             "Password / App Password" to bitbucketPromptRepoPasswordField,
             "Token / PAT (optional)" to bitbucketPromptRepoTokenField,
-            "Hardcoded Raw Path (Check Only)" to bitbucketHardcodedPathField,
+            "Hardcoded Config URL (Import Only)" to bitbucketHardcodedPathField,
             "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                 add(updateBitbucketPromptsButton)
                 add(checkHardcodedPathButton)
@@ -740,7 +740,8 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoBranch = bitbucketPromptRepoBranchField.text.trim(),
         bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim(),
         bitbucketPromptRepoUsername = bitbucketPromptRepoUsernameField.text.trim(),
-        bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim()
+        bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim(),
+        bitbucketConfigImportPath = bitbucketHardcodedPathField.text.trim()
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -787,6 +788,7 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoTokenField.text = state.bitbucketPromptRepoToken
         bitbucketPromptRepoUsernameField.text = state.bitbucketPromptRepoUsername
         bitbucketPromptRepoPasswordField.text = state.bitbucketPromptRepoPassword
+        bitbucketHardcodedPathField.text = state.bitbucketConfigImportPath
 
         refreshPromptManager()
         toggleTemplateCards()

@@ -43,7 +43,8 @@ object LlmSettingsLoader {
         val branch: String,
         val token: String,
         val username: String,
-        val password: String
+        val password: String,
+        val configImportPath: String = ""
     )
 
     private data class GlobalPromptMeta(
@@ -88,6 +89,14 @@ object LlmSettingsLoader {
         }
 
         val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(remoteRepo.repoUrl)
+        if (remoteRepo.configImportPath.isNotBlank()) {
+            val sourceText = bitbucketGet(project, remoteRepo.configImportPath, remoteRepo)
+            val target = findOrCreateConfigFile()
+            target.writeText(sourceText, Charsets.UTF_8)
+            RuntimeLogStore.append("INFO | Prompt Repo Import | Success provider=BITBUCKET path=${remoteRepo.configImportPath} target=${target.absolutePath}")
+            return "${remoteRepo.repoUrl}@${remoteRepo.configImportPath}"
+        }
+
         val repo = directBitbucketRawBaseUrl?.let {
             RepositoryRef(
                 provider = GitHostingProviderType.BITBUCKET,
@@ -167,7 +176,8 @@ object LlmSettingsLoader {
                 branch = model.bitbucketPromptRepoBranch,
                 token = model.bitbucketPromptRepoToken,
                 username = model.bitbucketPromptRepoUsername,
-                password = model.bitbucketPromptRepoPassword
+                password = model.bitbucketPromptRepoPassword,
+                configImportPath = model.bitbucketConfigImportPath
             )
             RuntimeLogStore.append("INFO | Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
@@ -230,7 +240,8 @@ object LlmSettingsLoader {
             branch = model.bitbucketPromptRepoBranch,
             token = model.bitbucketPromptRepoToken,
             username = model.bitbucketPromptRepoUsername,
-            password = model.bitbucketPromptRepoPassword
+            password = model.bitbucketPromptRepoPassword,
+            configImportPath = model.bitbucketConfigImportPath
         )
         val body = bitbucketGet(project, target, config)
         return body.take(500)
@@ -340,7 +351,8 @@ object LlmSettingsLoader {
             bitbucketPromptRepoBranch = remoteRepo.string("branch").ifBlank { "main" },
             bitbucketPromptRepoToken = remoteRepo.string("token"),
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
-            bitbucketPromptRepoPassword = remoteRepo.string("password")
+            bitbucketPromptRepoPassword = remoteRepo.string("password"),
+            bitbucketConfigImportPath = remoteRepo.string("configImportPath")
         )
     }
 
@@ -698,7 +710,8 @@ object LlmSettingsLoader {
             "url" to model.bitbucketPromptRepoUrl,
             "branch" to model.bitbucketPromptRepoBranch,
             "token" to model.bitbucketPromptRepoToken,
-            "username" to model.bitbucketPromptRepoUsername
+            "username" to model.bitbucketPromptRepoUsername,
+            "configImportPath" to model.bitbucketConfigImportPath
         )
         return prompts
     }
@@ -899,7 +912,8 @@ object LlmSettingsLoader {
             branch = map.string("branch").ifBlank { "main" },
             token = map.string("token"),
             username = map.string("username"),
-            password = map.string("password")
+            password = map.string("password"),
+            configImportPath = map.string("configImportPath")
         )
     }
 
