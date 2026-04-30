@@ -12,7 +12,7 @@ object GitRemoteParser {
 
     private fun parseBitbucket(remoteUrl: String): RepositoryRef? {
         val ssh = Regex("""git@([^:]+):([^/]+)/(.+?)(\.git)?$""")
-        val httpsScm = Regex("""https?://([^/]+)/scm/([^/]+)/(.+?)(\.git)?$""", RegexOption.IGNORE_CASE)
+        val httpsScm = Regex("""https?://(.+?)/scm/([^/]+)/(.+?)(\.git)?$""", RegexOption.IGNORE_CASE)
         val httpsPlain = Regex("""https?://([^/]+)/([^/]+)/(.+?)(\.git)?$""", RegexOption.IGNORE_CASE)
 
         ssh.matchEntire(remoteUrl)?.let { m ->

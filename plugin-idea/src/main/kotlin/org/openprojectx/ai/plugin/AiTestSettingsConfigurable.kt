@@ -90,6 +90,7 @@ class AiTestSettingsConfigurable(
     private lateinit var bitbucketPromptRepoUsernameField: JTextField
     private lateinit var bitbucketPromptRepoPasswordField: JPasswordField
     private lateinit var bitbucketPromptRepoTokenField: JPasswordField
+    private lateinit var bitbucketHardcodedPathField: JTextField
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -180,6 +181,7 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoUsernameField = JTextField()
         bitbucketPromptRepoPasswordField = JPasswordField()
         bitbucketPromptRepoTokenField = JPasswordField()
+        bitbucketHardcodedPathField = JTextField()
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -329,6 +331,19 @@ class AiTestSettingsConfigurable(
                 }
             }
         }
+        val checkHardcodedPathButton = JButton("Check Hardcoded Path").apply {
+            addActionListener {
+                usage.record("settings.bitbucket_prompt_repo.check_hardcoded_path")
+                if (!saveCurrentState()) return@addActionListener
+                runCatching {
+                    LlmSettingsLoader.checkBitbucketHardcodedPath(project, bitbucketHardcodedPathField.text)
+                }.onSuccess {
+                    Notifications.info(project, "Bitbucket Prompt Repo", "Hardcoded path check succeeded.")
+                }.onFailure { ex ->
+                    Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
+                }
+            }
+        }
         add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
             "Provider" to JLabel("Bitbucket"),
             "Repo URL" to bitbucketPromptRepoUrlField,
@@ -336,8 +351,10 @@ class AiTestSettingsConfigurable(
             "Username" to bitbucketPromptRepoUsernameField,
             "Password / App Password" to bitbucketPromptRepoPasswordField,
             "Token / PAT (optional)" to bitbucketPromptRepoTokenField,
+            "Hardcoded Config URL (Import Only)" to bitbucketHardcodedPathField,
             "Action" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                 add(updateBitbucketPromptsButton)
+                add(checkHardcodedPathButton)
             }
         )))
         add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
@@ -723,7 +740,8 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoBranch = bitbucketPromptRepoBranchField.text.trim(),
         bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim(),
         bitbucketPromptRepoUsername = bitbucketPromptRepoUsernameField.text.trim(),
-        bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim()
+        bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim(),
+        bitbucketConfigImportPath = bitbucketHardcodedPathField.text.trim()
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -770,6 +788,7 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoTokenField.text = state.bitbucketPromptRepoToken
         bitbucketPromptRepoUsernameField.text = state.bitbucketPromptRepoUsername
         bitbucketPromptRepoPasswordField.text = state.bitbucketPromptRepoPassword
+        bitbucketHardcodedPathField.text = state.bitbucketConfigImportPath
 
         refreshPromptManager()
         toggleTemplateCards()

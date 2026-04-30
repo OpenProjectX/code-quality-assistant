@@ -43,7 +43,6 @@
                 text="Push and Create PR"
                 description="Push current branch and create a pull request with AI summary comment">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
-            <add-to-group group-id="CheckinActionsToolbar" anchor="last"/>
         </action>
         <group
                 id="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
@@ -51,9 +50,6 @@
                 text="Analyze Branch Diff (Choose Prompt)"
                 description="Choose a configured prompt to analyze branch diff">
             <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Vcs.Log.Branches.ContextMenu" anchor="last"/>
-            <add-to-group group-id="Git.Branches.Popup" anchor="after" relative-to-action="Git.Checkout"/>
-            <add-to-group group-id="Git.Branches" anchor="after" relative-to-action="Git.Checkout"/>
         </group>
         <action
                 id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogInternalToolbarAction"

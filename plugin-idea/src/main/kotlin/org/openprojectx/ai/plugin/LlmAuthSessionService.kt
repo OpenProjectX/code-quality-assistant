@@ -93,12 +93,16 @@ class LlmAuthSessionService(
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
         val baseSettings = LlmSettingsLoader.load(project)
         val resolved = resolve(baseSettings)
+        val loginAlreadyAttempted = baseSettings.auth != null && baseSettings.apiKey.isNullOrBlank()
 
         return try {
             block(resolved)
         } catch (_: LlmUnauthorizedException) {
             if (baseSettings.auth == null) {
                 throw LlmUnauthorizedException("Unauthorized LLM request and no login template is configured")
+            }
+            if (loginAlreadyAttempted) {
+                throw LlmUnauthorizedException("Unauthorized LLM request after login attempt; please verify login endpoint/credentials")
             }
             val refreshed = relogin(baseSettings)
             block(refreshed)
@@ -108,7 +112,7 @@ class LlmAuthSessionService(
     private fun promptCredentials(settings: LlmSettings): LoginCredentials {
         lateinit var credentials: LoginCredentials
         val saved = loadSavedCredentials(settings)
-        ApplicationManager.getApplication().invokeAndWait {
+        val showDialog = {
             val dialog = LlmLoginDialog(
                 project = project,
                 initialUsername = saved?.userName.orEmpty(),
@@ -131,6 +135,13 @@ class LlmAuthSessionService(
             } else {
                 clearSavedCredentials(settings)
             }
+        }
+
+        val app = ApplicationManager.getApplication()
+        if (app.isDispatchThread) {
+            showDialog()
+        } else {
+            app.invokeAndWait(showDialog)
         }
         return credentials
     }

@@ -42,5 +42,6 @@ data class AiTestSettingsModel(
     val bitbucketPromptRepoBranch: String = "main",
     val bitbucketPromptRepoToken: String = "",
     val bitbucketPromptRepoUsername: String = "",
-    val bitbucketPromptRepoPassword: String = ""
+    val bitbucketPromptRepoPassword: String = "",
+    val bitbucketConfigImportPath: String = ""
 )

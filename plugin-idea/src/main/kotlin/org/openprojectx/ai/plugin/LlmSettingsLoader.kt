@@ -12,6 +12,7 @@ import org.openprojectx.ai.plugin.core.Framework
 import org.openprojectx.ai.plugin.core.GenerationPromptTemplate
 import org.openprojectx.ai.plugin.pr.GitHostingProviderType
 import org.openprojectx.ai.plugin.pr.GitRemoteParser
+import org.openprojectx.ai.plugin.pr.RepositoryRef
 import org.openprojectx.ai.plugin.llm.LlmAuthConfig
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.TemplateRequestConfig
@@ -42,7 +43,8 @@ object LlmSettingsLoader {
         val branch: String,
         val token: String,
         val username: String,
-        val password: String
+        val password: String,
+        val configImportPath: String = ""
     )
 
     private data class GlobalPromptMeta(
@@ -86,8 +88,24 @@ object LlmSettingsLoader {
             error(message)
         }
 
-        val repo = GitRemoteParser.parse(remoteRepo.repoUrl)
-        val candidatePaths = listOf("config/ai-test.yaml", "config/ai-test.yml", ".ai-test.yaml", ".ai-test.yml")
+        val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(remoteRepo.repoUrl)
+        if (remoteRepo.configImportPath.isNotBlank()) {
+            val sourceText = bitbucketGet(project, remoteRepo.configImportPath, remoteRepo)
+            val target = findOrCreateConfigFile()
+            target.writeText(sourceText, Charsets.UTF_8)
+            RuntimeLogStore.append("INFO | Prompt Repo Import | Success provider=BITBUCKET path=${remoteRepo.configImportPath} target=${target.absolutePath}")
+            return "${remoteRepo.repoUrl}@${remoteRepo.configImportPath}"
+        }
+
+        val repo = directBitbucketRawBaseUrl?.let {
+            RepositoryRef(
+                provider = GitHostingProviderType.BITBUCKET,
+                host = "<direct-raw-base>",
+                projectKey = "<direct-raw-base>",
+                repoSlug = "<direct-raw-base>"
+            )
+        } ?: GitRemoteParser.parse(remoteRepo.repoUrl)
+        val candidatePaths = listOf("config/.ai-test.yaml")
         RuntimeLogStore.append(
             "INFO | Prompt Repo Import | Start provider=${repo.provider} repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
         )
@@ -96,15 +114,19 @@ object LlmSettingsLoader {
         for (configPath in candidatePaths) {
             val sourceText = runCatching {
                 when (repo.provider) {
-                    GitHostingProviderType.BITBUCKET -> loadBitbucketPromptRaw(
-                        project = project,
-                        host = repo.host,
-                        projectKey = repo.projectKey,
-                        repoSlug = repo.repoSlug,
-                        path = configPath,
-                        branch = remoteRepo.branch,
-                        config = remoteRepo
-                    )
+                    GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                        loadBitbucketPromptRawFromBaseUrl(project, directBitbucketRawBaseUrl, configPath, remoteRepo.branch, remoteRepo)
+                    } else {
+                        loadBitbucketPromptRaw(
+                            project = project,
+                            host = repo.host,
+                            projectKey = repo.projectKey,
+                            repoSlug = repo.repoSlug,
+                            path = configPath,
+                            branch = remoteRepo.branch,
+                            config = remoteRepo
+                        )
+                    }
                     GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(
                         host = repo.host,
                         owner = repo.projectKey,
@@ -154,7 +176,8 @@ object LlmSettingsLoader {
                 branch = model.bitbucketPromptRepoBranch,
                 token = model.bitbucketPromptRepoToken,
                 username = model.bitbucketPromptRepoUsername,
-                password = model.bitbucketPromptRepoPassword
+                password = model.bitbucketPromptRepoPassword,
+                configImportPath = model.bitbucketConfigImportPath
             )
             RuntimeLogStore.append("INFO | Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
@@ -205,6 +228,23 @@ object LlmSettingsLoader {
         val latest = loadSettingsModel(project)
         saveSettingsModel(project, latest)
         return checkBitbucketPromptUpdates(project)
+    }
+
+    fun checkBitbucketHardcodedPath(project: Project, rawUrl: String): String {
+        val target = rawUrl.trim()
+        if (target.isBlank()) error("Hardcoded Bitbucket path is empty.")
+        val model = loadSettingsModel(project)
+        val config = BitbucketPromptRepoConfig(
+            enabled = model.bitbucketPromptRepoEnabled,
+            repoUrl = model.bitbucketPromptRepoUrl,
+            branch = model.bitbucketPromptRepoBranch,
+            token = model.bitbucketPromptRepoToken,
+            username = model.bitbucketPromptRepoUsername,
+            password = model.bitbucketPromptRepoPassword,
+            configImportPath = model.bitbucketConfigImportPath
+        )
+        val body = bitbucketGet(project, target, config)
+        return body.take(500)
     }
 
     fun loadSettingsModel(project: Project): AiTestSettingsModel {
@@ -311,7 +351,8 @@ object LlmSettingsLoader {
             bitbucketPromptRepoBranch = remoteRepo.string("branch").ifBlank { "main" },
             bitbucketPromptRepoToken = remoteRepo.string("token"),
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
-            bitbucketPromptRepoPassword = remoteRepo.string("password")
+            bitbucketPromptRepoPassword = remoteRepo.string("password"),
+            bitbucketConfigImportPath = remoteRepo.string("configImportPath")
         )
     }
 
@@ -669,7 +710,8 @@ object LlmSettingsLoader {
             "url" to model.bitbucketPromptRepoUrl,
             "branch" to model.bitbucketPromptRepoBranch,
             "token" to model.bitbucketPromptRepoToken,
-            "username" to model.bitbucketPromptRepoUsername
+            "username" to model.bitbucketPromptRepoUsername,
+            "configImportPath" to model.bitbucketConfigImportPath
         )
         return prompts
     }
@@ -870,22 +912,39 @@ object LlmSettingsLoader {
             branch = map.string("branch").ifBlank { "main" },
             token = map.string("token"),
             username = map.string("username"),
-            password = map.string("password")
+            password = map.string("password"),
+            configImportPath = map.string("configImportPath")
         )
     }
 
     private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {
         if (config.repoUrl.isBlank()) return emptyList()
         val result = runCatching {
-            val repo = GitRemoteParser.parse(config.repoUrl)
+            val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(config.repoUrl)
+            val repo = directBitbucketRawBaseUrl?.let {
+                RepositoryRef(
+                    provider = GitHostingProviderType.BITBUCKET,
+                    host = "<direct-raw-base>",
+                    projectKey = "<direct-raw-base>",
+                    repoSlug = "<direct-raw-base>"
+                )
+            } ?: GitRemoteParser.parse(config.repoUrl)
             val filePaths = when (repo.provider) {
-                GitHostingProviderType.BITBUCKET -> loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                    loadBitbucketPromptFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
+                } else {
+                    loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                }
                 GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
                 else -> emptyList()
             }
             filePaths.mapNotNull { path ->
                 val content = when (repo.provider) {
-                    GitHostingProviderType.BITBUCKET -> loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                    GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                        loadBitbucketPromptRawFromBaseUrl(project, directBitbucketRawBaseUrl, path, config.branch, config)
+                    } else {
+                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                    }
                     GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
                     else -> return@mapNotNull null
                 }
@@ -897,9 +956,21 @@ object LlmSettingsLoader {
     }
 
     private fun validateBitbucketPromptRepoConnection(project: Project, config: BitbucketPromptRepoConfig) {
-        val repo = GitRemoteParser.parse(config.repoUrl)
+        val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(config.repoUrl)
+        val repo = directBitbucketRawBaseUrl?.let {
+            RepositoryRef(
+                provider = GitHostingProviderType.BITBUCKET,
+                host = "<direct-raw-base>",
+                projectKey = "<direct-raw-base>",
+                repoSlug = "<direct-raw-base>"
+            )
+        } ?: GitRemoteParser.parse(config.repoUrl)
         val filePaths = when (repo.provider) {
-            GitHostingProviderType.BITBUCKET -> loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                loadBitbucketPromptFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
+            } else {
+                loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+            }
             GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
             else -> emptyList()
         }
@@ -1019,6 +1090,40 @@ object LlmSettingsLoader {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
         val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
         return bitbucketGet(project, url, config)
+    }
+
+    private fun loadBitbucketPromptRawFromBaseUrl(
+        project: Project,
+        rawBaseUrl: String,
+        path: String,
+        branch: String,
+        config: BitbucketPromptRepoConfig
+    ): String {
+        val normalizedBase = rawBaseUrl.trimEnd('/')
+        val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "$normalizedBase/$encodedPath?at=$encodedBranch"
+        return bitbucketGet(project, url, config)
+    }
+
+    private fun loadBitbucketPromptFilePathsFromRawBaseUrl(
+        project: Project,
+        rawBaseUrl: String,
+        branch: String,
+        config: BitbucketPromptRepoConfig
+    ): List<String> {
+        val normalizedBase = rawBaseUrl.trimEnd('/')
+        val filesBase = normalizedBase.replace(Regex("/raw/?$"), "/files")
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "$filesBase?at=$encodedBranch&limit=1000"
+        val body = bitbucketGet(project, url, config)
+        val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
+        return values.mapNotNull { it.jsonPrimitive.contentOrNull }
+            .filter { isPromptMarkdownPath(it) }
+    }
+
+    private fun parseDirectBitbucketRawBaseUrl(repoUrl: String): String? {
+        return null
     }
 
     private fun loadGitHubPromptRaw(
