@@ -404,7 +404,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             Notifications.info(
                 project,
                 "Prompt Manager",
-                "Prompt pull completed. Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
             )
         }
 

@@ -2,17 +2,19 @@ package org.openprojectx.ai.plugin
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
 object HttpClients {
-    fun shared(disableTlsVerification: Boolean = false): HttpClient {
+    fun shared(disableTlsVerification: Boolean = false, timeoutSeconds: Long = 60): HttpClient {
         return HttpClient(OkHttp) {
             engine {
                 config {
@@ -28,6 +30,10 @@ object HttpClients {
                         isLenient = true
                     }
                 )
+            }
+            install(HttpTimeout) {
+                connectTimeoutMillis = TimeUnit.SECONDS.toMillis(timeoutSeconds)
+                socketTimeoutMillis = TimeUnit.SECONDS.toMillis(timeoutSeconds)
             }
         }
     }
