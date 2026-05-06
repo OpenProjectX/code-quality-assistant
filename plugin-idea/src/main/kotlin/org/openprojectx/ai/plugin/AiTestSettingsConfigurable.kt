@@ -210,7 +210,7 @@ class AiTestSettingsConfigurable(
                 add(JButton("Login Now").apply {
                     addActionListener {
                         usage.record("settings.toolbar.login_now")
-                        if (saveCurrentState()) {
+                        if (saveLlmStateForLoginNow()) {
                             LlmAuthSessionService.getInstance(project).loginNowWithFeedback()
                         }
                     }
@@ -225,7 +225,7 @@ class AiTestSettingsConfigurable(
                     addActionListener {
                         usage.record("settings.toolbar.import_repo_config")
                         runCatching {
-                            LlmSettingsLoader.importConfigFromRepo(project)
+                            LlmSettingsLoader.importConfigFromRepo(project, collectState())
                         }.onSuccess { sourcePath ->
                             reset()
                             Messages.showInfoMessage(
@@ -291,7 +291,7 @@ class AiTestSettingsConfigurable(
         pathLabel = null
     }
 
-    private fun llmTab(): JComponent = JPanel().apply {
+    private fun llmTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(formSection("Provider", listOf(
@@ -311,9 +311,9 @@ class AiTestSettingsConfigurable(
             "" to showLogTabCheckbox
         )))
         add(sectionWithToggle(llmTemplateEnabled, llmTemplatePanel).also { llmTemplateCardPanel = it })
-    }.apply { border = BorderFactory.createEmptyBorder() }
+    })
 
-    private fun loginTab(): JComponent = JPanel().apply {
+    private fun loginTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         val usage = ButtonUsageReportService.getInstance(project)
@@ -322,10 +322,19 @@ class AiTestSettingsConfigurable(
                 usage.record("settings.bitbucket_prompt_repo.update")
                 if (!saveCurrentState()) return@addActionListener
                 try {
+                    val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+                    if (!status.configured) {
+                        Notifications.warn(project, "Bitbucket Prompt Repo", status.message)
+                        return@addActionListener
+                    }
                     val latest = LlmSettingsLoader.loadSettingsModel(project)
                     applyState(latest)
                     initialState = latest
-                    Notifications.info(project, "Bitbucket Prompt Repo", "Prompt sync completed. Latest prompts have been loaded.")
+                    Notifications.info(
+                        project,
+                        "Bitbucket Prompt Repo",
+                        "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                    )
                 } catch (ex: Exception) {
                     Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
                 }
@@ -359,9 +368,9 @@ class AiTestSettingsConfigurable(
         )))
         add(infoBanner("Configure a pre-login request that exchanges username/password for an API key using JSONPath extraction."))
         add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
-    }.apply { border = BorderFactory.createEmptyBorder() }
+    })
 
-    private fun promptsTab(): JComponent = JScrollPane(JPanel().apply {
+    private fun promptsTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
@@ -378,7 +387,14 @@ class AiTestSettingsConfigurable(
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
         add(unifiedPromptManagerSection())
-    }).apply { border = BorderFactory.createEmptyBorder() }
+    })
+
+    private fun scrollableTab(content: JComponent): JComponent = JScrollPane(content).apply {
+        border = BorderFactory.createEmptyBorder()
+        verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        verticalScrollBar.unitIncrement = 16
+    }
 
     private fun unifiedPromptManagerSection(): JComponent {
         val clearButton = JButton("New / Clear")
@@ -796,18 +812,7 @@ class AiTestSettingsConfigurable(
     }
 
     private fun validate(state: AiTestSettingsModel) {
-        if (state.llmModel.isBlank()) {
-            throw IllegalArgumentException("LLM model is required")
-        }
-        if (state.llmTimeoutSeconds.isBlank()) {
-            throw IllegalArgumentException("Timeout is required")
-        }
-        if (state.llmTemplateEnabled) {
-            requireTemplate("LLM template", state.llmTemplateUrl, state.llmTemplateBody, state.llmTemplateResponsePath)
-        }
-        if (state.loginEnabled) {
-            requireTemplate("Login template", state.loginUrl, state.loginBody, state.loginResponsePath)
-        }
+        validateLlmSettings(state)
         requirePromptProfiles("Test prompts YAML", state.generationPromptProfilesYaml)
         requirePromptProfiles("Commit prompts YAML", state.commitPromptProfilesYaml)
         requirePromptProfiles("Branch diff prompts YAML", state.branchDiffPromptProfilesYaml)
@@ -822,6 +827,21 @@ class AiTestSettingsConfigurable(
             ) {
                 throw IllegalArgumentException("Bitbucket prompt repo requires Token or Username + Password")
             }
+        }
+    }
+
+    private fun validateLlmSettings(state: AiTestSettingsModel) {
+        if (state.llmModel.isBlank()) {
+            throw IllegalArgumentException("LLM model is required")
+        }
+        if (state.llmTimeoutSeconds.isBlank()) {
+            throw IllegalArgumentException("Timeout is required")
+        }
+        if (state.llmTemplateEnabled) {
+            requireTemplate("LLM template", state.llmTemplateUrl, state.llmTemplateBody, state.llmTemplateResponsePath)
+        }
+        if (state.loginEnabled) {
+            requireTemplate("Login template", state.loginUrl, state.loginBody, state.loginResponsePath)
         }
     }
 
@@ -890,6 +910,43 @@ class AiTestSettingsConfigurable(
             false
         }
     }
+
+    private fun saveLlmStateForLoginNow(): Boolean {
+        return try {
+            val state = collectState()
+            validateLlmSettings(state)
+            LlmSettingsLoader.saveLlmSettingsModel(project, state)
+            initialState = initialState.withLlmSettingsFrom(state)
+            updatePathLabel()
+            true
+        } catch (e: Exception) {
+            Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
+            false
+        }
+    }
+
+    private fun AiTestSettingsModel.withLlmSettingsFrom(state: AiTestSettingsModel): AiTestSettingsModel = copy(
+        llmProvider = state.llmProvider,
+        llmModel = state.llmModel,
+        llmEndpoint = state.llmEndpoint,
+        llmTimeoutSeconds = state.llmTimeoutSeconds,
+        llmApiKey = state.llmApiKey,
+        llmApiKeyEnv = state.llmApiKeyEnv,
+        httpDisableTlsVerification = state.httpDisableTlsVerification,
+        showLogTab = state.showLogTab,
+        llmTemplateEnabled = state.llmTemplateEnabled,
+        llmTemplateMethod = state.llmTemplateMethod,
+        llmTemplateUrl = state.llmTemplateUrl,
+        llmTemplateHeaders = state.llmTemplateHeaders,
+        llmTemplateBody = state.llmTemplateBody,
+        llmTemplateResponsePath = state.llmTemplateResponsePath,
+        loginEnabled = state.loginEnabled,
+        loginMethod = state.loginMethod,
+        loginUrl = state.loginUrl,
+        loginHeaders = state.loginHeaders,
+        loginBody = state.loginBody,
+        loginResponsePath = state.loginResponsePath
+    )
 
     private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
         val details = generateSequence(throwable) { it.cause }

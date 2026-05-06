@@ -53,6 +53,16 @@ object LlmSettingsLoader {
         val updatedAt: Instant,
         val template: String,
         val sourcePriority: Int
+    ) {
+        val cacheKey: String
+            get() = "global/$name [$updatedAt]"
+    }
+
+    private data class PromptProfileTarget(
+        val category: String,
+        val profileKey: String,
+        val defaultTemplate: String,
+        val selectedFallback: String
     )
 
     data class PromptUpdateStatus(
@@ -63,7 +73,11 @@ object LlmSettingsLoader {
         val message: String
     )
 
-    fun load(project: Project): LlmSettings = loadConfig(project).llm
+    fun load(project: Project): LlmSettings = loadLlmSettings(project)
+
+    fun loadLlmSettings(project: Project): LlmSettings {
+        return parseLlmSettings(readRootMap(project))
+    }
 
     fun readConfigText(project: Project): String {
         val configFile = findOrCreateConfigFile()
@@ -81,7 +95,25 @@ object LlmSettingsLoader {
     fun importConfigFromRepo(project: Project): String {
         val root = readRootMap(project)
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
+        return importConfigFromRepo(project, parseBitbucketPromptRepoConfig(prompts.map("remoteRepo")))
+    }
+
+    fun importConfigFromRepo(project: Project, model: AiTestSettingsModel): String {
+        return importConfigFromRepo(
+            project,
+            BitbucketPromptRepoConfig(
+                enabled = model.bitbucketPromptRepoEnabled,
+                repoUrl = model.bitbucketPromptRepoUrl,
+                branch = model.bitbucketPromptRepoBranch,
+                token = model.bitbucketPromptRepoToken,
+                username = model.bitbucketPromptRepoUsername,
+                password = model.bitbucketPromptRepoPassword,
+                configImportPath = model.bitbucketConfigImportPath
+            )
+        )
+    }
+
+    private fun importConfigFromRepo(project: Project, remoteRepo: BitbucketPromptRepoConfig): String {
         if (remoteRepo.repoUrl.isBlank()) {
             val message = "Cannot import repo config: prompts.remoteRepo.url is not configured."
             RuntimeLogStore.append("ERROR | Prompt Repo Import | $message")
@@ -105,7 +137,7 @@ object LlmSettingsLoader {
                 repoSlug = "<direct-raw-base>"
             )
         } ?: GitRemoteParser.parse(remoteRepo.repoUrl)
-        val candidatePaths = listOf("config/.ai-test.yaml")
+        val candidatePaths = listOf("config/ai-test.yaml", ".ai-test.yaml")
         RuntimeLogStore.append(
             "INFO | Prompt Repo Import | Start provider=${repo.provider} repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
         )
@@ -183,7 +215,7 @@ object LlmSettingsLoader {
             validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
             val remoteGlobalKeys = remoteEntries
-                .map { "global/${it.name} [${it.updatedAt}]" }
+                .map { it.cacheKey }
                 .toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
             val hasUpdates = remoteGlobalKeys != cachedGlobalKeys
@@ -225,9 +257,51 @@ object LlmSettingsLoader {
     }
 
     fun pullBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
-        val latest = loadSettingsModel(project)
-        saveSettingsModel(project, latest)
-        return checkBitbucketPromptUpdates(project)
+        val root = readRootMap(project)
+        val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val remoteConfig = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
+        if (remoteConfig.repoUrl.isBlank()) {
+            return PromptUpdateStatus(
+                configured = false,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = "Bitbucket prompt repo URL is not configured."
+            )
+        }
+
+        return runCatching {
+            RuntimeLogStore.append("INFO | Prompt Repo | Pull start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
+            validateBitbucketPromptRepoConnection(project, remoteConfig)
+            val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
+            writeGlobalPromptCache(project, root, remoteEntries)
+
+            val remoteGlobalKeys = remoteEntries.map { it.cacheKey }.toSet()
+            val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
+            RuntimeLogStore.append(
+                "INFO | Prompt Repo | Pull completed remoteCount=${remoteGlobalKeys.size} cachedCount=${cachedGlobalKeys.size}"
+            )
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = remoteGlobalKeys.size,
+                cachedCount = cachedGlobalKeys.size,
+                hasUpdates = false,
+                message = if (remoteEntries.isEmpty()) {
+                    "Prompt repo is reachable, but no prompt markdown files were found under prompt(s)/ directories."
+                } else {
+                    "Prompt cache updated from remote repo. Latest remote update: ${remoteEntries.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH}"
+                }
+            )
+        }.getOrElse { ex ->
+            RuntimeLogStore.append("ERROR | Prompt Repo | Pull failed: ${ex.message ?: ex}")
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = ex.message ?: ex.toString()
+            )
+        }
     }
 
     fun checkBitbucketHardcodedPath(project: Project, rawUrl: String): String {
@@ -362,6 +436,13 @@ object LlmSettingsLoader {
         root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
         root.remove("generation")
         root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
+        writeRootMap(project, root)
+    }
+
+    fun saveLlmSettingsModel(project: Project, model: AiTestSettingsModel) {
+        val root = readRootMap(project).toMutableLinkedMap()
+        root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
+        root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
         writeRootMap(project, root)
     }
 
@@ -716,6 +797,67 @@ object LlmSettingsLoader {
         return prompts
     }
 
+    private fun writeGlobalPromptCache(project: Project, root: Map<String, Any?>, remoteEntries: List<GlobalPromptMeta>) {
+        val mutableRoot = root.toMutableLinkedMap()
+        val prompts = (mutableRoot["prompts"] as? Map<*, *>).toMutableLinkedMap()
+        promptProfileTargets().forEach { target ->
+            val profile = (prompts[target.profileKey] as? Map<*, *>).toMutableLinkedMap()
+            val existingItems = (profile["items"] as? Map<*, *>).toMutableLinkedMap()
+            val itemsWithoutOldGlobal = existingItems
+                .filterKeys { !it.startsWith("global/") }
+                .toMutableMap()
+
+            remoteEntries
+                .filter { it.category == target.category }
+                .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
+                .forEach { meta ->
+                    itemsWithoutOldGlobal[meta.cacheKey] = ensurePromptUpdateMetadata(meta)
+                }
+
+            if (itemsWithoutOldGlobal.isEmpty()) {
+                itemsWithoutOldGlobal[PromptProfileSet.DEFAULT_NAME] = target.defaultTemplate
+            } else if (!itemsWithoutOldGlobal.containsKey(PromptProfileSet.DEFAULT_NAME)) {
+                itemsWithoutOldGlobal[PromptProfileSet.DEFAULT_NAME] = target.defaultTemplate
+            }
+
+            val selected = profile["selected"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: target.selectedFallback
+            profile["selected"] = selected
+            profile["items"] = itemsWithoutOldGlobal
+            prompts[target.profileKey] = profile
+        }
+        mutableRoot["prompts"] = prompts
+        writeRootMap(project, mutableRoot)
+    }
+
+    private fun promptProfileTargets(): List<PromptProfileTarget> = listOf(
+        PromptProfileTarget("test", "generationProfiles", AiPromptDefaults.GENERATION_WRAPPER, PromptProfileSet.DEFAULT_NAME),
+        PromptProfileTarget("commit", "commitMessageProfiles", AiPromptDefaults.COMMIT_MESSAGE, GLOBAL_DIFF_REVIEW_PROFILE),
+        PromptProfileTarget("branchDiff", "branchDiffSummaryProfiles", AiPromptDefaults.BRANCH_DIFF_SUMMARY, GLOBAL_DIFF_REVIEW_PROFILE),
+        PromptProfileTarget("codeGenerate", "codeGenerateProfiles", AiPromptDefaults.CODE_GENERATE, PromptProfileSet.DEFAULT_NAME),
+        PromptProfileTarget("codeReview", "codeReviewProfiles", AiPromptDefaults.CODE_REVIEW, PromptProfileSet.DEFAULT_NAME)
+    )
+
+    private fun ensurePromptUpdateMetadata(meta: GlobalPromptMeta): String {
+        val lines = meta.template.trim().lines().toMutableList()
+        upsertMetadataLine(lines, "name", meta.name)
+        upsertMetadataLine(lines, "type", meta.category)
+        upsertMetadataLine(lines, "time", meta.updatedAt.toString())
+        upsertMetadataLine(lines, "updatedAt", meta.updatedAt.toString())
+        upsertMetadataLine(lines, "pulledAt", Instant.now().toString())
+        return lines.joinToString("\n").trim()
+    }
+
+    private fun upsertMetadataLine(lines: MutableList<String>, key: String, value: String) {
+        val index = lines.indexOfFirst { it.trimStart().startsWith("$key:", ignoreCase = true) }
+        val line = "$key: $value"
+        if (index >= 0) {
+            lines[index] = line
+        } else {
+            lines.add(0, line)
+        }
+    }
+
     private fun buildUiMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
         val ui = existing.toMutableLinkedMap()
         ui["showLogTab"] = model.showLogTab
@@ -782,7 +924,7 @@ object LlmSettingsLoader {
                     .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
                     .associateTo(linkedMapOf()) { meta ->
                         val key = if (meta.sourcePriority > 1) {
-                            "global/${meta.name} [${meta.updatedAt}]"
+                            meta.cacheKey
                         } else {
                             meta.name
                         }
@@ -993,11 +1135,12 @@ object LlmSettingsLoader {
         if (text.isBlank()) return null
         val nameMatch = Regex("(?im)^name\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
         val timeMatch = Regex("(?im)^time\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val updatedAtMatch = Regex("(?im)^updatedAt\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
         val typeMatch = Regex("(?im)^type\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
 
         val category = resolveCategory(path, typeMatch) ?: "test"
         val name = nameMatch?.takeIf { it.isNotBlank() } ?: File(path).nameWithoutExtension
-        val time = parseInstantOrEpoch(timeMatch)
+        val time = parseInstantOrEpoch(timeMatch ?: updatedAtMatch)
         return GlobalPromptMeta(
             category = category,
             name = name,
@@ -1161,22 +1304,13 @@ object LlmSettingsLoader {
         return body
     }
 
-    private fun bitbucketGet(project: Project, url: String, config: BitbucketPromptRepoConfig): String {
-        val llmAuthService = LlmAuthSessionService.getInstance(project)
-        val savedLoginCredentials = llmAuthService.loadSavedLoginCredentialsForCurrentSettings()
-        val credentialPairs = mutableListOf<Pair<String, String>>()
-        if (config.username.isNotBlank() && config.password.isNotBlank()) {
-            credentialPairs += config.username to config.password
+    private fun bitbucketGet(@Suppress("UNUSED_PARAMETER") project: Project, url: String, config: BitbucketPromptRepoConfig): String {
+        val credentialPairs = if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            listOf(config.username to config.password)
+        } else {
+            emptyList()
         }
-        if (savedLoginCredentials != null) {
-            credentialPairs += savedLoginCredentials.username to savedLoginCredentials.password
-        }
-        return runCatching {
-            bitbucketGetWithCredentials(url, config.token, credentialPairs)
-        }.getOrElse {
-            val prompted = llmAuthService.promptLoginCredentialsForCurrentSettings()
-            bitbucketGetWithCredentials(url, config.token, listOf(prompted.username to prompted.password))
-        }
+        return bitbucketGetWithCredentials(url, config.token, credentialPairs)
     }
 
     private fun bitbucketGetWithCredentials(url: String, token: String, credentialPairs: List<Pair<String, String>>): String {
