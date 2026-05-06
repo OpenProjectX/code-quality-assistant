@@ -327,6 +327,10 @@ class AiTestSettingsConfigurable(
                         Notifications.warn(project, "Bitbucket Prompt Repo", status.message)
                         return@addActionListener
                     }
+                    if (status.error) {
+                        Notifications.error(project, "Bitbucket Prompt Repo", status.message)
+                        return@addActionListener
+                    }
                     val latest = LlmSettingsLoader.loadSettingsModel(project)
                     applyState(latest)
                     initialState = latest
@@ -819,14 +823,8 @@ class AiTestSettingsConfigurable(
         requirePromptProfiles("Code generate prompts YAML", state.codeGeneratePromptProfilesYaml)
         requirePromptProfiles("Code review prompts YAML", state.codeReviewPromptProfilesYaml)
         if (state.bitbucketPromptRepoUrl.isNotBlank()) {
-            val provider = runCatching { GitRemoteParser.parse(state.bitbucketPromptRepoUrl).provider.name }
+            runCatching { GitRemoteParser.parse(state.bitbucketPromptRepoUrl).provider.name }
                 .getOrElse { ex -> throw IllegalArgumentException("Prompt repo URL is invalid: ${ex.message ?: ex}") }
-            if (provider == "BITBUCKET"
-                && state.bitbucketPromptRepoToken.isBlank()
-                && (state.bitbucketPromptRepoUsername.isBlank() || state.bitbucketPromptRepoPassword.isBlank())
-            ) {
-                throw IllegalArgumentException("Bitbucket prompt repo requires Token or Username + Password")
-            }
         }
     }
 

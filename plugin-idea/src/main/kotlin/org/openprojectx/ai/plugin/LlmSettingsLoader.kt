@@ -47,6 +47,12 @@ object LlmSettingsLoader {
         val configImportPath: String = ""
     )
 
+    private data class BitbucketCredential(
+        val source: String,
+        val username: String,
+        val password: String
+    )
+
     private data class GlobalPromptMeta(
         val category: String,
         val name: String,
@@ -70,7 +76,8 @@ object LlmSettingsLoader {
         val remoteCount: Int,
         val cachedCount: Int,
         val hasUpdates: Boolean,
-        val message: String
+        val message: String,
+        val error: Boolean = false
     )
 
     fun load(project: Project): LlmSettings = loadLlmSettings(project)
@@ -251,7 +258,8 @@ object LlmSettingsLoader {
                 remoteCount = 0,
                 cachedCount = 0,
                 hasUpdates = false,
-                message = ex.message ?: ex.toString()
+                message = ex.message ?: ex.toString(),
+                error = true
             )
         }
     }
@@ -299,7 +307,8 @@ object LlmSettingsLoader {
                 remoteCount = 0,
                 cachedCount = 0,
                 hasUpdates = false,
-                message = ex.message ?: ex.toString()
+                message = ex.message ?: ex.toString(),
+                error = true
             )
         }
     }
@@ -792,6 +801,7 @@ object LlmSettingsLoader {
             "branch" to model.bitbucketPromptRepoBranch,
             "token" to model.bitbucketPromptRepoToken,
             "username" to model.bitbucketPromptRepoUsername,
+            "password" to model.bitbucketPromptRepoPassword,
             "configImportPath" to model.bitbucketConfigImportPath
         )
         return prompts
@@ -1305,43 +1315,76 @@ object LlmSettingsLoader {
     }
 
     private fun bitbucketGet(@Suppress("UNUSED_PARAMETER") project: Project, url: String, config: BitbucketPromptRepoConfig): String {
-        val credentialPairs = if (config.username.isNotBlank() && config.password.isNotBlank()) {
-            listOf(config.username to config.password)
+        val configuredCredentials = if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            listOf(BitbucketCredential("settings", config.username, config.password))
         } else {
             emptyList()
         }
-        return bitbucketGetWithCredentials(url, config.token, credentialPairs)
+        val gitCredentials = GitCredentialHelper.resolve(config.repoUrl)
+            ?.let { listOf(BitbucketCredential("git-credential-helper", it.username, it.password)) }
+            ?: emptyList()
+        val credentials = configuredCredentials + gitCredentials
+        return bitbucketGetWithCredentials(url, config.token, credentials)
     }
 
-    private fun bitbucketGetWithCredentials(url: String, token: String, credentialPairs: List<Pair<String, String>>): String {
+    private fun bitbucketGetWithCredentials(url: String, token: String, credentials: List<BitbucketCredential>): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.connectTimeout = 60_000
         conn.readTimeout = 60_000
         val normalized = token.trim()
-        if (normalized.isNotBlank()) {
+        val authHeaderLog = if (normalized.isNotBlank()) {
             if (normalized.contains(":")) {
                 val basic = Base64.getEncoder().encodeToString(normalized.toByteArray(Charsets.UTF_8))
                 conn.setRequestProperty("Authorization", "Basic $basic")
+                describeBasicTokenHeader(normalized)
             } else {
                 conn.setRequestProperty("Authorization", "Bearer $normalized")
+                "Authorization=Bearer token=${maskSecret(normalized)}"
             }
-        } else if (credentialPairs.isNotEmpty()) {
-            val (username, password) = credentialPairs.first()
-            val basicRaw = "$username:$password"
+        } else if (credentials.isNotEmpty()) {
+            val credential = credentials.first()
+            val basicRaw = "${credential.username}:${credential.password}"
             val basic = Base64.getEncoder().encodeToString(basicRaw.toByteArray(Charsets.UTF_8))
             conn.setRequestProperty("Authorization", "Basic $basic")
+            describeBasicCredentialHeader(credential)
+        } else {
+            "Authorization=<absent>"
         }
+        RuntimeLogStore.append(
+            "INFO | Bitbucket API | Request method=GET url=$url headers[$authHeaderLog] credentialSources=${credentials.joinToString(",") { it.source }.ifBlank { "<none>" }}"
+        )
         val code = conn.responseCode
         val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader(Charsets.UTF_8)
             ?.use { it.readText() }
             .orEmpty()
         if (code !in 200..299) {
-            error("Bitbucket API request failed ($code) for $url. Response: ${body.ifBlank { "<empty>" }}")
+            val response = body.ifBlank { "<empty>" }
+            val authHint = if (code == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                " Configure Token/PAT or Username + Password in the Bitbucket Prompt Repo settings, or make sure git credential helper has valid credentials for the repo URL."
+            } else {
+                ""
+            }
+            error("Bitbucket API request failed ($code) for $url.$authHint Response: $response")
         }
         return body
     }
+
+    private fun describeBasicTokenHeader(token: String): String {
+        val separatorIndex = token.indexOf(':')
+        val username = token.substring(0, separatorIndex)
+        val password = token.substring(separatorIndex + 1)
+        return "Authorization=Basic source=token username=${displayHeaderValue(username)} password=${maskSecret(password)}"
+    }
+
+    private fun describeBasicCredentialHeader(credential: BitbucketCredential): String {
+        return "Authorization=Basic source=${credential.source} username=${displayHeaderValue(credential.username)} password=${maskSecret(credential.password)}"
+    }
+
+    private fun displayHeaderValue(value: String): String = value.ifBlank { "<blank>" }
+
+    private fun maskSecret(value: String): String = if (value.isBlank()) "<blank>" else "*".repeat(value.length)
 
     private fun Map<*, *>?.string(key: String): String =
         this?.get(key)?.toString()?.trim().orEmpty()
