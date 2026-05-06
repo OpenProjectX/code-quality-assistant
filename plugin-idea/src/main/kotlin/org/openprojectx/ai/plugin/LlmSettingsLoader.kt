@@ -137,7 +137,7 @@ object LlmSettingsLoader {
                 repoSlug = "<direct-raw-base>"
             )
         } ?: GitRemoteParser.parse(remoteRepo.repoUrl)
-        val candidatePaths = listOf(".ai-test.yaml")
+        val candidatePaths = listOf("config/ai-test.yaml", ".ai-test.yaml")
         RuntimeLogStore.append(
             "INFO | Prompt Repo Import | Start provider=${repo.provider} repo=${repo.host}/${repo.projectKey}/${repo.repoSlug} branch=${remoteRepo.branch} candidates=${candidatePaths.joinToString(",")}" 
         )
