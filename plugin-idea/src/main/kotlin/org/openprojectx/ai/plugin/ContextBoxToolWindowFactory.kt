@@ -378,7 +378,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 Notifications.warn(project, "Prompt Manager", status.message)
                 return@addActionListener
             }
-            if (status.hasUpdates) {
+            if (status.error) {
+                Notifications.error(project, "Prompt Manager", status.message)
+            } else if (status.hasUpdates) {
                 Notifications.info(
                     project,
                     "Prompt Manager",
@@ -388,7 +390,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 Notifications.info(
                     project,
                     "Prompt Manager",
-                    "No updates. Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                    "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
                 )
             }
         }
@@ -398,6 +400,10 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
             if (!status.configured) {
                 Notifications.warn(project, "Prompt Manager", status.message)
+                return@addActionListener
+            }
+            if (status.error) {
+                Notifications.error(project, "Prompt Manager", status.message)
                 return@addActionListener
             }
             refreshList()
