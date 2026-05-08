@@ -1,0 +1,8 @@
+.gradle
+**/.gradle
+**/build
+out
+.idea
+*.iml
+
+# Keep .git in the context: build.gradle.kts runs `git ls-files` during configuration.
