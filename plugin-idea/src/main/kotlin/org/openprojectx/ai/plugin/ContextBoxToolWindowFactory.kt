@@ -406,7 +406,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             selectedPrompt = prompt
             if (prompt == null) {
                 titleLabel.text = "Select a prompt"
+                titleLabel.foreground = fgColor
                 scopeLabel.text = ""
+                scopeLabel.toolTipText = null
                 scopeLabel.foreground = mutedColor
                 contentPreview.text = ""
                 detailsPanel.removeAll()
@@ -415,7 +417,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 return
             }
             titleLabel.text = prompt.displayName
-            scopeLabel.text = if (prompt.isGlobal) "● Global" else "● Local"
+            titleLabel.foreground = categoryColor(prompt.category)
+            scopeLabel.text = if (prompt.isGlobal) "●" else "◆"
+            scopeLabel.toolTipText = if (prompt.isGlobal) "Global" else "Local"
             scopeLabel.foreground = scopeColor(prompt.isGlobal)
             contentPreview.text = prompt.content
             contentPreview.caretPosition = 0
@@ -451,9 +455,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }, valueConstraints)
             }
 
-            addDetailRow(0, "Name", prompt.displayName)
+            addDetailRow(0, "Name", prompt.displayName, categoryColor(prompt.category))
             addDetailRow(1, "Type", "${categoryIcon(prompt.category)}  ${prompt.category.label}", categoryColor(prompt.category))
-            addDetailRow(2, "Scope", if (prompt.isGlobal) "● Global" else "● Local", scopeColor(prompt.isGlobal))
+            addDetailRow(2, "Scope", if (prompt.isGlobal) "●" else "◆", scopeColor(prompt.isGlobal))
             addDetailRow(3, "Updated Time", prompt.updatedText)
             detailsPanel.revalidate()
             detailsPanel.repaint()
@@ -549,10 +553,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val editButton = compactActionButton("✎", "Edit prompt")
         val duplicateButton = compactActionButton("⧉", "Duplicate prompt")
         val deleteButton = compactActionButton("🗑", "Delete or hide prompt")
-        val moreButton = compactActionButton("⋮", "More actions")
         val checkUpdateButton = JButton("☁ Check Update")
         val newPromptButton = JButton("+ New Prompt")
-        val copyButton = JButton("⧉ Copy")
+        val copyButton = JButton("⧉").apply {
+            toolTipText = "Copy prompt content"
+            margin = Insets(2, 8, 2, 8)
+            preferredSize = Dimension(36, 30)
+            minimumSize = preferredSize
+        }
 
         fun performPullUpdate() {
             usage.record("context_box.prompt_manager.pull_update")
@@ -692,10 +700,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             (viewCards.layout as CardLayout).show(viewCards, "view")
         }
 
-        moreButton.addActionListener {
-            Notifications.info(project, "Prompt Manager", "More prompt actions are not implemented yet.")
-        }
-
         val viewPanel = JPanel(BorderLayout(0, 12)).apply {
             background = pageColor
             add(JPanel(BorderLayout()).apply {
@@ -786,11 +790,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     border = BorderFactory.createLineBorder(designBorderColor)
                     viewport.background = surfaceColor
                 }, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 18, 4)).apply {
-                    isOpaque = false
-                    add(JLabel("🌐 Global").apply { foreground = mutedColor })
-                    add(JLabel("📁 Local").apply { foreground = mutedColor })
-                }, BorderLayout.SOUTH)
             }, BorderLayout.CENTER)
         }
 
@@ -809,7 +808,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     add(editButton)
                     add(duplicateButton)
                     add(deleteButton)
-                    add(moreButton)
                 }, BorderLayout.EAST)
             }, BorderLayout.NORTH)
             add(viewCards, BorderLayout.CENTER)
@@ -864,12 +862,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 is PromptListRow.PromptRow -> {
                     val prompt = value.prompt
                     panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
-                    panel.add(label("${categoryIcon(prompt.category)}  ${prompt.displayName}", fgColor), BorderLayout.CENTER)
+                    panel.add(label("${categoryIcon(prompt.category)}  ${prompt.displayName}", categoryColor(prompt.category)), BorderLayout.CENTER)
                     panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                         background = if (isSelected) accentColor else bgColor
-                        add(label(if (prompt.isGlobal) "● Global" else "● Local", scopeColor(prompt.isGlobal), 12f))
+                        add(label(if (prompt.isGlobal) "●" else "◆", scopeColor(prompt.isGlobal), 12f))
                         add(label(prompt.updatedText, mutedColor, 12f))
-                        add(label("⋮", mutedColor, 12f))
                     }, BorderLayout.EAST)
                 }
                 is PromptListRow.AddPrompt -> {
