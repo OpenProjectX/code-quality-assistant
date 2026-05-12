@@ -51,9 +51,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val commonFont = UIManager.getFont("Label.font")
             ?.deriveFont(Font.PLAIN, 13f)
             ?: Font("SansSerif", Font.PLAIN, 13)
-        val bgColor = Color(0x0D, 0x0D, 0x0D)
-        val fgColor = Color(0xFF, 0xFF, 0xFF)
-        val borderColor = Color(0x22, 0x22, 0x22)
+        val bgColor = Color(0x0F, 0x17, 0x2A)
+        val fgColor = Color(0xE5, 0xED, 0xF7)
+        val borderColor = Color(0x2A, 0x3A, 0x52)
 
         val resultArea = JTextArea().apply {
             isEditable = false
@@ -233,41 +233,65 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         commonFont: Font
     ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val accentColor = Color(0x16, 0x63, 0xD8)
-        val mutedColor = Color(0xA0, 0xA8, 0xB5)
-        val cardColor = Color(0x10, 0x1B, 0x24)
+        val pageColor = Color(0x0F, 0x17, 0x2A)
+        val surfaceColor = Color(0x11, 0x1C, 0x2F)
+        val inputColor = Color(0x0B, 0x12, 0x20)
+        val accentColor = Color(0x3B, 0x82, 0xF6)
+        val mutedColor = Color(0x94, 0xA3, 0xB8)
+        val cardColor = Color(0x14, 0x1F, 0x34)
+        val designBorderColor = borderColor
         val listModel = DefaultListModel<PromptListRow>()
         val collapsedCategories = mutableSetOf<PromptCategory>()
         var selectedPrompt: PromptDefinition? = null
 
         val searchField = JTextField().apply {
             toolTipText = "Search prompts"
-            background = bgColor
+            background = inputColor
             foreground = fgColor
             caretColor = fgColor
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(borderColor),
+                BorderFactory.createLineBorder(designBorderColor),
                 BorderFactory.createEmptyBorder(6, 8, 6, 8)
             )
         }
-        val typeFilter = JComboBox(arrayOf("All Types") + PromptCategory.entries.map { it.label }.toTypedArray())
-        val sortField = JComboBox(PromptSort.entries.toTypedArray())
+        val typeFilter = JComboBox(arrayOf("All Types") + PromptCategory.entries.map { it.label }.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
+        val sortField = JComboBox(PromptSort.entries.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
         val promptList = JList(listModel).apply {
             font = commonFont
-            background = bgColor
+            background = surfaceColor
             foreground = fgColor
             selectionMode = ListSelectionModel.SINGLE_SELECTION
             selectionBackground = accentColor
             selectionForeground = Color.WHITE
             fixedCellHeight = -1
-            cellRenderer = PromptListCellRenderer(bgColor, fgColor, mutedColor, borderColor, accentColor, commonFont)
+            cellRenderer = PromptListCellRenderer(surfaceColor, fgColor, mutedColor, designBorderColor, accentColor, commonFont)
         }
-        val categoryField = JComboBox(PromptCategory.entries.toTypedArray())
-        val nameField = JTextField()
+        val categoryField = JComboBox(PromptCategory.entries.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
+        val nameField = JTextField().apply {
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(designBorderColor),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            )
+        }
         val contentField = JTextArea().apply {
             lineWrap = true
             wrapStyleWord = true
             font = commonFont
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
         }
         val titleLabel = JLabel("Select a prompt").apply {
             foreground = fgColor
@@ -275,8 +299,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         }
         val scopeLabel = JLabel("—").apply { foreground = mutedColor }
         val detailsPanel = JPanel(GridBagLayout()).apply {
-            background = bgColor
-            border = BorderFactory.createLineBorder(borderColor)
+            background = surfaceColor
+            border = BorderFactory.createLineBorder(designBorderColor)
         }
         val contentPreview = JTextArea().apply {
             isEditable = false
@@ -289,13 +313,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         }
         val historyPanel = JPanel(BorderLayout()).apply {
-            background = bgColor
+            background = surfaceColor
             add(JLabel("No prompt history available yet.").apply {
                 foreground = mutedColor
                 border = BorderFactory.createEmptyBorder(16, 16, 16, 16)
             }, BorderLayout.NORTH)
         }
-        val viewCards = JPanel(CardLayout()).apply { background = bgColor }
+        val viewCards = JPanel(CardLayout()).apply { background = pageColor }
 
         fun mapForCategory(model: AiTestSettingsModel, category: PromptCategory): LinkedHashMap<String, String> {
             val text = when (category) {
@@ -386,7 +410,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 detailsPanel.add(JLabel(label).apply {
                     foreground = mutedColor
                     border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(borderColor),
+                        BorderFactory.createLineBorder(designBorderColor),
                         BorderFactory.createEmptyBorder(10, 12, 10, 12)
                     )
                 }, labelConstraints)
@@ -400,7 +424,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 detailsPanel.add(JLabel(value).apply {
                     foreground = fgColor
                     border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(borderColor),
+                        BorderFactory.createLineBorder(designBorderColor),
                         BorderFactory.createEmptyBorder(10, 12, 10, 12)
                     )
                 }, valueConstraints)
@@ -647,9 +671,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         }
 
         val viewPanel = JPanel(BorderLayout(0, 12)).apply {
-            background = bgColor
+            background = pageColor
             add(JPanel(BorderLayout()).apply {
-                background = bgColor
+                background = surfaceColor
                 add(JTabbedPane().apply {
                     background = bgColor
                     foreground = fgColor
@@ -658,20 +682,20 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }, BorderLayout.CENTER)
             }, BorderLayout.NORTH)
             add(JPanel(BorderLayout(8, 6)).apply {
-                background = bgColor
+                background = pageColor
                 add(JLabel("Prompt Content").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.WEST)
                 add(copyButton, BorderLayout.EAST)
                 add(JBScrollPane(contentPreview).apply {
                     preferredSize = Dimension(480, 360)
-                    border = BorderFactory.createLineBorder(borderColor)
+                    border = BorderFactory.createLineBorder(designBorderColor)
                     viewport.background = cardColor
                 }, BorderLayout.SOUTH)
             }, BorderLayout.CENTER)
         }
 
         val editPanel = JPanel(GridBagLayout()).apply {
-            background = bgColor
-            border = BorderFactory.createLineBorder(borderColor)
+            background = surfaceColor
+            border = BorderFactory.createLineBorder(designBorderColor)
             val gbc = GridBagConstraints().apply {
                 insets = Insets(6, 6, 6, 6)
                 fill = GridBagConstraints.HORIZONTAL
@@ -712,11 +736,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         viewCards.add(editPanel, "edit")
 
         val leftPanel = JPanel(BorderLayout(0, 8)).apply {
-            background = bgColor
+            background = pageColor
             preferredSize = Dimension(470, 600)
             border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
             add(JPanel(BorderLayout(8, 8)).apply {
-                background = bgColor
+                background = surfaceColor
                 add(JLabel("Prompt Manager").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.NORTH)
                 add(searchField, BorderLayout.CENTER)
                 add(JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
@@ -726,15 +750,15 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }, BorderLayout.EAST)
             }, BorderLayout.NORTH)
             add(JPanel(BorderLayout(8, 8)).apply {
-                background = bgColor
+                background = pageColor
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                     isOpaque = false
                     add(typeFilter)
                     add(sortField)
                 }, BorderLayout.NORTH)
                 add(JBScrollPane(promptList).apply {
-                    border = BorderFactory.createLineBorder(borderColor)
-                    viewport.background = bgColor
+                    border = BorderFactory.createLineBorder(designBorderColor)
+                    viewport.background = surfaceColor
                 }, BorderLayout.CENTER)
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 18, 4)).apply {
                     isOpaque = false
@@ -745,10 +769,10 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         }
 
         val rightPanel = JPanel(BorderLayout(0, 12)).apply {
-            background = bgColor
+            background = pageColor
             border = BorderFactory.createEmptyBorder(18, 18, 18, 18)
             add(JPanel(BorderLayout()).apply {
-                background = bgColor
+                background = pageColor
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                     isOpaque = false
                     add(titleLabel)
@@ -771,7 +795,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             resizeWeight = 0.38
             dividerSize = 1
             border = BorderFactory.createEmptyBorder()
-            background = bgColor
+            background = pageColor
         }
     }
 
