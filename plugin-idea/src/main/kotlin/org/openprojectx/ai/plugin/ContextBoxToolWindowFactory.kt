@@ -387,7 +387,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             selectedPrompt = prompt
             if (prompt == null) {
                 titleLabel.text = "Select a prompt"
-                scopeLabel.text = "Use + New Prompt to create one"
+                scopeLabel.text = ""
                 contentPreview.text = ""
                 detailsPanel.removeAll()
                 detailsPanel.revalidate()
@@ -395,7 +395,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 return
             }
             titleLabel.text = prompt.displayName
-            scopeLabel.text = if (prompt.isGlobal) "🌐 Global   Available to all projects" else "📁 Local   Available in this project"
+            scopeLabel.text = if (prompt.isGlobal) "🌐 Global" else "📁 Local"
             contentPreview.text = prompt.content
             contentPreview.caretPosition = 0
             detailsPanel.removeAll()
@@ -762,8 +762,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }, BorderLayout.CENTER)
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 18, 4)).apply {
                     isOpaque = false
-                    add(JLabel("🌐 Global   Available to all projects").apply { foreground = mutedColor })
-                    add(JLabel("📁 Local   Available in this project").apply { foreground = mutedColor })
+                    add(JLabel("🌐 Global").apply { foreground = mutedColor })
+                    add(JLabel("📁 Local").apply { foreground = mutedColor })
                 }, BorderLayout.SOUTH)
             }, BorderLayout.CENTER)
         }
@@ -771,13 +771,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val rightPanel = JPanel(BorderLayout(0, 12)).apply {
             background = pageColor
             border = BorderFactory.createEmptyBorder(18, 18, 18, 18)
-            add(JPanel(BorderLayout()).apply {
+            add(JPanel(BorderLayout(12, 0)).apply {
                 background = pageColor
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(JPanel(BorderLayout(8, 0)).apply {
                     isOpaque = false
-                    add(titleLabel)
-                    add(scopeLabel)
-                }, BorderLayout.WEST)
+                    add(titleLabel, BorderLayout.CENTER)
+                    add(scopeLabel, BorderLayout.EAST)
+                }, BorderLayout.CENTER)
                 add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     isOpaque = false
                     add(editButton)
