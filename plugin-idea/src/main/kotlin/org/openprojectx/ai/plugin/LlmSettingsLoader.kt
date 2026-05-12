@@ -221,7 +221,10 @@ object LlmSettingsLoader {
             RuntimeLogStore.append("INFO | Prompt Repo | Update check start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
             validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
-            val remoteGlobalKeys = remoteEntries
+            val visibleRemoteEntries = remoteEntries.filterNot {
+                globalPromptSuppressionKey(it.category, it.cacheKey) in model.suppressedGlobalPrompts
+            }
+            val remoteGlobalKeys = visibleRemoteEntries
                 .map { it.cacheKey }
                 .toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
@@ -284,7 +287,11 @@ object LlmSettingsLoader {
             val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
             writeGlobalPromptCache(project, root, remoteEntries)
 
-            val remoteGlobalKeys = remoteEntries.map { it.cacheKey }.toSet()
+            val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
+            val visibleRemoteEntries = remoteEntries.filterNot {
+                globalPromptSuppressionKey(it.category, it.cacheKey) in suppressedGlobalPrompts
+            }
+            val remoteGlobalKeys = visibleRemoteEntries.map { it.cacheKey }.toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
             RuntimeLogStore.append(
                 "INFO | Prompt Repo | Pull completed remoteCount=${remoteGlobalKeys.size} cachedCount=${cachedGlobalKeys.size}"
@@ -340,6 +347,7 @@ object LlmSettingsLoader {
         val ui = root["ui"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteRepo = prompts.map("remoteRepo")
+        val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
         return AiTestSettingsModel(
@@ -378,7 +386,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         prompts.map("generationProfiles").map("items"),
                         AiPromptDefaults.GENERATION_WRAPPER
-                    )
+                    ),
+                    suppressedGlobalPrompts
                 )
             ),
             commitPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
@@ -390,7 +399,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
                     AiPromptDefaults.COMMIT_MESSAGE
-                    )
+                    ),
+                    suppressedGlobalPrompts
                 )
             ),
             branchDiffPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
@@ -402,7 +412,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY
-                    )
+                    ),
+                    suppressedGlobalPrompts
                 )
             ),
             codeGeneratePromptProfileDefault = prompts.map("codeGenerateProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
@@ -414,7 +425,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         prompts.map("codeGenerateProfiles").map("items"),
                         AiPromptDefaults.CODE_GENERATE
-                    )
+                    ),
+                    suppressedGlobalPrompts
                 )
             ),
             codeReviewPromptProfileDefault = prompts.map("codeReviewProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
@@ -426,7 +438,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         prompts.map("codeReviewProfiles").map("items"),
                         AiPromptDefaults.CODE_REVIEW
-                    )
+                    ),
+                    suppressedGlobalPrompts
                 )
             ),
             bitbucketPromptRepoEnabled = remoteRepo["enabled"] as? Boolean ?: false,
@@ -435,7 +448,8 @@ object LlmSettingsLoader {
             bitbucketPromptRepoToken = remoteRepo.string("token"),
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
             bitbucketPromptRepoPassword = remoteRepo.string("password"),
-            bitbucketConfigImportPath = remoteRepo.string("configImportPath")
+            bitbucketConfigImportPath = remoteRepo.string("configImportPath"),
+            suppressedGlobalPrompts = suppressedGlobalPrompts
         )
     }
 
@@ -478,6 +492,7 @@ object LlmSettingsLoader {
     private fun parsePromptOverrides(project: Project, root: Map<*, *>): PromptOverrides {
         val prompts = root["prompts"] as? Map<*, *> ?: return PromptOverrides()
         val remoteRepo = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
+        val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         val generation = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
 
         return PromptOverrides(
@@ -495,35 +510,40 @@ object LlmSettingsLoader {
                     defaultTemplate = generation.string("wrapper").ifBlank { AiPromptDefaults.GENERATION_WRAPPER },
                     globalCategory = "test",
                     project = project,
-                    remoteRepoConfig = remoteRepo
+                    remoteRepoConfig = remoteRepo,
+                    suppressedGlobalPrompts = suppressedGlobalPrompts
                 ),
                 commitMessage = parsePromptProfileSet(
                     profileMap = prompts.map("commitMessageProfiles"),
                     defaultTemplate = prompts.string("commitMessage").ifBlank { AiPromptDefaults.COMMIT_MESSAGE },
                     globalCategory = "commit",
                     project = project,
-                    remoteRepoConfig = remoteRepo
+                    remoteRepoConfig = remoteRepo,
+                    suppressedGlobalPrompts = suppressedGlobalPrompts
                 ),
                 branchDiffSummary = parsePromptProfileSet(
                     profileMap = prompts.map("branchDiffSummaryProfiles"),
                     defaultTemplate = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
                     globalCategory = "branchDiff",
                     project = project,
-                    remoteRepoConfig = remoteRepo
+                    remoteRepoConfig = remoteRepo,
+                    suppressedGlobalPrompts = suppressedGlobalPrompts
                 ),
                 codeGenerate = parsePromptProfileSet(
                     profileMap = prompts.map("codeGenerateProfiles"),
                     defaultTemplate = AiPromptDefaults.CODE_GENERATE,
                     globalCategory = "codeGenerate",
                     project = project,
-                    remoteRepoConfig = remoteRepo
+                    remoteRepoConfig = remoteRepo,
+                    suppressedGlobalPrompts = suppressedGlobalPrompts
                 ),
                 codeReview = parsePromptProfileSet(
                     profileMap = prompts.map("codeReviewProfiles"),
                     defaultTemplate = AiPromptDefaults.CODE_REVIEW,
                     globalCategory = "codeReview",
                     project = project,
-                    remoteRepoConfig = remoteRepo
+                    remoteRepoConfig = remoteRepo,
+                    suppressedGlobalPrompts = suppressedGlobalPrompts
                 )
             )
         )
@@ -730,7 +750,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.generationPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.generationPromptWrapper
-                    )
+                    ),
+                    model.suppressedGlobalPrompts
                 )
             ),
             defaultTemplate = model.generationPromptWrapper
@@ -745,7 +766,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.commitPrompt
-                    )
+                    ),
+                    model.suppressedGlobalPrompts
                 )
             ),
             defaultTemplate = model.commitPrompt
@@ -760,7 +782,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.branchDiffPrompt
-                    )
+                    ),
+                    model.suppressedGlobalPrompts
                 )
             ),
             defaultTemplate = model.branchDiffPrompt
@@ -775,7 +798,8 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeGeneratePromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         AiPromptDefaults.CODE_GENERATE
-                    )
+                    ),
+                    model.suppressedGlobalPrompts
                 )
             ),
             defaultTemplate = AiPromptDefaults.CODE_GENERATE
@@ -790,11 +814,13 @@ object LlmSettingsLoader {
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeReviewPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         AiPromptDefaults.CODE_REVIEW
-                    )
+                    ),
+                    model.suppressedGlobalPrompts
                 )
             ),
             defaultTemplate = AiPromptDefaults.CODE_REVIEW
         )
+        prompts["suppressedGlobalPrompts"] = model.suppressedGlobalPrompts.sorted()
         prompts["remoteRepo"] = linkedMapOf<String, Any>(
             "enabled" to model.bitbucketPromptRepoEnabled,
             "url" to model.bitbucketPromptRepoUrl,
@@ -810,6 +836,7 @@ object LlmSettingsLoader {
     private fun writeGlobalPromptCache(project: Project, root: Map<String, Any?>, remoteEntries: List<GlobalPromptMeta>) {
         val mutableRoot = root.toMutableLinkedMap()
         val prompts = (mutableRoot["prompts"] as? Map<*, *>).toMutableLinkedMap()
+        val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         promptProfileTargets().forEach { target ->
             val profile = (prompts[target.profileKey] as? Map<*, *>).toMutableLinkedMap()
             val existingItems = (profile["items"] as? Map<*, *>).toMutableLinkedMap()
@@ -819,6 +846,7 @@ object LlmSettingsLoader {
 
             remoteEntries
                 .filter { it.category == target.category }
+                .filterNot { globalPromptSuppressionKey(it.category, it.cacheKey) in suppressedGlobalPrompts }
                 .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
                 .forEach { meta ->
                     itemsWithoutOldGlobal[meta.cacheKey] = ensurePromptUpdateMetadata(meta)
@@ -878,9 +906,11 @@ object LlmSettingsLoader {
         project: Project,
         category: String,
         remoteRepoConfig: BitbucketPromptRepoConfig,
-        items: Map<String, String>
+        items: Map<String, String>,
+        suppressedGlobalPrompts: Collection<String> = emptyList()
     ): Map<String, String> {
         val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)[category].orEmpty()
+            .filterKeys { globalPromptSuppressionKey(category, it) !in suppressedGlobalPrompts }
         if (globalPrompts.isEmpty()) return items
         val normalized = linkedMapOf<String, String>()
         globalPrompts.forEach { (name, content) ->
@@ -954,13 +984,15 @@ object LlmSettingsLoader {
         defaultTemplate: String,
         globalCategory: String,
         project: Project,
-        remoteRepoConfig: BitbucketPromptRepoConfig
+        remoteRepoConfig: BitbucketPromptRepoConfig,
+        suppressedGlobalPrompts: Collection<String> = emptyList()
     ): PromptProfileSet {
         val items = applyGlobalProfiles(
             project,
             globalCategory,
             remoteRepoConfig,
-            parsePromptProfileItems(profileMap.map("items"), defaultTemplate)
+            parsePromptProfileItems(profileMap.map("items"), defaultTemplate),
+            suppressedGlobalPrompts
         )
         val selected = profileMap.string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME }
         return PromptProfileSet(selected = selected, items = items)
@@ -1150,7 +1182,7 @@ object LlmSettingsLoader {
 
         val category = resolveCategory(path, typeMatch) ?: "test"
         val name = nameMatch?.takeIf { it.isNotBlank() } ?: File(path).nameWithoutExtension
-        val time = parseInstantOrEpoch(timeMatch ?: updatedAtMatch)
+        val time = parseInstantOrNow(timeMatch ?: updatedAtMatch)
         return GlobalPromptMeta(
             category = category,
             name = name,
@@ -1160,8 +1192,8 @@ object LlmSettingsLoader {
         )
     }
 
-    private fun parseInstantOrEpoch(raw: String?): Instant {
-        if (raw.isNullOrBlank()) return Instant.EPOCH
+    private fun parseInstantOrNow(raw: String?): Instant {
+        if (raw.isNullOrBlank()) return Instant.now()
         return try {
             Instant.parse(raw)
         } catch (_: DateTimeParseException) {
@@ -1432,6 +1464,15 @@ object LlmSettingsLoader {
             if (type == "blob" && path != null && isPromptMarkdownPath(path)) path else null
         }
     }
+
+    private fun parseSuppressedGlobalPrompts(prompts: Map<*, *>): List<String> {
+        return (prompts["suppressedGlobalPrompts"] as? List<*>)
+            .orEmpty()
+            .mapNotNull { it?.toString()?.trim()?.takeIf { value -> value.isNotBlank() } }
+            .distinct()
+    }
+
+    private fun globalPromptSuppressionKey(category: String, name: String): String = "$category:$name"
 
     private fun readCachedGlobalPromptKeys(project: Project): Set<String> {
         val root = readRootMap(project)
