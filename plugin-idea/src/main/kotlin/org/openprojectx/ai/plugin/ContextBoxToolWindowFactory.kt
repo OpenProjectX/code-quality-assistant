@@ -225,6 +225,25 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         object CustomHeader : PromptListRow()
     }
 
+    private fun categoryIcon(category: PromptCategory): String = when (category) {
+        PromptCategory.TEST -> "⚗"
+        PromptCategory.COMMIT -> "⌘"
+        PromptCategory.BRANCH_DIFF -> "⑂"
+        PromptCategory.CODE_GENERATE -> "</>"
+        PromptCategory.CODE_REVIEW -> "▣"
+    }
+
+    private fun categoryColor(category: PromptCategory): Color = when (category) {
+        PromptCategory.TEST -> Color(0xA7, 0x8B, 0xFA)
+        PromptCategory.COMMIT -> Color(0xF5, 0x9E, 0x0B)
+        PromptCategory.BRANCH_DIFF -> Color(0x38, 0xB2, 0xDF)
+        PromptCategory.CODE_GENERATE -> Color(0x22, 0xC5, 0x5E)
+        PromptCategory.CODE_REVIEW -> Color(0xFB, 0x71, 0x85)
+    }
+
+    private fun scopeColor(isGlobal: Boolean): Color =
+        if (isGlobal) Color(0x60, 0xA5, 0xFA) else Color(0x34, 0xD3, 0x99)
+
     private fun createPromptManagerPanel(
         project: Project,
         bgColor: Color,
@@ -388,6 +407,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             if (prompt == null) {
                 titleLabel.text = "Select a prompt"
                 scopeLabel.text = ""
+                scopeLabel.foreground = mutedColor
                 contentPreview.text = ""
                 detailsPanel.removeAll()
                 detailsPanel.revalidate()
@@ -395,12 +415,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 return
             }
             titleLabel.text = prompt.displayName
-            scopeLabel.text = if (prompt.isGlobal) "🌐 Global" else "📁 Local"
+            scopeLabel.text = if (prompt.isGlobal) "● Global" else "● Local"
+            scopeLabel.foreground = scopeColor(prompt.isGlobal)
             contentPreview.text = prompt.content
             contentPreview.caretPosition = 0
             detailsPanel.removeAll()
 
-            fun addDetailRow(row: Int, label: String, value: String) {
+            fun addDetailRow(row: Int, label: String, value: String, valueColor: Color = fgColor) {
                 val labelConstraints = GridBagConstraints().apply {
                     gridx = 0
                     gridy = row
@@ -422,7 +443,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     fill = GridBagConstraints.HORIZONTAL
                 }
                 detailsPanel.add(JLabel(value).apply {
-                    foreground = fgColor
+                    foreground = valueColor
                     border = BorderFactory.createCompoundBorder(
                         BorderFactory.createLineBorder(designBorderColor),
                         BorderFactory.createEmptyBorder(10, 12, 10, 12)
@@ -431,12 +452,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
 
             addDetailRow(0, "Name", prompt.displayName)
-            addDetailRow(1, "Type", prompt.category.label)
-            addDetailRow(2, "Scope", if (prompt.isGlobal) "Global" else "Local")
+            addDetailRow(1, "Type", "${categoryIcon(prompt.category)}  ${prompt.category.label}", categoryColor(prompt.category))
+            addDetailRow(2, "Scope", if (prompt.isGlobal) "● Global" else "● Local", scopeColor(prompt.isGlobal))
             addDetailRow(3, "Updated Time", prompt.updatedText)
-            addDetailRow(4, "Created Time", "—")
-            addDetailRow(5, "Author", if (prompt.isGlobal) "Remote Prompt Repo" else "Local")
-            addDetailRow(6, "Description", "—")
             detailsPanel.revalidate()
             detailsPanel.repaint()
         }
@@ -518,12 +536,20 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         typeFilter.addActionListener { refreshList(null) }
         sortField.addActionListener { refreshList(selectedPrompt) }
 
+        fun compactActionButton(text: String, tooltip: String): JButton = JButton(text).apply {
+            toolTipText = tooltip
+            margin = Insets(1, 5, 1, 5)
+            preferredSize = Dimension(28, 26)
+            minimumSize = preferredSize
+            font = commonFont.deriveFont(Font.PLAIN, 12f)
+        }
+
         val saveButton = JButton("Save")
         val cancelButton = JButton("Cancel")
-        val editButton = JButton("✎")
-        val duplicateButton = JButton("⧉")
-        val deleteButton = JButton("🗑")
-        val moreButton = JButton("⋮")
+        val editButton = compactActionButton("✎", "Edit prompt")
+        val duplicateButton = compactActionButton("⧉", "Duplicate prompt")
+        val deleteButton = compactActionButton("🗑", "Delete or hide prompt")
+        val moreButton = compactActionButton("⋮", "More actions")
         val checkUpdateButton = JButton("☁ Check Update")
         val newPromptButton = JButton("+ New Prompt")
         val copyButton = JButton("⧉ Copy")
@@ -799,7 +825,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         }
     }
 
-    private class PromptListCellRenderer(
+    private inner class PromptListCellRenderer(
         private val bgColor: Color,
         private val fgColor: Color,
         private val mutedColor: Color,
@@ -832,14 +858,19 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
                 is PromptListRow.CategoryHeader -> {
                     val arrow = if (value.collapsed) "›" else "⌃"
-                    panel.add(label("${categoryIcon(value.category)}  ${value.category.label}", fgColor, 15f), BorderLayout.WEST)
+                    panel.add(label("${categoryIcon(value.category)}  ${value.category.label}", categoryColor(value.category), 15f), BorderLayout.WEST)
                     panel.add(label("${value.count}   $arrow", mutedColor), BorderLayout.EAST)
                 }
                 is PromptListRow.PromptRow -> {
                     val prompt = value.prompt
                     panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
-                    panel.add(label("${if (prompt.isGlobal) "🌐" else "📁"}  ${prompt.displayName}", fgColor), BorderLayout.CENTER)
-                    panel.add(label("${if (prompt.isGlobal) "Global" else "Local"}   ${prompt.updatedText}   ⋮", mutedColor, 12f), BorderLayout.EAST)
+                    panel.add(label("${categoryIcon(prompt.category)}  ${prompt.displayName}", fgColor), BorderLayout.CENTER)
+                    panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                        background = if (isSelected) accentColor else bgColor
+                        add(label(if (prompt.isGlobal) "● Global" else "● Local", scopeColor(prompt.isGlobal), 12f))
+                        add(label(prompt.updatedText, mutedColor, 12f))
+                        add(label("⋮", mutedColor, 12f))
+                    }, BorderLayout.EAST)
                 }
                 is PromptListRow.AddPrompt -> {
                     panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
@@ -852,14 +883,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 else -> panel.add(label(""), BorderLayout.WEST)
             }
             return panel
-        }
-
-        private fun categoryIcon(category: PromptCategory): String = when (category) {
-            PromptCategory.TEST -> "⚗"
-            PromptCategory.COMMIT -> "⌘"
-            PromptCategory.BRANCH_DIFF -> "⑂"
-            PromptCategory.CODE_GENERATE -> "</>"
-            PromptCategory.CODE_REVIEW -> "▣"
         }
     }
 
