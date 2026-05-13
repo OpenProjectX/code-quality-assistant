@@ -503,8 +503,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     val row = listModel.get(it)
                     row is PromptListRow.PromptRow && row.prompt.category == select.category && row.prompt.name == select.name
                 } ?: -1
-                if (index >= 0) promptList.selectedIndex = index
+                if (index >= 0) {
+                    promptList.selectedIndex = index
+                } else {
+                    promptList.clearSelection()
+                }
+            } else {
+                promptList.clearSelection()
             }
+            promptList.revalidate()
+            promptList.repaint()
         }
 
         promptList.addListSelectionListener {
@@ -731,8 +739,10 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
             LlmSettingsLoader.saveSettingsModel(project, updateModelFromMaps(model, maps, suppressed))
             selectedPrompt = null
-            applyPromptToDetails(null)
             refreshList(null)
+            applyPromptToDetails(null)
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+            Notifications.info(project, "Prompt Manager", if (prompt.isGlobal) "Global prompt hidden locally." else "Prompt deleted.")
         }
 
         cancelButton.addActionListener {
