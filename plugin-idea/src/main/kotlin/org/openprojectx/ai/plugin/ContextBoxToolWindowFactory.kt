@@ -259,6 +259,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val mutedColor = Color(0x94, 0xA3, 0xB8)
         val cardColor = Color(0x14, 0x1F, 0x34)
         val designBorderColor = borderColor
+        val promptFont = UIManager.getFont("EditorPane.font")
+            ?.deriveFont(Font.PLAIN, 14f)
+            ?: Font("JetBrains Mono", Font.PLAIN, 14)
         val listModel = DefaultListModel<PromptListRow>()
         val collapsedCategories = mutableSetOf<PromptCategory>()
         var selectedPrompt: PromptDefinition? = null
@@ -307,7 +310,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val contentField = JTextArea().apply {
             lineWrap = true
             wrapStyleWord = true
-            font = commonFont
+            font = promptFont
             background = inputColor
             foreground = fgColor
             caretColor = fgColor
@@ -325,18 +328,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             isEditable = false
             lineWrap = true
             wrapStyleWord = true
-            font = Font(Font.MONOSPACED, Font.PLAIN, 13)
+            font = promptFont
             background = cardColor
             foreground = fgColor
             caretColor = fgColor
             border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
-        }
-        val historyPanel = JPanel(BorderLayout()).apply {
-            background = surfaceColor
-            add(JLabel("No prompt history available yet.").apply {
-                foreground = mutedColor
-                border = BorderFactory.createEmptyBorder(16, 16, 16, 16)
-            }, BorderLayout.NORTH)
         }
         val viewCards = JPanel(CardLayout()).apply { background = pageColor }
 
@@ -418,7 +414,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
             titleLabel.text = prompt.displayName
             titleLabel.foreground = categoryColor(prompt.category)
-            scopeLabel.text = if (prompt.isGlobal) "●" else "◆"
+            scopeLabel.text = if (prompt.isGlobal) "🌐" else "📁"
             scopeLabel.toolTipText = if (prompt.isGlobal) "Global" else "Local"
             scopeLabel.foreground = scopeColor(prompt.isGlobal)
             contentPreview.text = prompt.content
@@ -457,7 +453,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
             addDetailRow(0, "Name", prompt.displayName, categoryColor(prompt.category))
             addDetailRow(1, "Type", "${categoryIcon(prompt.category)}  ${prompt.category.label}", categoryColor(prompt.category))
-            addDetailRow(2, "Scope", if (prompt.isGlobal) "●" else "◆", scopeColor(prompt.isGlobal))
+            addDetailRow(2, "Scope", if (prompt.isGlobal) "🌐" else "📁", scopeColor(prompt.isGlobal))
             addDetailRow(3, "Updated Time", prompt.updatedText)
             detailsPanel.revalidate()
             detailsPanel.repaint()
@@ -557,9 +553,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val newPromptButton = JButton("+ New Prompt")
         val copyButton = JButton("⧉").apply {
             toolTipText = "Copy prompt content"
-            margin = Insets(2, 8, 2, 8)
+            margin = Insets(0, 0, 0, 0)
             preferredSize = Dimension(36, 30)
             minimumSize = preferredSize
+            maximumSize = preferredSize
+            font = commonFont.deriveFont(Font.PLAIN, 14f)
         }
 
         fun promptUpdateMessage(status: LlmSettingsLoader.PromptUpdateStatus): String =
@@ -747,12 +745,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             background = pageColor
             add(JPanel(BorderLayout()).apply {
                 background = surfaceColor
-                add(JTabbedPane().apply {
-                    background = bgColor
+                add(JLabel("Details").apply {
                     foreground = fgColor
-                    addTab("Details", JBScrollPane(detailsPanel).apply { border = BorderFactory.createEmptyBorder() })
-                    addTab("History", historyPanel)
-                }, BorderLayout.CENTER)
+                    font = commonFont.deriveFont(16f)
+                    border = BorderFactory.createEmptyBorder(0, 0, 8, 0)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(detailsPanel).apply { border = BorderFactory.createEmptyBorder() }, BorderLayout.CENTER)
             }, BorderLayout.NORTH)
             add(JPanel(BorderLayout(8, 6)).apply {
                 background = pageColor
@@ -908,7 +906,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     panel.add(label("${categoryIcon(prompt.category)}  ${prompt.displayName}", categoryColor(prompt.category)), BorderLayout.CENTER)
                     panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                         background = if (isSelected) accentColor else bgColor
-                        add(label(if (prompt.isGlobal) "●" else "◆", scopeColor(prompt.isGlobal), 12f))
+                        add(label(if (prompt.isGlobal) "🌐" else "📁", scopeColor(prompt.isGlobal), 12f))
                         add(label(prompt.updatedText, mutedColor, 12f))
                     }, BorderLayout.EAST)
                 }
