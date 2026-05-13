@@ -562,9 +562,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             minimumSize = preferredSize
         }
 
-        fun performPullUpdate() {
-            usage.record("context_box.prompt_manager.pull_update")
-            val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+        fun promptUpdateMessage(status: PromptUpdateStatus): String =
+            "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+
+        fun setUpdateControlsEnabled(enabled: Boolean) {
+            checkUpdateButton.isEnabled = enabled
+        }
+
+        fun handlePullUpdateStatus(status: PromptUpdateStatus) {
             if (!status.configured) {
                 Notifications.warn(project, "Prompt Manager", status.message)
                 return
@@ -574,27 +579,65 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 return
             }
             refreshList(selectedPrompt)
-            Notifications.info(project, "Prompt Manager", "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}.")
+            Notifications.info(project, "Prompt Manager", promptUpdateMessage(status))
         }
 
-        checkUpdateButton.addActionListener {
-            usage.record("context_box.prompt_manager.check_update")
-            val status = LlmSettingsLoader.checkBitbucketPromptUpdates(project)
+        fun performPullUpdate() {
+            usage.record("context_box.prompt_manager.pull_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Pull Prompt Updates", true) {
+                private var status: PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Pulling prompt updates..."
+                    status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        status?.let { handlePullUpdateStatus(it) }
+                    }
+                }
+            })
+        }
+
+        fun handleCheckUpdateStatus(status: PromptUpdateStatus) {
             if (!status.configured) {
                 Notifications.warn(project, "Prompt Manager", status.message)
-                return@addActionListener
+                return
             }
             if (status.error) {
                 Notifications.error(project, "Prompt Manager", status.message)
-                return@addActionListener
+                return
             }
-            val message = "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+            val message = promptUpdateMessage(status)
             if (status.hasUpdates) {
                 val choice = Messages.showYesNoDialog(project, "$message\n\nUpdate prompts now?", "Prompt Manager", "Update", "Later", null)
                 if (choice == Messages.YES) performPullUpdate() else Notifications.info(project, "Prompt Manager", message)
             } else {
                 Notifications.info(project, "Prompt Manager", message)
             }
+        }
+
+        checkUpdateButton.addActionListener {
+            usage.record("context_box.prompt_manager.check_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Check Prompt Updates", true) {
+                private var status: PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Checking prompt updates..."
+                    status = LlmSettingsLoader.checkBitbucketPromptUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        status?.let { handleCheckUpdateStatus(it) }
+                    }
+                }
+            })
         }
 
         newPromptButton.addActionListener {
