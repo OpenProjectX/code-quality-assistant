@@ -562,14 +562,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             minimumSize = preferredSize
         }
 
-        fun promptUpdateMessage(status: PromptUpdateStatus): String =
+        fun promptUpdateMessage(status: LlmSettingsLoader.PromptUpdateStatus): String =
             "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
 
         fun setUpdateControlsEnabled(enabled: Boolean) {
             checkUpdateButton.isEnabled = enabled
         }
 
-        fun handlePullUpdateStatus(status: PromptUpdateStatus) {
+        fun handlePullUpdateStatus(status: LlmSettingsLoader.PromptUpdateStatus) {
             if (!status.configured) {
                 Notifications.warn(project, "Prompt Manager", status.message)
                 return
@@ -586,7 +586,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             usage.record("context_box.prompt_manager.pull_update")
             setUpdateControlsEnabled(false)
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Pull Prompt Updates", true) {
-                private var status: PromptUpdateStatus? = null
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.text = "Pulling prompt updates..."
@@ -602,7 +602,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             })
         }
 
-        fun handleCheckUpdateStatus(status: PromptUpdateStatus) {
+        fun handleCheckUpdateStatus(status: LlmSettingsLoader.PromptUpdateStatus) {
             if (!status.configured) {
                 Notifications.warn(project, "Prompt Manager", status.message)
                 return
@@ -624,7 +624,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             usage.record("context_box.prompt_manager.check_update")
             setUpdateControlsEnabled(false)
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Check Prompt Updates", true) {
-                private var status: PromptUpdateStatus? = null
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.text = "Checking prompt updates..."
