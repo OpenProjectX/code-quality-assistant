@@ -44,5 +44,7 @@ data class AiTestSettingsModel(
     val bitbucketPromptRepoUsername: String = "",
     val bitbucketPromptRepoPassword: String = "",
     val bitbucketConfigImportPath: String = "",
-    val suppressedGlobalPrompts: List<String> = emptyList()
+    val suppressedGlobalPrompts: List<String> = emptyList(),
+    val skillProfilesYaml: String = "",
+    val suppressedGlobalSkills: List<String> = emptyList()
 )

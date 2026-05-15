@@ -320,6 +320,108 @@ object LlmSettingsLoader {
         }
     }
 
+    fun checkBitbucketSkillUpdates(project: Project): PromptUpdateStatus {
+        val model = loadSettingsModel(project)
+        val remoteConfig = BitbucketPromptRepoConfig(
+            enabled = model.bitbucketPromptRepoEnabled,
+            repoUrl = model.bitbucketPromptRepoUrl,
+            branch = model.bitbucketPromptRepoBranch,
+            token = model.bitbucketPromptRepoToken,
+            username = model.bitbucketPromptRepoUsername,
+            password = model.bitbucketPromptRepoPassword,
+            configImportPath = model.bitbucketConfigImportPath
+        )
+        if (remoteConfig.repoUrl.isBlank()) {
+            return PromptUpdateStatus(
+                configured = false,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = "Skill repo URL is not configured."
+            )
+        }
+        return runCatching {
+            validateBitbucketPromptRepoConnection(project, remoteConfig)
+            val remoteEntries = fetchBitbucketSkillEntries(project, remoteConfig)
+            val remoteKeys = remoteEntries.map { it.cacheKey }.toSet()
+            val cachedKeys = readCachedGlobalSkillKeys(project)
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = remoteKeys.size,
+                cachedCount = cachedKeys.size,
+                hasUpdates = remoteKeys != cachedKeys,
+                message = if (remoteEntries.isEmpty()) {
+                    "Skill repo is reachable, but no skill markdown files were found under skill(s)/ directories."
+                } else {
+                    "Found ${remoteEntries.size} skill(s) in remote repo. Latest update: ${remoteEntries.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH}"
+                }
+            )
+        }.getOrElse { ex ->
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = ex.message ?: ex.toString(),
+                error = true
+            )
+        }
+    }
+
+    fun pullBitbucketSkillUpdates(project: Project): PromptUpdateStatus {
+        val root = readRootMap(project)
+        val model = loadSettingsModel(project)
+        val remoteConfig = BitbucketPromptRepoConfig(
+            enabled = model.bitbucketPromptRepoEnabled,
+            repoUrl = model.bitbucketPromptRepoUrl,
+            branch = model.bitbucketPromptRepoBranch,
+            token = model.bitbucketPromptRepoToken,
+            username = model.bitbucketPromptRepoUsername,
+            password = model.bitbucketPromptRepoPassword,
+            configImportPath = model.bitbucketConfigImportPath
+        )
+        if (remoteConfig.repoUrl.isBlank()) {
+            return PromptUpdateStatus(
+                configured = false,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = "Skill repo URL is not configured."
+            )
+        }
+        return runCatching {
+            RuntimeLogStore.append("INFO | Skill Repo | Pull start repoUrl=${remoteConfig.repoUrl} branch=${remoteConfig.branch}")
+            validateBitbucketPromptRepoConnection(project, remoteConfig)
+            val remoteEntries = fetchBitbucketSkillEntries(project, remoteConfig, strict = true)
+            writeGlobalSkillCache(project, root, remoteEntries)
+            writeSkillMarkdownFiles(loadSettingsModel(project))
+            val remoteKeys = remoteEntries.map { it.cacheKey }.toSet()
+            val cachedKeys = readCachedGlobalSkillKeys(project)
+            RuntimeLogStore.append("INFO | Skill Repo | Pull completed remoteCount=${remoteKeys.size} cachedCount=${cachedKeys.size}")
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = remoteKeys.size,
+                cachedCount = cachedKeys.size,
+                hasUpdates = false,
+                message = if (remoteEntries.isEmpty()) {
+                    "Skill repo is reachable, but no skill markdown files were found under skill(s)/ directories."
+                } else {
+                    "Skill cache updated from remote repo. Latest remote update: ${remoteEntries.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH}"
+                }
+            )
+        }.getOrElse { ex ->
+            RuntimeLogStore.append("ERROR | Skill Repo | Pull failed: ${ex.message ?: ex}")
+            PromptUpdateStatus(
+                configured = true,
+                remoteCount = 0,
+                cachedCount = 0,
+                hasUpdates = false,
+                message = ex.message ?: ex.toString(),
+                error = true
+            )
+        }
+    }
+
     fun checkBitbucketHardcodedPath(project: Project, rawUrl: String): String {
         val target = rawUrl.trim()
         if (target.isBlank()) error("Hardcoded Bitbucket path is empty.")
@@ -454,7 +556,15 @@ object LlmSettingsLoader {
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
             bitbucketPromptRepoPassword = remoteRepo.string("password"),
             bitbucketConfigImportPath = remoteRepo.string("configImportPath"),
-            suppressedGlobalPrompts = suppressedGlobalPrompts
+            suppressedGlobalPrompts = suppressedGlobalPrompts,
+            skillProfilesYaml = dumpPromptProfilesYaml(
+                parsePromptProfileItems(
+                    (root["skills"] as? Map<*, *>)?.map("items") ?: emptyMap<Any?, Any?>(),
+                    "",
+                    includeDefault = false
+                )
+            ),
+            suppressedGlobalSkills = parseSuppressedGlobalItems(root["skills"] as? Map<*, *>)
         )
     }
 
@@ -464,7 +574,9 @@ object LlmSettingsLoader {
         root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
         root.remove("generation")
         root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
+        root["skills"] = buildSkillsMap(model)
         writeRootMap(project, root)
+        writeSkillMarkdownFiles(model)
     }
 
     fun saveLlmSettingsModel(project: Project, model: AiTestSettingsModel) {
@@ -841,6 +953,80 @@ object LlmSettingsLoader {
             "configImportPath" to model.bitbucketConfigImportPath
         )
         return prompts
+    }
+
+    private fun buildSkillsMap(model: AiTestSettingsModel): Map<String, Any> {
+        val items = parsePromptProfileItems(
+            Yaml().load<Any?>(model.skillProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+            "",
+            includeDefault = false
+        )
+        return linkedMapOf(
+            "selected" to (if (items.isNotEmpty()) items.keys.first() else "default"),
+            "items" to items,
+            "suppressed" to model.suppressedGlobalSkills.sorted()
+        )
+    }
+
+    fun skillsDir(): File = File(configHomeDir(), "skills").also { it.mkdirs() }
+
+    fun loadLocalSkillFiles(): List<Pair<String, String>> {
+        val dir = skillsDir()
+        if (!dir.exists()) return emptyList()
+        return dir.listFiles()
+            ?.filter { it.isFile && it.extension == "md" }
+            ?.mapNotNull { file ->
+                val text = file.readText(Charsets.UTF_8).trim()
+                if (text.isBlank()) return@mapNotNull null
+                val name = extractSkillName(text) ?: file.nameWithoutExtension
+                val body = extractSkillBody(text)
+                name to body
+            }
+            .orEmpty()
+    }
+
+    private fun extractSkillName(content: String): String? {
+        val match = Regex("""(?im)^name\s*:\s*(.+)$""").find(content)
+        return match?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun writeSkillMarkdownFiles(model: AiTestSettingsModel) {
+        val items = parsePromptProfileItems(
+            Yaml().load<Any?>(model.skillProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
+            "",
+            includeDefault = false
+        )
+        val dir = skillsDir()
+        dir.listFiles()?.forEach { if (it.isFile && it.extension == "md") it.delete() }
+        items.forEach { (name, content) ->
+            val displayName = name.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "")
+            val safeFileName = displayName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val body = extractSkillBody(content)
+            val file = File(dir, "$safeFileName.md")
+            buildSkillMarkdown(name, body).let { file.writeText(it, Charsets.UTF_8) }
+        }
+    }
+
+    private fun extractSkillBody(content: String): String {
+        val lines = content.trim().lines()
+        val metadataKeys = setOf("name", "type", "time", "updatedAt", "pulledAt", "description")
+        val bodyStart = lines.indexOfFirst { line ->
+            val key = line.substringBefore(":").trim().lowercase()
+            key !in metadataKeys && line.isNotBlank()
+        }
+        if (bodyStart < 0) return content
+        return lines.drop(bodyStart).joinToString("\n").trim()
+    }
+
+    private fun buildSkillMarkdown(name: String, body: String): String {
+        return buildString {
+            appendLine("---")
+            appendLine("name: $name")
+            appendLine("description: $name")
+            appendLine("---")
+            appendLine()
+            appendLine(body.trim())
+        }
     }
 
     private fun writeGlobalPromptCache(project: Project, root: Map<String, Any?>, remoteEntries: List<GlobalPromptMeta>) {
@@ -1492,6 +1678,13 @@ object LlmSettingsLoader {
             .distinct()
     }
 
+    private fun parseSuppressedGlobalItems(section: Map<*, *>?): List<String> {
+        return (section?.get("suppressed") as? List<*>)
+            .orEmpty()
+            .mapNotNull { it?.toString()?.trim()?.takeIf { value -> value.isNotBlank() } }
+            .distinct()
+    }
+
     private fun globalPromptSuppressionKey(category: String, name: String): String = "$category:$name"
 
     private fun readCachedGlobalPromptKeys(project: Project): Set<String> {
@@ -1511,5 +1704,136 @@ object LlmSettingsLoader {
             }
             .filter { it.startsWith("global/") }
             .toSet()
+    }
+
+    private fun isSkillMarkdownPath(path: String): Boolean {
+        val normalized = path.replace('\\', '/').lowercase()
+        return (normalized.startsWith("skills/") || normalized.startsWith("skill/")) && normalized.endsWith(".md")
+    }
+
+    private fun fetchBitbucketSkillEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {
+        if (config.repoUrl.isBlank()) return emptyList()
+        val result = runCatching {
+            val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(config.repoUrl)
+            val repo = directBitbucketRawBaseUrl?.let {
+                RepositoryRef(
+                    provider = GitHostingProviderType.BITBUCKET,
+                    host = "<direct-raw-base>",
+                    projectKey = "<direct-raw-base>",
+                    repoSlug = "<direct-raw-base>"
+                )
+            } ?: GitRemoteParser.parse(config.repoUrl)
+            val filePaths = when (repo.provider) {
+                GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                    loadBitbucketSkillFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
+                } else {
+                    loadBitbucketSkillFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                }
+                GitHostingProviderType.GITHUB -> loadGitHubSkillFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
+                else -> emptyList()
+            }
+            filePaths.mapNotNull { path ->
+                val content = when (repo.provider) {
+                    GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
+                        loadBitbucketPromptRawFromBaseUrl(project, directBitbucketRawBaseUrl, path, config.branch, config)
+                    } else {
+                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                    }
+                    GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
+                    else -> return@mapNotNull null
+                }
+                parseGlobalSkillMeta(path, content)
+            }
+        }
+        if (strict) return result.getOrThrow()
+        return result.getOrDefault(emptyList())
+    }
+
+    private fun parseGlobalSkillMeta(path: String, content: String): GlobalPromptMeta? {
+        if (!isSkillMarkdownPath(path)) return null
+        val text = content.trim()
+        if (text.isBlank()) return null
+        val nameMatch = Regex("(?im)^name\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val timeMatch = Regex("(?im)^time\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val updatedAtMatch = Regex("(?im)^updatedAt\\s*:\\s*(.+)$").find(text)?.groupValues?.get(1)?.trim()
+        val name = nameMatch?.takeIf { it.isNotBlank() } ?: File(path).nameWithoutExtension
+        val time = parseInstantOrNow(timeMatch ?: updatedAtMatch)
+        return GlobalPromptMeta(
+            category = "skill",
+            name = name,
+            updatedAt = time,
+            template = text,
+            sourcePriority = 2
+        )
+    }
+
+    private fun loadBitbucketSkillFilePaths(
+        project: Project, host: String, projectKey: String, repoSlug: String,
+        branch: String, config: BitbucketPromptRepoConfig
+    ): List<String> {
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
+        val body = bitbucketGet(project, url, config)
+        val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
+        return values.mapNotNull { it.jsonPrimitive.contentOrNull }
+            .filter { isSkillMarkdownPath(it) }
+    }
+
+    private fun loadBitbucketSkillFilePathsFromRawBaseUrl(
+        project: Project, rawBaseUrl: String, branch: String, config: BitbucketPromptRepoConfig
+    ): List<String> {
+        val normalizedBase = rawBaseUrl.trimEnd('/')
+        val filesBase = normalizedBase.replace(Regex("/raw/?$"), "/files")
+        val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
+        val url = "$filesBase?at=$encodedBranch&limit=1000"
+        val body = bitbucketGet(project, url, config)
+        val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
+        return values.mapNotNull { it.jsonPrimitive.contentOrNull }
+            .filter { isSkillMarkdownPath(it) }
+    }
+
+    private fun loadGitHubSkillFilePaths(
+        host: String, owner: String, repo: String, branch: String, token: String
+    ): List<String> {
+        val encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8)
+        val url = "https://api.$host/repos/$owner/$repo/git/trees/$encodedBranch?recursive=1"
+        val body = githubGet(url, token)
+        val tree = json.parseToJsonElement(body).jsonObject["tree"]?.jsonArray ?: return emptyList()
+        return tree.mapNotNull { node ->
+            val obj = node.jsonObject
+            val type = obj["type"]?.jsonPrimitive?.contentOrNull
+            val path = obj["path"]?.jsonPrimitive?.contentOrNull
+            if (type == "blob" && path != null && isSkillMarkdownPath(path)) path else null
+        }
+    }
+
+    private fun writeGlobalSkillCache(project: Project, root: Map<String, Any?>, remoteEntries: List<GlobalPromptMeta>) {
+        val mutableRoot = root.toMutableLinkedMap()
+        val skills = (mutableRoot["skills"] as? Map<*, *>).toMutableLinkedMap()
+        val suppressedGlobalSkills = parseSuppressedGlobalItems(skills)
+        val existingItems = (skills["items"] as? Map<*, *>).toMutableLinkedMap()
+        val itemsWithoutOldGlobal = existingItems
+            .filterKeys { !it.toString().startsWith("global/") }
+            .toMutableMap()
+
+        remoteEntries
+            .filterNot { "skill:${it.cacheKey}" in suppressedGlobalSkills }
+            .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
+            .forEach { meta ->
+                itemsWithoutOldGlobal[meta.cacheKey] = ensurePromptUpdateMetadata(meta)
+            }
+
+        skills["selected"] = skills["selected"]?.toString()?.takeIf { it.isNotBlank() } ?: "default"
+        skills["items"] = itemsWithoutOldGlobal
+        skills["suppressed"] = suppressedGlobalSkills
+        mutableRoot["skills"] = skills
+        writeRootMap(project, mutableRoot)
+    }
+
+    private fun readCachedGlobalSkillKeys(project: Project): Set<String> {
+        val root = readRootMap(project)
+        val skills = root["skills"] as? Map<*, *> ?: return emptySet()
+        val items = skills["items"] as? Map<*, *> ?: return emptySet()
+        return items.keys.mapNotNull { it?.toString() }.filter { it.startsWith("global/") }.toSet()
     }
 }

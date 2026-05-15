@@ -13,6 +13,7 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.runBlocking
+import java.io.File
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
@@ -170,6 +171,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val tabs = JTabbedPane().apply {
             addTab("Context", panel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab("Skill Manager", createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
             if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
                 addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
             }
@@ -422,6 +424,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 scopeLabel.foreground = mutedColor
                 contentPreview.text = ""
                 detailsPanel.removeAll()
+                detailsPanel.add(JLabel("No prompt selected").apply {
+                    foreground = mutedColor
+                    font = promptFont
+                }, GridBagConstraints().apply {
+                    gridx = 0; gridy = 0; weightx = 1.0; weighty = 1.0
+                    anchor = GridBagConstraints.CENTER
+                })
                 detailsPanel.revalidate()
                 detailsPanel.repaint()
                 return
@@ -576,11 +585,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val newPromptButton = JButton("+ New Prompt")
         val copyButton = JButton("⧉").apply {
             toolTipText = "Copy prompt content"
-            margin = Insets(0, 0, 0, 0)
-            preferredSize = Dimension(36, 30)
-            minimumSize = preferredSize
-            maximumSize = preferredSize
-            font = commonFont.deriveFont(Font.PLAIN, 14f)
+            margin = Insets(2, 4, 2, 4)
+            font = promptFont.deriveFont(Font.PLAIN, promptFont.size - 1f)
+            isFocusPainted = false
         }
         searchField.preferredSize = Dimension(searchField.preferredSize.width.coerceAtLeast(220), checkUpdateButton.preferredSize.height)
         searchField.minimumSize = Dimension(160, checkUpdateButton.preferredSize.height)
@@ -784,15 +791,18 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }, BorderLayout.NORTH)
                 add(JBScrollPane(detailsPanel).apply { border = BorderFactory.createEmptyBorder() }, BorderLayout.CENTER)
             }, BorderLayout.NORTH)
-            add(JPanel(BorderLayout(8, 6)).apply {
+            add(JPanel(BorderLayout()).apply {
                 background = pageColor
-                add(JLabel("Prompt Content").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.WEST)
-                add(copyButton, BorderLayout.EAST)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                    isOpaque = false
+                    border = BorderFactory.createEmptyBorder(6, 0, 8, 0)
+                    add(JLabel("Prompt Content").apply { foreground = fgColor; font = commonFont.deriveFont(16f) })
+                    add(copyButton)
+                }, BorderLayout.NORTH)
                 add(JBScrollPane(contentPreview).apply {
-                    preferredSize = Dimension(480, 360)
                     border = BorderFactory.createLineBorder(designBorderColor)
                     viewport.background = cardColor
-                }, BorderLayout.SOUTH)
+                }, BorderLayout.CENTER)
             }, BorderLayout.CENTER)
         }
 
@@ -895,6 +905,606 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             border = BorderFactory.createEmptyBorder()
             background = pageColor
         }
+    }
+
+    private enum class SkillSort(val label: String) {
+        NAME("Sort by: Name"),
+        UPDATED("Sort by: Updated");
+
+        override fun toString(): String = label
+    }
+
+    private data class SkillDefinition(
+        val name: String,
+        val content: String,
+        val isGlobal: Boolean,
+        val updatedText: String = "—"
+    ) {
+        val displayName: String get() = name.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "")
+    }
+
+    private sealed class SkillListRow {
+        data class All(val count: Int) : SkillListRow()
+        data class SkillRow(val skill: SkillDefinition) : SkillListRow()
+        object AddSkill : SkillListRow()
+    }
+
+    private fun createSkillManagerPanel(
+        project: Project,
+        bgColor: Color,
+        fgColor: Color,
+        borderColor: Color,
+        commonFont: Font
+    ): Component {
+        val usage = ButtonUsageReportService.getInstance(project)
+        val pageColor = Color(0x0F, 0x17, 0x2A)
+        val surfaceColor = Color(0x11, 0x1C, 0x2F)
+        val inputColor = Color(0x0B, 0x12, 0x20)
+        val accentColor = Color(0x3B, 0x82, 0xF6)
+        val mutedColor = Color(0x94, 0xA3, 0xB8)
+        val cardColor = Color(0x14, 0x1F, 0x34)
+        val designBorderColor = borderColor
+        val skillFont = UIManager.getFont("EditorPane.font")?.deriveFont(Font.PLAIN, 14f) ?: Font("JetBrains Mono", Font.PLAIN, 14)
+        val listModel = DefaultListModel<SkillListRow>()
+        var selectedSkill: SkillDefinition? = null
+
+        val searchField = JTextField().apply {
+            toolTipText = "Search skills"
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(designBorderColor),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            )
+        }
+        val sortField = JComboBox(SkillSort.entries.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
+        val skillList = JList(listModel).apply {
+            font = commonFont
+            background = surfaceColor
+            foreground = fgColor
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            selectionBackground = accentColor
+            selectionForeground = Color.WHITE
+            fixedCellHeight = -1
+            cellRenderer = SkillListCellRenderer(surfaceColor, fgColor, mutedColor, designBorderColor, accentColor, commonFont)
+        }
+        val nameField = JTextField().apply {
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(designBorderColor),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            )
+        }
+        val contentField = JTextArea().apply {
+            lineWrap = true
+            wrapStyleWord = true
+            font = skillFont
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+        }
+        val titleLabel = JLabel("Select a skill").apply {
+            foreground = fgColor
+            font = commonFont.deriveFont(Font.PLAIN, 18f)
+        }
+        val scopeLabel = JLabel("—").apply { foreground = mutedColor }
+        val contentPreview = JTextArea().apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = skillFont
+            background = cardColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        }
+        val viewCards = JPanel(CardLayout()).apply { background = pageColor }
+
+        fun allSkills(): List<SkillDefinition> {
+            val model = LlmSettingsLoader.loadSettingsModel(project)
+            val items = Yaml().load<Any?>(model.skillProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            val yamlSkills = items.mapNotNull { (k, v) ->
+                val key = k?.toString()?.trim().orEmpty()
+                val value = v?.toString().orEmpty()
+                if (key.isBlank() || value.isBlank()) null
+                else SkillDefinition(key, value, isGlobalSkillName(key), updatedText(key))
+            }
+            val yamlDisplayNames = yamlSkills.map { it.displayName }.toSet()
+            val localSkills = LlmSettingsLoader.loadLocalSkillFiles()
+                .filter { (name, _) -> name !in yamlDisplayNames && !isGlobalSkillName(name) }
+                .map { (name, content) ->
+                    SkillDefinition(name, content, false, "—")
+                }
+            return localSkills + yamlSkills
+        }
+
+        fun updatedText(name: String): String {
+            val match = Regex("\\[([^]]+)]").find(name)
+            return match?.groupValues?.get(1) ?: "—"
+        }
+
+        fun showSkillEditor(skill: SkillDefinition?) {
+            nameField.isEditable = skill?.isGlobal != true
+            nameField.text = when {
+                skill == null -> ""
+                skill.isGlobal -> skill.name
+                else -> skill.displayName
+            }
+            contentField.text = skill?.content.orEmpty()
+            (viewCards.layout as CardLayout).show(viewCards, "edit")
+            nameField.requestFocusInWindow()
+        }
+
+        fun applySkillToDetails(skill: SkillDefinition?) {
+            selectedSkill = skill
+            if (skill == null) {
+                titleLabel.text = "Select a skill"
+                titleLabel.foreground = fgColor
+                scopeLabel.text = ""
+                scopeLabel.foreground = mutedColor
+                contentPreview.text = ""
+                return
+            }
+            titleLabel.text = skill.displayName
+            titleLabel.foreground = fgColor
+            scopeLabel.text = if (skill.isGlobal) "🌐" else "📁"
+            scopeLabel.foreground = if (skill.isGlobal) Color(0x60, 0xA5, 0xFA) else Color(0x34, 0xD3, 0x99)
+            contentPreview.text = skill.content
+            contentPreview.caretPosition = 0
+        }
+
+        fun refreshList(select: SkillDefinition? = selectedSkill) {
+            listModel.removeAllElements()
+            val query = searchField.text.trim().lowercase()
+            val sort = sortField.selectedItem as? SkillSort ?: SkillSort.NAME
+            val skills = allSkills()
+                .filter { query.isBlank() || it.displayName.lowercase().contains(query) || it.content.lowercase().contains(query) }
+                .let { list ->
+                    when (sort) {
+                        SkillSort.NAME -> list.sortedBy { it.displayName.lowercase() }
+                        SkillSort.UPDATED -> list.sortedByDescending { it.updatedText }
+                    }
+                }
+            listModel.addElement(SkillListRow.All(skills.size))
+            skills.forEach { listModel.addElement(SkillListRow.SkillRow(it)) }
+            listModel.addElement(SkillListRow.AddSkill)
+            if (select != null) {
+                for (i in 0 until listModel.size()) {
+                    val row = listModel[i]
+                    if (row is SkillListRow.SkillRow && row.skill.name == select.name) {
+                        skillList.selectedIndex = i
+                        skillList.ensureIndexIsVisible(i)
+                        break
+                    }
+                }
+            }
+        }
+
+        skillList.addListSelectionListener {
+            if (it.valueIsAdjusting) return@addListSelectionListener
+            val row = skillList.selectedValue as? SkillListRow ?: return@addListSelectionListener
+            when (row) {
+                is SkillListRow.All -> applySkillToDetails(null)
+                is SkillListRow.SkillRow -> applySkillToDetails(row.skill)
+                is SkillListRow.AddSkill -> {
+                    selectedSkill = null
+                    showSkillEditor(null)
+                }
+            }
+        }
+
+        searchField.document.addDocumentListener(SimpleDocumentListener { refreshList(null) })
+        sortField.addActionListener { refreshList(selectedSkill) }
+
+        fun compactActionButton(text: String, tooltip: String): JButton = JButton(text).apply {
+            toolTipText = tooltip
+            margin = Insets(1, 5, 1, 5)
+            preferredSize = Dimension(28, 26)
+            minimumSize = preferredSize
+            font = commonFont.deriveFont(Font.PLAIN, 12f)
+        }
+
+        val saveButton = JButton("Save")
+        val cancelButton = JButton("Cancel")
+        val editButton = compactActionButton("✎", "Edit skill")
+        val duplicateButton = compactActionButton("⧉", "Duplicate skill")
+        val deleteButton = compactActionButton("🗑", "Delete or hide skill")
+        val refreshSkillsButton = compactActionButton("↻", "Refresh skill list")
+        val checkUpdateButton = JButton("☁ Check Update")
+        val newSkillButton = JButton("+ New Skill")
+        val copyButton = JButton("⧉").apply {
+            toolTipText = "Copy skill content"
+            margin = Insets(2, 4, 2, 4)
+            font = skillFont.deriveFont(Font.PLAIN, skillFont.size - 1f)
+            isFocusPainted = false
+        }
+
+        searchField.preferredSize = Dimension(searchField.preferredSize.width.coerceAtLeast(220), checkUpdateButton.preferredSize.height)
+        searchField.minimumSize = Dimension(160, checkUpdateButton.preferredSize.height)
+
+        fun setUpdateControlsEnabled(enabled: Boolean) {
+            checkUpdateButton.isEnabled = enabled
+        }
+
+        fun performPullSkillUpdate() {
+            usage.record("context_box.skill_manager.pull_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Pull Skill Updates", true) {
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Pulling skill updates..."
+                    status = LlmSettingsLoader.pullBitbucketSkillUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        val s = status ?: return@invokeLater
+                        if (!s.configured) {
+                            Notifications.warn(project, "Skill Manager", s.message)
+                            return@invokeLater
+                        }
+                        if (s.error) {
+                            Notifications.error(project, "Skill Manager", s.message)
+                            return@invokeLater
+                        }
+                        refreshList(selectedSkill)
+                        Notifications.info(project, "Skill Manager", s.message)
+                    }
+                }
+            })
+        }
+
+        fun handleCheckSkillUpdateStatus(status: LlmSettingsLoader.PromptUpdateStatus) {
+            if (!status.configured) {
+                Notifications.warn(project, "Skill Manager", status.message)
+                return
+            }
+            if (status.error) {
+                Notifications.error(project, "Skill Manager", status.message)
+                return
+            }
+            if (status.hasUpdates) {
+                val choice = Messages.showYesNoDialog(project,
+                    "${status.message}\n\nUpdate skills now?", "Skill Manager", "Update", "Later", null)
+                if (choice == Messages.YES) performPullSkillUpdate() else Notifications.info(project, "Skill Manager", status.message)
+            } else {
+                Notifications.info(project, "Skill Manager", status.message)
+            }
+        }
+
+        checkUpdateButton.addActionListener {
+            usage.record("context_box.skill_manager.check_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Check Skill Updates", true) {
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Checking skill updates..."
+                    status = LlmSettingsLoader.checkBitbucketSkillUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        status?.let { handleCheckSkillUpdateStatus(it) }
+                    }
+                }
+            })
+        }
+
+        refreshSkillsButton.addActionListener {
+            usage.record("context_box.skill_manager.refresh")
+            refreshList(selectedSkill)
+        }
+
+        newSkillButton.addActionListener {
+            usage.record("context_box.skill_manager.new")
+            selectedSkill = null
+            showSkillEditor(null)
+        }
+
+        editButton.addActionListener {
+            usage.record("context_box.skill_manager.edit")
+            showSkillEditor(selectedSkill)
+        }
+
+        duplicateButton.addActionListener {
+            usage.record("context_box.skill_manager.duplicate")
+            val skill = selectedSkill ?: return@addActionListener
+            selectedSkill = null
+            nameField.isEditable = true
+            nameField.text = "${skill.displayName} Copy"
+            contentField.text = skill.content
+            (viewCards.layout as CardLayout).show(viewCards, "edit")
+        }
+
+        copyButton.addActionListener {
+            val content = selectedSkill?.content.orEmpty()
+            if (content.isNotBlank()) {
+                CopyPasteManager.getInstance().setContents(StringSelection(content))
+                Notifications.info(project, "Skill Manager", "Skill content copied.")
+            }
+        }
+
+        fun dumpYaml(value: Map<String, String>): String {
+            val options = DumperOptions().apply {
+                defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+                indent = 2
+                isPrettyFlow = true
+            }
+            return Yaml(options).dump(value).trimEnd()
+        }
+
+        saveButton.addActionListener {
+            usage.record("context_box.skill_manager.save")
+            val current = selectedSkill
+            val name = if (current?.isGlobal == true) current.name else nameField.text.trim()
+            val content = contentField.text.trim()
+            if (name.isBlank() || content.isBlank()) {
+                Messages.showErrorDialog(project, "Skill name and content are required.", "Skill Manager")
+                return@addActionListener
+            }
+            val model = LlmSettingsLoader.loadSettingsModel(project)
+            val items = parseSkillItems(model.skillProfilesYaml)
+            if (current != null) {
+                if (current.isGlobal && current.name != name) {
+                    Messages.showErrorDialog(project, "Global skill name cannot be changed.", "Skill Manager")
+                    return@addActionListener
+                }
+                items.remove(current.name)
+            }
+            if (items.containsKey(name) && (current == null || current.name != name)) {
+                Messages.showErrorDialog(project, "Skill name already exists.", "Skill Manager")
+                return@addActionListener
+            }
+            items[name] = content
+            val suppressed = if (isGlobalSkillName(name)) model.suppressedGlobalSkills.filter { it != name } else model.suppressedGlobalSkills
+            val updated = model.copy(
+                skillProfilesYaml = dumpYaml(items),
+                suppressedGlobalSkills = suppressed.distinct().sorted()
+            )
+            LlmSettingsLoader.saveSettingsModel(project, updated)
+            val saved = SkillDefinition(name, content, isGlobalSkillName(name), updatedText(name))
+            applySkillToDetails(saved)
+            refreshList(saved)
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+        }
+
+        deleteButton.addActionListener {
+            usage.record("context_box.skill_manager.delete")
+            val skill = selectedSkill
+            if (skill == null) {
+                Messages.showErrorDialog(project, "Please select a skill first.", "Skill Manager")
+                return@addActionListener
+            }
+            val actionDescription = if (skill.isGlobal) "hide this global skill locally" else "delete this local skill"
+            val confirm = Messages.showYesNoDialog(project,
+                "Are you sure you want to $actionDescription?", "Skill Manager", "Delete", "Cancel", null)
+            if (confirm != Messages.YES) return@addActionListener
+            val model = LlmSettingsLoader.loadSettingsModel(project)
+            val items = parseSkillItems(model.skillProfilesYaml)
+            val inYaml = items.containsKey(skill.name)
+            items.remove(skill.name)
+            val suppressed = if (skill.isGlobal) {
+                model.suppressedGlobalSkills + skill.name
+            } else if (!inYaml) {
+                val safeName = skill.displayName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                File(LlmSettingsLoader.skillsDir(), "$safeName.md").delete()
+                model.suppressedGlobalSkills
+            } else {
+                model.suppressedGlobalSkills
+            }
+            val updated = model.copy(
+                skillProfilesYaml = dumpYaml(items),
+                suppressedGlobalSkills = suppressed.distinct().sorted()
+            )
+            LlmSettingsLoader.saveSettingsModel(project, updated)
+            selectedSkill = null
+            refreshList(null)
+            applySkillToDetails(null)
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+            Notifications.info(project, "Skill Manager", if (skill.isGlobal) "Global skill hidden locally." else "Skill deleted.")
+        }
+
+        cancelButton.addActionListener {
+            nameField.isEditable = true
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+        }
+
+        val viewPanel = JPanel(BorderLayout(0, 12)).apply {
+            background = pageColor
+            add(JPanel(BorderLayout()).apply {
+                background = pageColor
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                    isOpaque = false
+                    border = BorderFactory.createEmptyBorder(6, 0, 8, 0)
+                    add(JLabel("Skill Content").apply { foreground = fgColor; font = commonFont.deriveFont(16f) })
+                    add(copyButton)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(contentPreview).apply {
+                    border = BorderFactory.createLineBorder(designBorderColor)
+                    viewport.background = cardColor
+                }, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+        }
+
+        val editPanel = JPanel(GridBagLayout()).apply {
+            background = surfaceColor
+            border = BorderFactory.createLineBorder(designBorderColor)
+            val gbc = GridBagConstraints().apply {
+                insets = Insets(6, 6, 6, 6)
+                fill = GridBagConstraints.HORIZONTAL
+                anchor = GridBagConstraints.WEST
+            }
+            fun addLabel(row: Int, text: String) {
+                gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
+                add(JLabel(text).apply { foreground = mutedColor }, gbc)
+            }
+            addLabel(0, "Name")
+            gbc.gridx = 1; gbc.gridy = 0; gbc.weightx = 1.0
+            add(nameField, gbc)
+            addLabel(1, "Content")
+            gbc.gridx = 1; gbc.gridy = 1
+            gbc.fill = GridBagConstraints.BOTH; gbc.weighty = 1.0
+            add(JBScrollPane(contentField).apply { preferredSize = Dimension(480, 360) }, gbc)
+            gbc.gridx = 1; gbc.gridy = 2
+            gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weighty = 0.0
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                isOpaque = false
+                add(saveButton)
+                add(cancelButton)
+            }, gbc)
+        }
+        viewCards.add(viewPanel, "view")
+        viewCards.add(editPanel, "edit")
+
+        val leftPanel = JPanel(BorderLayout(0, 8)).apply {
+            background = pageColor
+            preferredSize = Dimension(470, 600)
+            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+            add(JPanel(BorderLayout(8, 8)).apply {
+                background = surfaceColor
+                add(JLabel("Skill Manager").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.NORTH)
+                add(searchField, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                    isOpaque = false
+                    add(checkUpdateButton)
+                    add(newSkillButton)
+                }, BorderLayout.EAST)
+            }, BorderLayout.NORTH)
+            add(JPanel(BorderLayout(8, 8)).apply {
+                background = pageColor
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                    isOpaque = false
+                    add(refreshSkillsButton)
+                    add(sortField)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(skillList).apply {
+                    border = BorderFactory.createLineBorder(designBorderColor)
+                    viewport.background = surfaceColor
+                }, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+        }
+
+        val rightPanel = JPanel(BorderLayout(0, 12)).apply {
+            background = pageColor
+            border = BorderFactory.createEmptyBorder(18, 18, 18, 18)
+            add(JPanel(BorderLayout(12, 0)).apply {
+                background = pageColor
+                add(JPanel(BorderLayout(8, 0)).apply {
+                    isOpaque = false
+                    add(titleLabel, BorderLayout.CENTER)
+                    add(scopeLabel, BorderLayout.EAST)
+                }, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                    isOpaque = false
+                    add(editButton)
+                    add(duplicateButton)
+                    add(deleteButton)
+                }, BorderLayout.EAST)
+            }, BorderLayout.NORTH)
+            add(viewCards, BorderLayout.CENTER)
+        }
+
+        refreshList(null)
+        applySkillToDetails(null)
+        return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel).apply {
+            resizeWeight = 0.38
+            dividerSize = 1
+            border = BorderFactory.createEmptyBorder()
+            background = pageColor
+        }
+    }
+
+    private inner class SkillListCellRenderer(
+        private val bgColor: Color,
+        private val fgColor: Color,
+        private val mutedColor: Color,
+        private val borderColor: Color,
+        private val accentColor: Color,
+        private val commonFont: Font
+    ) : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            val panel = JPanel(BorderLayout(8, 0)).apply {
+                background = if (isSelected) accentColor else bgColor
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, borderColor),
+                    BorderFactory.createEmptyBorder(8, 10, 8, 10)
+                )
+            }
+            val textColor = if (isSelected) Color.WHITE else fgColor
+            when (val row = value as? SkillListRow) {
+                is SkillListRow.All -> {
+                    panel.add(JLabel("☁  All").apply {
+                        foreground = textColor
+                        font = commonFont.deriveFont(Font.BOLD, 14f)
+                    }, BorderLayout.WEST)
+                    panel.add(JLabel("${row.count}").apply {
+                        foreground = mutedColor
+                        font = commonFont.deriveFont(Font.PLAIN, 12f)
+                    }, BorderLayout.EAST)
+                }
+                is SkillListRow.SkillRow -> {
+                    val icon = if (row.skill.isGlobal) "🌐" else "📁"
+                    val nameLabel = JLabel("${icon}  ${row.skill.displayName}").apply {
+                        foreground = textColor
+                        font = commonFont.deriveFont(Font.PLAIN, 14f)
+                    }
+                    val updatedLabel = JLabel(row.skill.updatedText).apply {
+                        foreground = mutedColor
+                        font = commonFont.deriveFont(Font.PLAIN, 11f)
+                    }
+                    val leftPanel = JPanel(BorderLayout(0, 2)).apply {
+                        isOpaque = false
+                        add(nameLabel, BorderLayout.NORTH)
+                        add(updatedLabel, BorderLayout.SOUTH)
+                    }
+                    panel.add(leftPanel, BorderLayout.CENTER)
+                }
+                is SkillListRow.AddSkill -> {
+                    panel.add(JLabel("+ Add Skill").apply {
+                        foreground = mutedColor
+                        font = commonFont.deriveFont(Font.ITALIC, 13f)
+                    }, BorderLayout.CENTER)
+                }
+                null -> {}
+            }
+            return panel
+        }
+    }
+
+    private fun parseSkillItems(yaml: String): LinkedHashMap<String, String> {
+        val parsed = Yaml().load<Any?>(yaml) as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val result = LinkedHashMap<String, String>()
+        parsed.forEach { (k, v) ->
+            val key = k?.toString()?.trim().orEmpty()
+            val value = v?.toString().orEmpty()
+            if (key.isNotBlank() && value.isNotBlank()) result[key] = value
+        }
+        return result
+    }
+
+    private fun isGlobalSkillName(name: String): Boolean {
+        return name.startsWith("[ADA]") || name.startsWith("[repo]") || name.startsWith("global/")
+    }
+
+    private fun updatedText(name: String): String {
+        val match = Regex("\\[([^]]+)]").find(name)
+        return match?.groupValues?.get(1) ?: "—"
     }
 
     private inner class PromptListCellRenderer(
