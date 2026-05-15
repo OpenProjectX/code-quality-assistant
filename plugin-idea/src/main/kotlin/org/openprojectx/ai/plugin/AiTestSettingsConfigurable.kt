@@ -98,6 +98,7 @@ class AiTestSettingsConfigurable(
 
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
     private var selectedPromptSelection: PromptSelection? = null
+    private var suppressedGlobalPrompts: Set<String> = emptySet()
 
     private enum class PromptCategory(val label: String) {
         TEST("Test"),
@@ -105,6 +106,15 @@ class AiTestSettingsConfigurable(
         BRANCH_DIFF("Branch Diff"),
         CODE_GENERATE("Code Generate"),
         CODE_REVIEW("Code Review");
+
+        val globalCategoryKey: String
+            get() = when (this) {
+                TEST -> "test"
+                COMMIT -> "commit"
+                BRANCH_DIFF -> "branchDiff"
+                CODE_GENERATE -> "codeGenerate"
+                CODE_REVIEW -> "codeReview"
+            }
 
         override fun toString(): String = label
     }
@@ -459,6 +469,10 @@ class AiTestSettingsConfigurable(
             maps[currentSelection.category]?.remove(currentSelection.name)
         }
 
+        if (isGlobalPromptName(name)) {
+            suppressedGlobalPrompts = suppressedGlobalPrompts - globalPromptSuppressionKey(category, name)
+        }
+
         val targetMap = maps.getValue(category)
         if (targetMap.containsKey(name) && (currentSelection == null || currentSelection.name != name || currentSelection.category != category)) {
             Messages.showErrorDialog(project, "Prompt name already exists in selected category.", "AI Test Generator")
@@ -476,17 +490,14 @@ class AiTestSettingsConfigurable(
             Messages.showErrorDialog(project, "Select a prompt before deleting.", "AI Test Generator")
             return
         }
-        if (selection.isGlobal) {
-            Messages.showErrorDialog(project, "Global prompt cannot be deleted.", "AI Test Generator")
-            return
-        }
-
         val maps = mutableMapsByCategory()
         val map = maps.getValue(selection.category)
         map.remove(selection.name)
+        if (selection.isGlobal) {
+            suppressedGlobalPrompts = suppressedGlobalPrompts + globalPromptSuppressionKey(selection.category, selection.name)
+        }
         if (map.isEmpty()) {
-            Messages.showErrorDialog(project, "At least one prompt must remain in this category.", "AI Test Generator")
-            return
+            map[PromptProfileSet.DEFAULT_NAME] = defaultPromptTemplateByCategory(selection.category)
         }
         applyMapsByCategory(maps)
 
@@ -617,6 +628,19 @@ class AiTestSettingsConfigurable(
             PromptCategory.CODE_REVIEW -> codeReviewPromptProfileDefaultField
         }
     }
+
+    private fun defaultPromptTemplateByCategory(category: PromptCategory): String {
+        return when (category) {
+            PromptCategory.TEST -> generationPromptWrapperField.text.ifBlank { AiPromptDefaults.GENERATION_WRAPPER }
+            PromptCategory.COMMIT -> commitPromptField.text.ifBlank { AiPromptDefaults.COMMIT_MESSAGE }
+            PromptCategory.BRANCH_DIFF -> branchDiffPromptField.text.ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY }
+            PromptCategory.CODE_GENERATE -> AiPromptDefaults.CODE_GENERATE
+            PromptCategory.CODE_REVIEW -> AiPromptDefaults.CODE_REVIEW
+        }
+    }
+
+    private fun globalPromptSuppressionKey(category: PromptCategory, name: String): String =
+        "${category.globalCategoryKey}:$name"
 
     private fun formSection(title: String, rows: List<Pair<String, JComponent>>): JComponent {
         val panel = JPanel(GridBagLayout())
@@ -761,7 +785,8 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoToken = String(bitbucketPromptRepoTokenField.password).trim(),
         bitbucketPromptRepoUsername = bitbucketPromptRepoUsernameField.text.trim(),
         bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim(),
-        bitbucketConfigImportPath = bitbucketHardcodedPathField.text.trim()
+        bitbucketConfigImportPath = bitbucketHardcodedPathField.text.trim(),
+        suppressedGlobalPrompts = suppressedGlobalPrompts.sorted()
     )
 
     private fun applyState(state: AiTestSettingsModel) {
@@ -809,6 +834,7 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoUsernameField.text = state.bitbucketPromptRepoUsername
         bitbucketPromptRepoPasswordField.text = state.bitbucketPromptRepoPassword
         bitbucketHardcodedPathField.text = state.bitbucketConfigImportPath
+        suppressedGlobalPrompts = state.suppressedGlobalPrompts.toSet()
 
         refreshPromptManager()
         toggleTemplateCards()

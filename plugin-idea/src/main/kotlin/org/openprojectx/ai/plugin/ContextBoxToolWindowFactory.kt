@@ -6,6 +6,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -13,13 +14,17 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.runBlocking
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Color
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Component
+import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import javax.swing.BorderFactory
+import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JComboBox
@@ -29,6 +34,9 @@ import javax.swing.JPanel
 import javax.swing.JTabbedPane
 import javax.swing.JTextField
 import javax.swing.JTextArea
+import javax.swing.JSplitPane
+import javax.swing.ListSelectionModel
+import java.awt.datatransfer.StringSelection
 import javax.swing.UIManager
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
@@ -43,9 +51,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val commonFont = UIManager.getFont("Label.font")
             ?.deriveFont(Font.PLAIN, 13f)
             ?: Font("SansSerif", Font.PLAIN, 13)
-        val bgColor = Color(0x0D, 0x0D, 0x0D)
-        val fgColor = Color(0xFF, 0xFF, 0xFF)
-        val borderColor = Color(0x22, 0x22, 0x22)
+        val bgColor = Color(0x0F, 0x17, 0x2A)
+        val fgColor = Color(0xE5, 0xED, 0xF7)
+        val borderColor = Color(0x2A, 0x3A, 0x52)
 
         val resultArea = JTextArea().apply {
             isEditable = false
@@ -160,7 +168,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         )
 
         val tabs = JTabbedPane().apply {
-            addTab("Context Box", panel)
+            addTab("Context", panel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
             if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
                 addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
@@ -172,23 +180,69 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private enum class PromptCategory(val label: String) {
-        TEST("Test"),
-        COMMIT("Commit"),
-        BRANCH_DIFF("Branch Diff"),
+        TEST("Test Generate"),
+        COMMIT("Commit Generate"),
+        BRANCH_DIFF("Branch Compare"),
         CODE_GENERATE("Code Generate"),
         CODE_REVIEW("Code Review");
+
+        val globalCategoryKey: String
+            get() = when (this) {
+                TEST -> "test"
+                COMMIT -> "commit"
+                BRANCH_DIFF -> "branchDiff"
+                CODE_GENERATE -> "codeGenerate"
+                CODE_REVIEW -> "codeReview"
+            }
 
         override fun toString(): String = label
     }
 
-    private data class PromptItem(
+    private enum class PromptSort(val label: String) {
+        TYPE("Sort by: Type"),
+        NAME("Sort by: Name"),
+        UPDATED("Sort by: Updated");
+
+        override fun toString(): String = label
+    }
+
+    private data class PromptDefinition(
         val category: PromptCategory,
         val name: String,
+        val content: String,
         val isGlobal: Boolean,
-        val isNew: Boolean = false
+        val updatedText: String = "—"
     ) {
-        override fun toString(): String = name
+        val displayName: String
+            get() = name.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "")
     }
+
+    private sealed class PromptListRow {
+        data class All(val count: Int) : PromptListRow()
+        data class CategoryHeader(val category: PromptCategory, val count: Int, val collapsed: Boolean) : PromptListRow()
+        data class PromptRow(val prompt: PromptDefinition) : PromptListRow()
+        data class AddPrompt(val category: PromptCategory) : PromptListRow()
+        object CustomHeader : PromptListRow()
+    }
+
+    private fun categoryIcon(category: PromptCategory): String = when (category) {
+        PromptCategory.TEST -> "⚗"
+        PromptCategory.COMMIT -> "⌘"
+        PromptCategory.BRANCH_DIFF -> "⑂"
+        PromptCategory.CODE_GENERATE -> "</>"
+        PromptCategory.CODE_REVIEW -> "▣"
+    }
+
+    private fun categoryColor(category: PromptCategory): Color = when (category) {
+        PromptCategory.TEST -> Color(0xA7, 0x8B, 0xFA)
+        PromptCategory.COMMIT -> Color(0xF5, 0x9E, 0x0B)
+        PromptCategory.BRANCH_DIFF -> Color(0x38, 0xB2, 0xDF)
+        PromptCategory.CODE_GENERATE -> Color(0x22, 0xC5, 0x5E)
+        PromptCategory.CODE_REVIEW -> Color(0xFB, 0x71, 0x85)
+    }
+
+    private fun scopeColor(isGlobal: Boolean): Color =
+        if (isGlobal) Color(0x60, 0xA5, 0xFA) else Color(0x34, 0xD3, 0x99)
 
     private fun createPromptManagerPanel(
         project: Project,
@@ -196,23 +250,91 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         fgColor: Color,
         borderColor: Color,
         commonFont: Font
-    ): JPanel {
+    ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val listModel = DefaultListModel<PromptItem>()
+        val pageColor = Color(0x0F, 0x17, 0x2A)
+        val surfaceColor = Color(0x11, 0x1C, 0x2F)
+        val inputColor = Color(0x0B, 0x12, 0x20)
+        val accentColor = Color(0x3B, 0x82, 0xF6)
+        val mutedColor = Color(0x94, 0xA3, 0xB8)
+        val cardColor = Color(0x14, 0x1F, 0x34)
+        val designBorderColor = borderColor
+        val promptFont = UIManager.getFont("EditorPane.font")
+            ?.deriveFont(Font.PLAIN, 14f)
+            ?: Font("JetBrains Mono", Font.PLAIN, 14)
+        val listModel = DefaultListModel<PromptListRow>()
+        val collapsedCategories = mutableSetOf<PromptCategory>()
+        var selectedPrompt: PromptDefinition? = null
+
+        val searchField = JTextField().apply {
+            toolTipText = "Search prompts"
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(designBorderColor),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            )
+        }
+        val typeFilter = JComboBox(arrayOf("All Types") + PromptCategory.entries.map { it.label }.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
+        val sortField = JComboBox(PromptSort.entries.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
         val promptList = JList(listModel).apply {
             font = commonFont
-            background = bgColor
+            background = surfaceColor
             foreground = fgColor
-            selectionBackground = Color(0x1B, 0x3A, 0x57)
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            selectionBackground = accentColor
             selectionForeground = Color.WHITE
+            fixedCellHeight = -1
+            cellRenderer = PromptListCellRenderer(surfaceColor, fgColor, mutedColor, designBorderColor, accentColor, commonFont)
         }
-        val categoryField = JComboBox(PromptCategory.entries.toTypedArray())
-        val nameField = JTextField()
+        val categoryField = JComboBox(PromptCategory.entries.toTypedArray()).apply {
+            background = inputColor
+            foreground = fgColor
+        }
+        val nameField = JTextField().apply {
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(designBorderColor),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            )
+        }
         val contentField = JTextArea().apply {
             lineWrap = true
             wrapStyleWord = true
-            font = commonFont
+            font = promptFont
+            background = inputColor
+            foreground = fgColor
+            caretColor = fgColor
         }
+        val titleLabel = JLabel("Select a prompt").apply {
+            foreground = fgColor
+            font = commonFont.deriveFont(Font.PLAIN, 18f)
+        }
+        val scopeLabel = JLabel("—").apply { foreground = mutedColor }
+        val detailsPanel = JPanel(GridBagLayout()).apply {
+            background = surfaceColor
+            border = BorderFactory.createLineBorder(designBorderColor)
+        }
+        val contentPreview = JTextArea().apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = promptFont
+            background = cardColor
+            foreground = fgColor
+            caretColor = fgColor
+            border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        }
+        val viewCards = JPanel(CardLayout()).apply { background = pageColor }
 
         fun mapForCategory(model: AiTestSettingsModel, category: PromptCategory): LinkedHashMap<String, String> {
             val text = when (category) {
@@ -241,220 +363,607 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             return Yaml(options).dump(value).trimEnd()
         }
 
-        fun refreshList(select: PromptItem? = null) {
-            listModel.removeAllElements()
+        fun mapsForModel(model: AiTestSettingsModel): Map<PromptCategory, LinkedHashMap<String, String>> = mapOf(
+            PromptCategory.TEST to mapForCategory(model, PromptCategory.TEST),
+            PromptCategory.COMMIT to mapForCategory(model, PromptCategory.COMMIT),
+            PromptCategory.BRANCH_DIFF to mapForCategory(model, PromptCategory.BRANCH_DIFF),
+            PromptCategory.CODE_GENERATE to mapForCategory(model, PromptCategory.CODE_GENERATE),
+            PromptCategory.CODE_REVIEW to mapForCategory(model, PromptCategory.CODE_REVIEW)
+        )
+
+        fun updateModelFromMaps(
+            model: AiTestSettingsModel,
+            maps: Map<PromptCategory, LinkedHashMap<String, String>>,
+            suppressed: List<String> = model.suppressedGlobalPrompts
+        ): AiTestSettingsModel = model.copy(
+            generationPromptProfilesYaml = dumpYaml(maps.getValue(PromptCategory.TEST)),
+            commitPromptProfilesYaml = dumpYaml(maps.getValue(PromptCategory.COMMIT)),
+            branchDiffPromptProfilesYaml = dumpYaml(maps.getValue(PromptCategory.BRANCH_DIFF)),
+            codeGeneratePromptProfilesYaml = dumpYaml(maps.getValue(PromptCategory.CODE_GENERATE)),
+            codeReviewPromptProfilesYaml = dumpYaml(maps.getValue(PromptCategory.CODE_REVIEW)),
+            suppressedGlobalPrompts = suppressed.distinct().sorted()
+        )
+
+        fun updatedText(name: String): String {
+            val match = Regex("\\[([^]]+)]$").find(name)?.groupValues?.get(1).orEmpty()
+            return match.takeIf { it.isNotBlank() }?.replace('T', ' ')?.take(16) ?: "—"
+        }
+
+        fun allPrompts(): List<PromptDefinition> {
             val model = LlmSettingsLoader.loadSettingsModel(project)
-            PromptCategory.entries.forEach { category ->
-                val map = mapForCategory(model, category)
-                map.keys.forEach { name ->
-                    listModel.addElement(PromptItem(category, name, isGlobalPromptName(name)))
+            return PromptCategory.entries.flatMap { category ->
+                mapForCategory(model, category).map { (name, content) ->
+                    PromptDefinition(category, name, content, isGlobalPromptName(name), updatedText(name))
                 }
             }
-            listModel.addElement(PromptItem(PromptCategory.TEST, "new prompt", isGlobal = false, isNew = true))
+        }
+
+        fun promptSuppressionKeys(prompt: PromptDefinition): List<String> =
+            listOf(prompt.name, prompt.displayName)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .map { "${prompt.category.globalCategoryKey}:$it" }
+
+        fun removePromptFromMap(map: MutableMap<String, String>, prompt: PromptDefinition) {
+            val namesToRemove = setOf(prompt.name, prompt.displayName)
+            map.keys
+                .filter { it in namesToRemove || it.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "") == prompt.displayName }
+                .toList()
+                .forEach { map.remove(it) }
+        }
+
+        fun applyPromptToDetails(prompt: PromptDefinition?) {
+            selectedPrompt = prompt
+            if (prompt == null) {
+                titleLabel.text = "Select a prompt"
+                titleLabel.foreground = fgColor
+                scopeLabel.text = ""
+                scopeLabel.toolTipText = null
+                scopeLabel.foreground = mutedColor
+                contentPreview.text = ""
+                detailsPanel.removeAll()
+                detailsPanel.revalidate()
+                detailsPanel.repaint()
+                return
+            }
+            titleLabel.text = prompt.displayName
+            titleLabel.foreground = categoryColor(prompt.category)
+            scopeLabel.text = if (prompt.isGlobal) "🌐" else "📁"
+            scopeLabel.toolTipText = if (prompt.isGlobal) "Global" else "Local"
+            scopeLabel.foreground = scopeColor(prompt.isGlobal)
+            contentPreview.text = prompt.content
+            contentPreview.caretPosition = 0
+            detailsPanel.removeAll()
+
+            fun addDetailRow(row: Int, label: String, value: String, valueColor: Color = fgColor) {
+                val labelConstraints = GridBagConstraints().apply {
+                    gridx = 0
+                    gridy = row
+                    weightx = 0.0
+                    fill = GridBagConstraints.HORIZONTAL
+                }
+                detailsPanel.add(JLabel(label).apply {
+                    foreground = mutedColor
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(designBorderColor),
+                        BorderFactory.createEmptyBorder(10, 12, 10, 12)
+                    )
+                }, labelConstraints)
+
+                val valueConstraints = GridBagConstraints().apply {
+                    gridx = 1
+                    gridy = row
+                    weightx = 1.0
+                    fill = GridBagConstraints.HORIZONTAL
+                }
+                detailsPanel.add(JLabel(value).apply {
+                    foreground = valueColor
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(designBorderColor),
+                        BorderFactory.createEmptyBorder(10, 12, 10, 12)
+                    )
+                }, valueConstraints)
+            }
+
+            addDetailRow(0, "Name", prompt.displayName, categoryColor(prompt.category))
+            addDetailRow(1, "Type", "${categoryIcon(prompt.category)}  ${prompt.category.label}", categoryColor(prompt.category))
+            addDetailRow(2, "Scope", if (prompt.isGlobal) "🌐" else "📁", scopeColor(prompt.isGlobal))
+            addDetailRow(3, "Updated Time", prompt.updatedText)
+            detailsPanel.revalidate()
+            detailsPanel.repaint()
+        }
+
+        fun showEditor(prompt: PromptDefinition?) {
+            categoryField.selectedItem = prompt?.category ?: PromptCategory.TEST
+            categoryField.isEnabled = prompt?.isGlobal != true
+            nameField.isEditable = prompt?.isGlobal != true
+            nameField.text = when {
+                prompt == null -> ""
+                prompt.isGlobal -> prompt.name
+                else -> prompt.displayName
+            }
+            contentField.text = prompt?.content.orEmpty()
+            (viewCards.layout as CardLayout).show(viewCards, "edit")
+            nameField.requestFocusInWindow()
+        }
+
+        fun refreshList(select: PromptDefinition? = selectedPrompt) {
+            listModel.removeAllElements()
+            val query = searchField.text.trim().lowercase()
+            val selectedType = typeFilter.selectedItem?.toString().orEmpty()
+            val sort = sortField.selectedItem as? PromptSort ?: PromptSort.TYPE
+            val prompts = allPrompts()
+                .filter { query.isBlank() || it.displayName.lowercase().contains(query) || it.content.lowercase().contains(query) }
+                .filter { selectedType == "All Types" || it.category.label == selectedType }
+                .let { list ->
+                    when (sort) {
+                        PromptSort.TYPE -> list.sortedWith(compareBy<PromptDefinition> { it.category.ordinal }.thenBy { it.displayName })
+                        PromptSort.NAME -> list.sortedBy { it.displayName }
+                        PromptSort.UPDATED -> list.sortedByDescending { it.updatedText }
+                    }
+                }
+            listModel.addElement(PromptListRow.All(prompts.size))
+            PromptCategory.entries.forEach { category ->
+                val categoryPrompts = prompts.filter { it.category == category }
+                listModel.addElement(PromptListRow.CategoryHeader(category, categoryPrompts.size, category in collapsedCategories))
+                if (category !in collapsedCategories) {
+                    categoryPrompts.forEach { listModel.addElement(PromptListRow.PromptRow(it)) }
+                    listModel.addElement(PromptListRow.AddPrompt(category))
+                }
+            }
+            listModel.addElement(PromptListRow.CustomHeader)
             if (select != null) {
                 val index = (0 until listModel.size()).firstOrNull {
-                    val item = listModel.get(it)
-                    item.category == select.category && item.name == select.name
+                    val row = listModel.get(it)
+                    row is PromptListRow.PromptRow && row.prompt.category == select.category && row.prompt.name == select.name
                 } ?: -1
-                if (index >= 0) promptList.selectedIndex = index
+                if (index >= 0) {
+                    promptList.selectedIndex = index
+                } else {
+                    promptList.clearSelection()
+                }
+            } else {
+                promptList.clearSelection()
             }
+            promptList.revalidate()
+            promptList.repaint()
         }
-
-        fun selectedItem(): PromptItem? = promptList.selectedValue?.takeIf { !it.isNew }
 
         promptList.addListSelectionListener {
-            val rawSelected = promptList.selectedValue ?: return@addListSelectionListener
-            if (rawSelected.isNew) {
-                categoryField.selectedItem = PromptCategory.TEST
-                nameField.text = ""
-                contentField.text = ""
-                return@addListSelectionListener
+            if (it.valueIsAdjusting) return@addListSelectionListener
+            when (val row = promptList.selectedValue) {
+                is PromptListRow.All -> applyPromptToDetails(null)
+                is PromptListRow.CategoryHeader -> {
+                    if (row.category in collapsedCategories) collapsedCategories.remove(row.category) else collapsedCategories.add(row.category)
+                    refreshList(null)
+                }
+                is PromptListRow.PromptRow -> {
+                    applyPromptToDetails(row.prompt)
+                    (viewCards.layout as CardLayout).show(viewCards, "view")
+                }
+                is PromptListRow.AddPrompt -> {
+                    selectedPrompt = null
+                    categoryField.isEnabled = true
+                    nameField.isEditable = true
+                    categoryField.selectedItem = row.category
+                    nameField.text = ""
+                    contentField.text = ""
+                    (viewCards.layout as CardLayout).show(viewCards, "edit")
+                }
+                PromptListRow.CustomHeader, null -> Unit
             }
-            val selected = selectedItem() ?: return@addListSelectionListener
-            val model = LlmSettingsLoader.loadSettingsModel(project)
-            val value = mapForCategory(model, selected.category)[selected.name].orEmpty()
-            categoryField.selectedItem = selected.category
-            nameField.text = selected.name
-            contentField.text = value
         }
 
-        val saveButton = javax.swing.JButton("Save")
-        val deleteButton = javax.swing.JButton("Delete")
-        val checkUpdateButton = javax.swing.JButton("Check Update")
-        val pullUpdateButton = javax.swing.JButton("Pull Update")
+        searchField.document.addDocumentListener(SimpleDocumentListener { refreshList(null) })
+        typeFilter.addActionListener { refreshList(null) }
+        sortField.addActionListener { refreshList(selectedPrompt) }
+
+        fun compactActionButton(text: String, tooltip: String): JButton = JButton(text).apply {
+            toolTipText = tooltip
+            margin = Insets(1, 5, 1, 5)
+            preferredSize = Dimension(28, 26)
+            minimumSize = preferredSize
+            font = commonFont.deriveFont(Font.PLAIN, 12f)
+        }
+
+        val saveButton = JButton("Save")
+        val cancelButton = JButton("Cancel")
+        val editButton = compactActionButton("✎", "Edit prompt")
+        val duplicateButton = compactActionButton("⧉", "Duplicate prompt")
+        val deleteButton = compactActionButton("🗑", "Delete or hide prompt")
+        val refreshPromptsButton = compactActionButton("↻", "Refresh prompt list")
+        val checkUpdateButton = JButton("☁ Check Update")
+        val newPromptButton = JButton("+ New Prompt")
+        val copyButton = JButton("⧉").apply {
+            toolTipText = "Copy prompt content"
+            margin = Insets(0, 0, 0, 0)
+            preferredSize = Dimension(36, 30)
+            minimumSize = preferredSize
+            maximumSize = preferredSize
+            font = commonFont.deriveFont(Font.PLAIN, 14f)
+        }
+        searchField.preferredSize = Dimension(searchField.preferredSize.width.coerceAtLeast(220), checkUpdateButton.preferredSize.height)
+        searchField.minimumSize = Dimension(160, checkUpdateButton.preferredSize.height)
+
+        fun promptUpdateMessage(status: LlmSettingsLoader.PromptUpdateStatus): String =
+            "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+
+        fun setUpdateControlsEnabled(enabled: Boolean) {
+            checkUpdateButton.isEnabled = enabled
+        }
+
+        fun handlePullUpdateStatus(status: LlmSettingsLoader.PromptUpdateStatus) {
+            if (!status.configured) {
+                Notifications.warn(project, "Prompt Manager", status.message)
+                return
+            }
+            if (status.error) {
+                Notifications.error(project, "Prompt Manager", status.message)
+                return
+            }
+            refreshList(selectedPrompt)
+            Notifications.info(project, "Prompt Manager", promptUpdateMessage(status))
+        }
+
+        fun performPullUpdate() {
+            usage.record("context_box.prompt_manager.pull_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Pull Prompt Updates", true) {
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Pulling prompt updates..."
+                    status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        status?.let { handlePullUpdateStatus(it) }
+                    }
+                }
+            })
+        }
+
+        fun handleCheckUpdateStatus(status: LlmSettingsLoader.PromptUpdateStatus) {
+            if (!status.configured) {
+                Notifications.warn(project, "Prompt Manager", status.message)
+                return
+            }
+            if (status.error) {
+                Notifications.error(project, "Prompt Manager", status.message)
+                return
+            }
+            val message = promptUpdateMessage(status)
+            if (status.hasUpdates) {
+                val choice = Messages.showYesNoDialog(project, "$message\n\nUpdate prompts now?", "Prompt Manager", "Update", "Later", null)
+                if (choice == Messages.YES) performPullUpdate() else Notifications.info(project, "Prompt Manager", message)
+            } else {
+                Notifications.info(project, "Prompt Manager", message)
+            }
+        }
+
+        checkUpdateButton.addActionListener {
+            usage.record("context_box.prompt_manager.check_update")
+            setUpdateControlsEnabled(false)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Check Prompt Updates", true) {
+                private var status: LlmSettingsLoader.PromptUpdateStatus? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.text = "Checking prompt updates..."
+                    status = LlmSettingsLoader.checkBitbucketPromptUpdates(project)
+                }
+
+                override fun onFinished() {
+                    ApplicationManager.getApplication().invokeLater {
+                        setUpdateControlsEnabled(true)
+                        status?.let { handleCheckUpdateStatus(it) }
+                    }
+                }
+            })
+        }
+
+        refreshPromptsButton.addActionListener {
+            usage.record("context_box.prompt_manager.refresh")
+            refreshList(selectedPrompt)
+        }
+
+        newPromptButton.addActionListener {
+            usage.record("context_box.prompt_manager.new")
+            selectedPrompt = null
+            showEditor(null)
+        }
+
+        editButton.addActionListener {
+            usage.record("context_box.prompt_manager.edit")
+            showEditor(selectedPrompt)
+        }
+
+        duplicateButton.addActionListener {
+            usage.record("context_box.prompt_manager.duplicate")
+            val prompt = selectedPrompt ?: return@addActionListener
+            selectedPrompt = null
+            categoryField.isEnabled = true
+            nameField.isEditable = true
+            categoryField.selectedItem = prompt.category
+            nameField.text = "${prompt.displayName} Copy"
+            contentField.text = prompt.content
+            (viewCards.layout as CardLayout).show(viewCards, "edit")
+        }
+
+        copyButton.addActionListener {
+            val content = selectedPrompt?.content.orEmpty()
+            if (content.isNotBlank()) {
+                CopyPasteManager.getInstance().setContents(StringSelection(content))
+                Notifications.info(project, "Prompt Manager", "Prompt content copied.")
+            }
+        }
 
         saveButton.addActionListener {
             usage.record("context_box.prompt_manager.save")
-            val category = categoryField.selectedItem as? PromptCategory ?: PromptCategory.TEST
-            val name = nameField.text.trim()
+            val current = selectedPrompt
+            val category = if (current?.isGlobal == true) current.category else categoryField.selectedItem as? PromptCategory ?: PromptCategory.TEST
+            val name = if (current?.isGlobal == true) current.name else nameField.text.trim()
             val content = contentField.text.trim()
             if (name.isBlank() || content.isBlank()) {
                 Messages.showErrorDialog(project, "Prompt name and content are required.", "Prompt Manager")
                 return@addActionListener
             }
-            val selected = selectedItem()
             val model = LlmSettingsLoader.loadSettingsModel(project)
-            val test = mapForCategory(model, PromptCategory.TEST)
-            val commit = mapForCategory(model, PromptCategory.COMMIT)
-            val branch = mapForCategory(model, PromptCategory.BRANCH_DIFF)
-            val codeGenerate = mapForCategory(model, PromptCategory.CODE_GENERATE)
-            val codeReview = mapForCategory(model, PromptCategory.CODE_REVIEW)
-
-            if (selected != null) {
-                val target = when (selected.category) {
-                    PromptCategory.TEST -> test
-                    PromptCategory.COMMIT -> commit
-                    PromptCategory.BRANCH_DIFF -> branch
-                    PromptCategory.CODE_GENERATE -> codeGenerate
-                    PromptCategory.CODE_REVIEW -> codeReview
-                }
-                if (selected.isGlobal && (selected.category != category || selected.name != name)) {
+            val maps = mapsForModel(model).mapValues { LinkedHashMap(it.value) }
+            if (current != null) {
+                if (current.isGlobal && (current.category != category || current.name != name)) {
                     Messages.showErrorDialog(project, "Global prompt name/category cannot be changed.", "Prompt Manager")
                     return@addActionListener
                 }
-                target.remove(selected.name)
+                maps.getValue(current.category).remove(current.name)
             }
-
-            val finalTarget = when (category) {
-                PromptCategory.TEST -> test
-                PromptCategory.COMMIT -> commit
-                PromptCategory.BRANCH_DIFF -> branch
-                PromptCategory.CODE_GENERATE -> codeGenerate
-                PromptCategory.CODE_REVIEW -> codeReview
+            val target = maps.getValue(category)
+            if (target.containsKey(name) && (current == null || current.category != category || current.name != name)) {
+                Messages.showErrorDialog(project, "Prompt name already exists in selected category.", "Prompt Manager")
+                return@addActionListener
             }
-            finalTarget[name] = content
-
-            val updated = model.copy(
-                generationPromptProfilesYaml = dumpYaml(test),
-                commitPromptProfilesYaml = dumpYaml(commit),
-                branchDiffPromptProfilesYaml = dumpYaml(branch),
-                codeGeneratePromptProfilesYaml = dumpYaml(codeGenerate),
-                codeReviewPromptProfilesYaml = dumpYaml(codeReview)
-            )
+            target[name] = content
+            val suppressionKey = "${category.globalCategoryKey}:$name"
+            val suppressed = if (isGlobalPromptName(name)) model.suppressedGlobalPrompts - suppressionKey else model.suppressedGlobalPrompts
+            val updated = updateModelFromMaps(model, maps, suppressed)
             LlmSettingsLoader.saveSettingsModel(project, updated)
-            refreshList(PromptItem(category, name, false))
+            val saved = PromptDefinition(category, name, content, isGlobalPromptName(name), updatedText(name))
+            applyPromptToDetails(saved)
+            refreshList(saved)
+            (viewCards.layout as CardLayout).show(viewCards, "view")
         }
 
         deleteButton.addActionListener {
             usage.record("context_box.prompt_manager.delete")
-            val selected = selectedItem()
-            if (selected == null) {
+            val prompt = selectedPrompt
+            if (prompt == null) {
                 Messages.showErrorDialog(project, "Please select a prompt first.", "Prompt Manager")
                 return@addActionListener
             }
-            if (selected.isGlobal) {
-                Messages.showErrorDialog(project, "Global prompt cannot be deleted.", "Prompt Manager")
-                return@addActionListener
-            }
-            val model = LlmSettingsLoader.loadSettingsModel(project)
-            val test = mapForCategory(model, PromptCategory.TEST)
-            val commit = mapForCategory(model, PromptCategory.COMMIT)
-            val branch = mapForCategory(model, PromptCategory.BRANCH_DIFF)
-            val codeGenerate = mapForCategory(model, PromptCategory.CODE_GENERATE)
-            val codeReview = mapForCategory(model, PromptCategory.CODE_REVIEW)
-            when (selected.category) {
-                PromptCategory.TEST -> test.remove(selected.name)
-                PromptCategory.COMMIT -> commit.remove(selected.name)
-                PromptCategory.BRANCH_DIFF -> branch.remove(selected.name)
-                PromptCategory.CODE_GENERATE -> codeGenerate.remove(selected.name)
-                PromptCategory.CODE_REVIEW -> codeReview.remove(selected.name)
-            }
-            val updated = model.copy(
-                generationPromptProfilesYaml = dumpYaml(test),
-                commitPromptProfilesYaml = dumpYaml(commit),
-                branchDiffPromptProfilesYaml = dumpYaml(branch),
-                codeGeneratePromptProfilesYaml = dumpYaml(codeGenerate),
-                codeReviewPromptProfilesYaml = dumpYaml(codeReview)
-            )
-            LlmSettingsLoader.saveSettingsModel(project, updated)
-            refreshList()
-            promptList.selectedIndex = listModel.size() - 1
-        }
-
-        checkUpdateButton.addActionListener {
-            usage.record("context_box.prompt_manager.check_update")
-            val status = LlmSettingsLoader.checkBitbucketPromptUpdates(project)
-            if (!status.configured) {
-                Notifications.warn(project, "Prompt Manager", status.message)
-                return@addActionListener
-            }
-            if (status.error) {
-                Notifications.error(project, "Prompt Manager", status.message)
-            } else if (status.hasUpdates) {
-                Notifications.info(
-                    project,
-                    "Prompt Manager",
-                    "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
-                )
-            } else {
-                Notifications.info(
-                    project,
-                    "Prompt Manager",
-                    "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
-                )
-            }
-        }
-
-        pullUpdateButton.addActionListener {
-            usage.record("context_box.prompt_manager.pull_update")
-            val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
-            if (!status.configured) {
-                Notifications.warn(project, "Prompt Manager", status.message)
-                return@addActionListener
-            }
-            if (status.error) {
-                Notifications.error(project, "Prompt Manager", status.message)
-                return@addActionListener
-            }
-            refreshList()
-            Notifications.info(
+            val actionDescription = if (prompt.isGlobal) "hide this global prompt locally" else "delete this local prompt"
+            val confirm = Messages.showYesNoDialog(
                 project,
+                "Are you sure you want to $actionDescription?",
                 "Prompt Manager",
-                "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                "Delete",
+                "Cancel",
+                null
             )
+            if (confirm != Messages.YES) return@addActionListener
+            val model = LlmSettingsLoader.loadSettingsModel(project)
+            val maps = mapsForModel(model).mapValues { LinkedHashMap(it.value) }
+            removePromptFromMap(maps.getValue(prompt.category), prompt)
+            val suppressed = if (prompt.isGlobal) {
+                model.suppressedGlobalPrompts + promptSuppressionKeys(prompt)
+            } else {
+                model.suppressedGlobalPrompts
+            }
+            LlmSettingsLoader.saveSettingsModel(project, updateModelFromMaps(model, maps, suppressed))
+            selectedPrompt = null
+            refreshList(null)
+            applyPromptToDetails(null)
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+            Notifications.info(project, "Prompt Manager", if (prompt.isGlobal) "Global prompt hidden locally." else "Prompt deleted.")
         }
 
-        val detail = JPanel(GridBagLayout()).apply {
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(borderColor),
-                BorderFactory.createEmptyBorder(8, 8, 8, 8)
-            )
-            background = bgColor
-            foreground = fgColor
+        cancelButton.addActionListener {
+            categoryField.isEnabled = true
+            nameField.isEditable = true
+            (viewCards.layout as CardLayout).show(viewCards, "view")
+        }
 
+        val viewPanel = JPanel(BorderLayout(0, 12)).apply {
+            background = pageColor
+            add(JPanel(BorderLayout()).apply {
+                background = surfaceColor
+                add(JLabel("Details").apply {
+                    foreground = fgColor
+                    font = commonFont.deriveFont(16f)
+                    border = BorderFactory.createEmptyBorder(0, 0, 8, 0)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(detailsPanel).apply { border = BorderFactory.createEmptyBorder() }, BorderLayout.CENTER)
+            }, BorderLayout.NORTH)
+            add(JPanel(BorderLayout(8, 6)).apply {
+                background = pageColor
+                add(JLabel("Prompt Content").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.WEST)
+                add(copyButton, BorderLayout.EAST)
+                add(JBScrollPane(contentPreview).apply {
+                    preferredSize = Dimension(480, 360)
+                    border = BorderFactory.createLineBorder(designBorderColor)
+                    viewport.background = cardColor
+                }, BorderLayout.SOUTH)
+            }, BorderLayout.CENTER)
+        }
+
+        val editPanel = JPanel(GridBagLayout()).apply {
+            background = surfaceColor
+            border = BorderFactory.createLineBorder(designBorderColor)
             val gbc = GridBagConstraints().apply {
-                insets = Insets(4, 4, 4, 4)
+                insets = Insets(6, 6, 6, 6)
                 fill = GridBagConstraints.HORIZONTAL
                 anchor = GridBagConstraints.WEST
             }
-            gbc.gridx = 0; gbc.gridy = 0; add(JLabel("Type"), gbc)
-            gbc.gridx = 1; gbc.weightx = 1.0; add(categoryField, gbc)
-            gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.0; add(JLabel("Name"), gbc)
-            gbc.gridx = 1; gbc.weightx = 1.0; add(nameField, gbc)
-            gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0.0; add(JLabel("Content"), gbc)
-            gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH; gbc.weighty = 1.0
-            add(JBScrollPane(contentField), gbc)
-            gbc.gridx = 1; gbc.gridy = 3; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
+            fun addLabel(row: Int, text: String) {
+                gbc.gridx = 0
+                gbc.gridy = row
+                gbc.weightx = 0.0
+                add(JLabel(text).apply { foreground = mutedColor }, gbc)
+            }
+            addLabel(0, "Type")
+            gbc.gridx = 1
+            gbc.gridy = 0
+            gbc.weightx = 1.0
+            add(categoryField, gbc)
+            addLabel(1, "Name")
+            gbc.gridx = 1
+            gbc.gridy = 1
+            add(nameField, gbc)
+            addLabel(2, "Content")
+            gbc.gridx = 1
+            gbc.gridy = 2
+            gbc.fill = GridBagConstraints.BOTH
+            gbc.weighty = 1.0
+            add(JBScrollPane(contentField).apply { preferredSize = Dimension(480, 360) }, gbc)
+            gbc.gridx = 1
+            gbc.gridy = 3
+            gbc.fill = GridBagConstraints.HORIZONTAL
+            gbc.weighty = 0.0
             add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                add(saveButton); add(deleteButton)
                 isOpaque = false
+                add(saveButton)
+                add(cancelButton)
             }, gbc)
         }
+        viewCards.add(viewPanel, "view")
+        viewCards.add(editPanel, "edit")
 
-        refreshList()
-        promptList.selectedIndex = listModel.size() - 1
-
-        return JPanel(BorderLayout(8, 8)).apply {
-            border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
-            background = bgColor
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                isOpaque = false
-                add(checkUpdateButton)
-                add(pullUpdateButton)
+        val leftPanel = JPanel(BorderLayout(0, 8)).apply {
+            background = pageColor
+            preferredSize = Dimension(470, 600)
+            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+            add(JPanel(BorderLayout(8, 8)).apply {
+                background = surfaceColor
+                add(JLabel("Prompt Manager").apply { foreground = fgColor; font = commonFont.deriveFont(16f) }, BorderLayout.NORTH)
+                add(searchField, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                    isOpaque = false
+                    add(checkUpdateButton)
+                    add(newPromptButton)
+                }, BorderLayout.EAST)
             }, BorderLayout.NORTH)
-            add(JBScrollPane(promptList).apply { border = BorderFactory.createLineBorder(borderColor) }, BorderLayout.WEST)
-            add(detail, BorderLayout.CENTER)
+            add(JPanel(BorderLayout(8, 8)).apply {
+                background = pageColor
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                    isOpaque = false
+                    add(refreshPromptsButton)
+                    add(typeFilter)
+                    add(sortField)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(promptList).apply {
+                    border = BorderFactory.createLineBorder(designBorderColor)
+                    viewport.background = surfaceColor
+                }, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
         }
+
+        val rightPanel = JPanel(BorderLayout(0, 12)).apply {
+            background = pageColor
+            border = BorderFactory.createEmptyBorder(18, 18, 18, 18)
+            add(JPanel(BorderLayout(12, 0)).apply {
+                background = pageColor
+                add(JPanel(BorderLayout(8, 0)).apply {
+                    isOpaque = false
+                    add(titleLabel, BorderLayout.CENTER)
+                    add(scopeLabel, BorderLayout.EAST)
+                }, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                    isOpaque = false
+                    add(editButton)
+                    add(duplicateButton)
+                    add(deleteButton)
+                }, BorderLayout.EAST)
+            }, BorderLayout.NORTH)
+            add(viewCards, BorderLayout.CENTER)
+        }
+
+        refreshList(null)
+        applyPromptToDetails(null)
+        return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel).apply {
+            resizeWeight = 0.38
+            dividerSize = 1
+            border = BorderFactory.createEmptyBorder()
+            background = pageColor
+        }
+    }
+
+    private inner class PromptListCellRenderer(
+        private val bgColor: Color,
+        private val fgColor: Color,
+        private val mutedColor: Color,
+        private val borderColor: Color,
+        private val accentColor: Color,
+        private val commonFont: Font
+    ) : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            val panel = JPanel(BorderLayout(8, 0)).apply {
+                background = if (isSelected) accentColor else bgColor
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, borderColor),
+                    BorderFactory.createEmptyBorder(8, 10, 8, 10)
+                )
+            }
+            fun label(text: String, color: Color = fgColor, size: Float = 13f): JLabel = JLabel(text).apply {
+                foreground = if (isSelected) Color.WHITE else color
+                font = commonFont.deriveFont(size)
+            }
+            when (value) {
+                is PromptListRow.All -> {
+                    panel.add(label("☁  All", fgColor, 15f), BorderLayout.WEST)
+                    panel.add(label(value.count.toString(), mutedColor), BorderLayout.EAST)
+                }
+                is PromptListRow.CategoryHeader -> {
+                    val arrow = if (value.collapsed) "›" else "⌃"
+                    panel.add(label("${categoryIcon(value.category)}  ${value.category.label}", categoryColor(value.category), 15f), BorderLayout.WEST)
+                    panel.add(label("${value.count}   $arrow", mutedColor), BorderLayout.EAST)
+                }
+                is PromptListRow.PromptRow -> {
+                    val prompt = value.prompt
+                    panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
+                    panel.add(label("${categoryIcon(prompt.category)}  ${prompt.displayName}", categoryColor(prompt.category)), BorderLayout.CENTER)
+                    panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                        background = if (isSelected) accentColor else bgColor
+                        add(label(if (prompt.isGlobal) "🌐" else "📁", scopeColor(prompt.isGlobal), 12f))
+                        if (prompt.updatedText != "—") {
+                            add(label(prompt.updatedText, mutedColor, 12f))
+                        }
+                    }, BorderLayout.EAST)
+                }
+                is PromptListRow.AddPrompt -> {
+                    panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
+                    panel.add(label("＋  Add Prompt", mutedColor), BorderLayout.WEST)
+                }
+                PromptListRow.CustomHeader -> {
+                    panel.add(label("⚙  Custom", fgColor, 15f), BorderLayout.WEST)
+                    panel.add(label("0   ›", mutedColor), BorderLayout.EAST)
+                }
+                else -> panel.add(label(""), BorderLayout.WEST)
+            }
+            return panel
+        }
+    }
+
+    private fun interface SimpleDocumentListener : javax.swing.event.DocumentListener {
+        fun update()
+        override fun insertUpdate(e: javax.swing.event.DocumentEvent) = update()
+        override fun removeUpdate(e: javax.swing.event.DocumentEvent) = update()
+        override fun changedUpdate(e: javax.swing.event.DocumentEvent) = update()
     }
 
     private fun createLogPanel(
