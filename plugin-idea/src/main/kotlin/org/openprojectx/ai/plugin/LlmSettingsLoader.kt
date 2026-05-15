@@ -385,7 +385,8 @@ object LlmSettingsLoader {
                     parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                         prompts.map("generationProfiles").map("items"),
-                        AiPromptDefaults.GENERATION_WRAPPER
+                        AiPromptDefaults.GENERATION_WRAPPER,
+                        includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
@@ -398,7 +399,8 @@ object LlmSettingsLoader {
                     parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
-                    AiPromptDefaults.COMMIT_MESSAGE
+                    AiPromptDefaults.COMMIT_MESSAGE,
+                    includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
@@ -411,7 +413,8 @@ object LlmSettingsLoader {
                     parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
-                    AiPromptDefaults.BRANCH_DIFF_SUMMARY
+                    AiPromptDefaults.BRANCH_DIFF_SUMMARY,
+                    includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
@@ -424,7 +427,8 @@ object LlmSettingsLoader {
                     parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                         prompts.map("codeGenerateProfiles").map("items"),
-                        AiPromptDefaults.CODE_GENERATE
+                        AiPromptDefaults.CODE_GENERATE,
+                        includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
@@ -437,7 +441,8 @@ object LlmSettingsLoader {
                     parseBitbucketPromptRepoConfig(remoteRepo),
                     parsePromptProfileItems(
                         prompts.map("codeReviewProfiles").map("items"),
-                        AiPromptDefaults.CODE_REVIEW
+                        AiPromptDefaults.CODE_REVIEW,
+                        includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
@@ -749,7 +754,8 @@ object LlmSettingsLoader {
                     remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.generationPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
-                        model.generationPromptWrapper
+                        model.generationPromptWrapper,
+                        includeDefault = false
                     ),
                     model.suppressedGlobalPrompts
                 )
@@ -765,7 +771,8 @@ object LlmSettingsLoader {
                     remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
-                        model.commitPrompt
+                        model.commitPrompt,
+                        includeDefault = false
                     ),
                     model.suppressedGlobalPrompts
                 )
@@ -781,7 +788,8 @@ object LlmSettingsLoader {
                     remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
-                        model.branchDiffPrompt
+                        model.branchDiffPrompt,
+                        includeDefault = false
                     ),
                     model.suppressedGlobalPrompts
                 )
@@ -797,7 +805,8 @@ object LlmSettingsLoader {
                     remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeGeneratePromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
-                        AiPromptDefaults.CODE_GENERATE
+                        AiPromptDefaults.CODE_GENERATE,
+                        includeDefault = false
                     ),
                     model.suppressedGlobalPrompts
                 )
@@ -813,7 +822,8 @@ object LlmSettingsLoader {
                     remoteRepoConfig,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeReviewPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
-                        AiPromptDefaults.CODE_REVIEW
+                        AiPromptDefaults.CODE_REVIEW,
+                        includeDefault = false
                     ),
                     model.suppressedGlobalPrompts
                 )
@@ -998,7 +1008,11 @@ object LlmSettingsLoader {
         return PromptProfileSet(selected = selected, items = items)
     }
 
-    private fun parsePromptProfileItems(map: Map<*, *>, defaultTemplate: String): Map<String, String> {
+    private fun parsePromptProfileItems(
+        map: Map<*, *>,
+        defaultTemplate: String,
+        includeDefault: Boolean = true
+    ): Map<String, String> {
         val parsed = linkedMapOf<String, String>()
         map.forEach { (key, value) ->
             val name = key?.toString()?.trim().orEmpty()
@@ -1007,17 +1021,23 @@ object LlmSettingsLoader {
                 parsed[name] = template
             }
         }
-        if (parsed.isEmpty()) {
-            parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
-        } else if (!parsed.containsKey(PromptProfileSet.DEFAULT_NAME)) {
-            parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
+        if (includeDefault) {
+            if (parsed.isEmpty()) {
+                parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
+            } else if (!parsed.containsKey(PromptProfileSet.DEFAULT_NAME)) {
+                parsed[PromptProfileSet.DEFAULT_NAME] = defaultTemplate
+            }
         }
         return parsed
     }
 
     private fun buildPromptProfileMap(selected: String, yamlText: String, defaultTemplate: String): Map<String, Any> {
         val parsedYaml = Yaml().load<Any?>(yamlText) as? Map<*, *>
-        val items = parsePromptProfileItems(parsedYaml ?: emptyMap<Any?, Any?>(), defaultTemplate)
+        val items = parsePromptProfileItems(
+            parsedYaml ?: emptyMap<Any?, Any?>(),
+            defaultTemplate,
+            includeDefault = false
+        )
         return linkedMapOf(
             "selected" to selected.ifBlank { PromptProfileSet.DEFAULT_NAME },
             "items" to items
