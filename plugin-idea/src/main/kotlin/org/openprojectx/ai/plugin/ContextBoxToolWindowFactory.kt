@@ -398,6 +398,20 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             }
         }
 
+        fun promptSuppressionKeys(prompt: PromptDefinition): List<String> =
+            listOf(prompt.name, prompt.displayName)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .map { "${prompt.category.globalCategoryKey}:$it" }
+
+        fun removePromptFromMap(map: MutableMap<String, String>, prompt: PromptDefinition) {
+            val namesToRemove = setOf(prompt.name, prompt.displayName)
+            map.keys
+                .filter { it in namesToRemove || it.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "") == prompt.displayName }
+                .toList()
+                .forEach { map.remove(it) }
+        }
+
         fun applyPromptToDetails(prompt: PromptDefinition?) {
             selectedPrompt = prompt
             if (prompt == null) {
@@ -557,6 +571,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val editButton = compactActionButton("✎", "Edit prompt")
         val duplicateButton = compactActionButton("⧉", "Duplicate prompt")
         val deleteButton = compactActionButton("🗑", "Delete or hide prompt")
+        val refreshPromptsButton = compactActionButton("↻", "Refresh prompt list")
         val checkUpdateButton = JButton("☁ Check Update")
         val newPromptButton = JButton("+ New Prompt")
         val copyButton = JButton("⧉").apply {
@@ -567,6 +582,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             maximumSize = preferredSize
             font = commonFont.deriveFont(Font.PLAIN, 14f)
         }
+        searchField.preferredSize = Dimension(searchField.preferredSize.width.coerceAtLeast(220), checkUpdateButton.preferredSize.height)
+        searchField.minimumSize = Dimension(160, checkUpdateButton.preferredSize.height)
 
         fun promptUpdateMessage(status: LlmSettingsLoader.PromptUpdateStatus): String =
             "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
@@ -644,6 +661,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     }
                 }
             })
+        }
+
+        refreshPromptsButton.addActionListener {
+            usage.record("context_box.prompt_manager.refresh")
+            refreshList(selectedPrompt)
         }
 
         newPromptButton.addActionListener {
@@ -731,9 +753,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             if (confirm != Messages.YES) return@addActionListener
             val model = LlmSettingsLoader.loadSettingsModel(project)
             val maps = mapsForModel(model).mapValues { LinkedHashMap(it.value) }
-            maps.getValue(prompt.category).remove(prompt.name)
+            removePromptFromMap(maps.getValue(prompt.category), prompt)
             val suppressed = if (prompt.isGlobal) {
-                model.suppressedGlobalPrompts + "${prompt.category.globalCategoryKey}:${prompt.name}"
+                model.suppressedGlobalPrompts + promptSuppressionKeys(prompt)
             } else {
                 model.suppressedGlobalPrompts
             }
@@ -834,6 +856,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 background = pageColor
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                     isOpaque = false
+                    add(refreshPromptsButton)
                     add(typeFilter)
                     add(sortField)
                 }, BorderLayout.NORTH)
@@ -917,7 +940,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                         background = if (isSelected) accentColor else bgColor
                         add(label(if (prompt.isGlobal) "🌐" else "📁", scopeColor(prompt.isGlobal), 12f))
-                        add(label(prompt.updatedText, mutedColor, 12f))
+                        if (prompt.updatedText != "—") {
+                            add(label(prompt.updatedText, mutedColor, 12f))
+                        }
                     }, BorderLayout.EAST)
                 }
                 is PromptListRow.AddPrompt -> {
