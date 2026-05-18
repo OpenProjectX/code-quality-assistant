@@ -78,11 +78,11 @@ class LlmAuthSessionService(
             try {
                 loginNow()
                 ApplicationManager.getApplication().invokeLater {
-                    Messages.showInfoMessage(project, "LLM login succeeded.", "AI Test Generator")
+                    Messages.showInfoMessage(project, "LLM login succeeded.", "Code Quality Improver")
                 }
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater {
-                    Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "AI Test Generator")
+                    Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "Code Quality Improver")
                 }
             }
         }

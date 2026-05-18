@@ -92,6 +92,12 @@ class AiTestSettingsConfigurable(
     private lateinit var bitbucketPromptRepoPasswordField: JPasswordField
     private lateinit var bitbucketPromptRepoTokenField: JPasswordField
     private lateinit var bitbucketHardcodedPathField: JTextField
+    private lateinit var sonarQubeServerUrlField: JTextField
+    private lateinit var sonarQubeProjectKeyField: JTextField
+    private lateinit var sonarQubeTokenField: JPasswordField
+    private lateinit var sonarQubeTokenEnvField: JTextField
+    private lateinit var sonarQubeTargetCoverageField: JTextField
+    private lateinit var sonarQubeMaxFilesField: JTextField
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -128,7 +134,7 @@ class AiTestSettingsConfigurable(
 
     override fun getId(): String = "org.openprojectx.ai.plugin.settings"
 
-    override fun getDisplayName(): String = "AI Test Generator"
+    override fun getDisplayName(): String = "Code Quality Improver"
 
     override fun createComponent(): JComponent {
         val usage = ButtonUsageReportService.getInstance(project)
@@ -193,6 +199,12 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoPasswordField = JPasswordField()
         bitbucketPromptRepoTokenField = JPasswordField()
         bitbucketHardcodedPathField = JTextField()
+        sonarQubeServerUrlField = JTextField()
+        sonarQubeProjectKeyField = JTextField()
+        sonarQubeTokenField = JPasswordField()
+        sonarQubeTokenEnvField = JTextField()
+        sonarQubeTargetCoverageField = JTextField("80")
+        sonarQubeMaxFilesField = JTextField("5")
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -203,6 +215,7 @@ class AiTestSettingsConfigurable(
         val tabs = JTabbedPane().apply {
             addTab("Login", loginTab())
             addTab("LLM", llmTab())
+            addTab("Sonar Cube", sonarCubeTab())
             addTab("Prompts", promptsTab())
         }
 
@@ -244,14 +257,14 @@ class AiTestSettingsConfigurable(
                                 Messages.showInfoMessage(
                                     project,
                                     "Imported config from: $sourcePath",
-                                    "AI Test Generator"
+                                    "Code Quality Improver"
                                 )
                             },
                             onFailure = { ex ->
                                 Messages.showErrorDialog(
                                     project,
                                     detailedErrorMessage("Import repo config failed", ex),
-                                    "AI Test Generator"
+                                    "Code Quality Improver"
                                 )
                             }
                         )
@@ -419,6 +432,25 @@ class AiTestSettingsConfigurable(
         add(sectionWithToggle(loginEnabled, loginPanel).also { loginCardPanel = it })
     })
 
+
+    private fun sonarCubeTab(): JComponent = scrollableTab(JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        add(infoBanner("Configure SonarQube/SonarCloud access used by the Sonar Cube side tab and Tools → SonarQube Coverage action. Authentication currently uses a token/PAT or token environment variable."))
+        add(formSection("Connection", listOf(
+            "Server URL" to sonarQubeServerUrlField,
+            "Project Key" to sonarQubeProjectKeyField
+        )))
+        add(formSection("Authentication", listOf(
+            "Token / PAT" to sonarQubeTokenField,
+            "Token env var" to sonarQubeTokenEnvField
+        )))
+        add(formSection("Coverage", listOf(
+            "Target coverage %" to sonarQubeTargetCoverageField,
+            "Max files to inspect" to sonarQubeMaxFilesField
+        )))
+    })
+
     private fun promptsTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
@@ -490,7 +522,7 @@ class AiTestSettingsConfigurable(
         val name = promptNameField.text.trim()
         val content = promptContentField.text.trim()
         if (name.isBlank() || content.isBlank()) {
-            Messages.showErrorDialog(project, "Prompt name and content are required.", "AI Test Generator")
+            Messages.showErrorDialog(project, "Prompt name and content are required.", "Code Quality Improver")
             return
         }
 
@@ -498,7 +530,7 @@ class AiTestSettingsConfigurable(
         val currentSelection = selectedPromptSelection
         if (currentSelection != null) {
             if (currentSelection.isGlobal && (currentSelection.category != category || currentSelection.name != name)) {
-                Messages.showErrorDialog(project, "Global prompt name/category cannot be changed.", "AI Test Generator")
+                Messages.showErrorDialog(project, "Global prompt name/category cannot be changed.", "Code Quality Improver")
                 return
             }
             maps[currentSelection.category]?.remove(currentSelection.name)
@@ -510,7 +542,7 @@ class AiTestSettingsConfigurable(
 
         val targetMap = maps.getValue(category)
         if (targetMap.containsKey(name) && (currentSelection == null || currentSelection.name != name || currentSelection.category != category)) {
-            Messages.showErrorDialog(project, "Prompt name already exists in selected category.", "AI Test Generator")
+            Messages.showErrorDialog(project, "Prompt name already exists in selected category.", "Code Quality Improver")
             return
         }
         targetMap[name] = content
@@ -522,7 +554,7 @@ class AiTestSettingsConfigurable(
     private fun deletePromptProfile() {
         val selection = selectedPromptSelection
         if (selection == null) {
-            Messages.showErrorDialog(project, "Select a prompt before deleting.", "AI Test Generator")
+            Messages.showErrorDialog(project, "Select a prompt before deleting.", "Code Quality Improver")
             return
         }
         val maps = mutableMapsByCategory()
@@ -821,6 +853,12 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoUsername = bitbucketPromptRepoUsernameField.text.trim(),
         bitbucketPromptRepoPassword = String(bitbucketPromptRepoPasswordField.password).trim(),
         bitbucketConfigImportPath = bitbucketHardcodedPathField.text.trim(),
+        sonarQubeServerUrl = sonarQubeServerUrlField.text.trim(),
+        sonarQubeProjectKey = sonarQubeProjectKeyField.text.trim(),
+        sonarQubeToken = String(sonarQubeTokenField.password).trim(),
+        sonarQubeTokenEnv = sonarQubeTokenEnvField.text.trim(),
+        sonarQubeTargetCoverage = sonarQubeTargetCoverageField.text.trim(),
+        sonarQubeMaxFiles = sonarQubeMaxFilesField.text.trim(),
         suppressedGlobalPrompts = suppressedGlobalPrompts.sorted()
     )
 
@@ -869,6 +907,12 @@ class AiTestSettingsConfigurable(
         bitbucketPromptRepoUsernameField.text = state.bitbucketPromptRepoUsername
         bitbucketPromptRepoPasswordField.text = state.bitbucketPromptRepoPassword
         bitbucketHardcodedPathField.text = state.bitbucketConfigImportPath
+        sonarQubeServerUrlField.text = state.sonarQubeServerUrl
+        sonarQubeProjectKeyField.text = state.sonarQubeProjectKey
+        sonarQubeTokenField.text = state.sonarQubeToken
+        sonarQubeTokenEnvField.text = state.sonarQubeTokenEnv
+        sonarQubeTargetCoverageField.text = state.sonarQubeTargetCoverage
+        sonarQubeMaxFilesField.text = state.sonarQubeMaxFiles
         suppressedGlobalPrompts = state.suppressedGlobalPrompts.toSet()
 
         refreshPromptManager()
@@ -887,6 +931,7 @@ class AiTestSettingsConfigurable(
             runCatching { GitRemoteParser.parse(state.bitbucketPromptRepoUrl).provider.name }
                 .getOrElse { ex -> throw IllegalArgumentException("Prompt repo URL is invalid: ${ex.message ?: ex}") }
         }
+        validateSonarQubeSettings(state)
     }
 
     private fun validateLlmSettings(state: AiTestSettingsModel) {
@@ -902,6 +947,13 @@ class AiTestSettingsConfigurable(
         if (state.loginEnabled) {
             requireTemplate("Login template", state.loginUrl, state.loginBody, state.loginResponsePath)
         }
+    }
+
+    private fun validateSonarQubeSettings(state: AiTestSettingsModel) {
+        state.sonarQubeTargetCoverage.takeIf { it.isNotBlank() }?.toDoubleOrNull()
+            ?: throw IllegalArgumentException("Sonar Cube target coverage must be a number")
+        state.sonarQubeMaxFiles.takeIf { it.isNotBlank() }?.toIntOrNull()
+            ?: throw IllegalArgumentException("Sonar Cube max files must be an integer")
     }
 
     private fun requireTemplate(label: String, url: String, body: String, responsePath: String) {
@@ -954,7 +1006,7 @@ class AiTestSettingsConfigurable(
         val ioFile = File(configPath)
         val vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
         if (vFile == null) {
-            Messages.showErrorDialog(project, "Cannot find config file: $configPath", "AI Test Generator")
+            Messages.showErrorDialog(project, "Cannot find config file: $configPath", "Code Quality Improver")
             return
         }
         FileEditorManager.getInstance(project).openFile(vFile, true)
@@ -965,7 +1017,7 @@ class AiTestSettingsConfigurable(
             apply()
             true
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
+            Messages.showErrorDialog(project, e.message ?: e.toString(), "Code Quality Improver")
             false
         }
     }
@@ -979,7 +1031,7 @@ class AiTestSettingsConfigurable(
             updatePathLabel()
             true
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: e.toString(), "AI Test Generator")
+            Messages.showErrorDialog(project, e.message ?: e.toString(), "Code Quality Improver")
             false
         }
     }

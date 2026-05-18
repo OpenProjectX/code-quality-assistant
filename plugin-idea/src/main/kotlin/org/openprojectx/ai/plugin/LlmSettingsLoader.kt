@@ -346,6 +346,7 @@ object LlmSettingsLoader {
         val http = llm["http"] as? Map<*, *>
         val ui = root["ui"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val sonarQube = root["sonarQube"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteRepo = prompts.map("remoteRepo")
         val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
@@ -454,6 +455,12 @@ object LlmSettingsLoader {
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
             bitbucketPromptRepoPassword = remoteRepo.string("password"),
             bitbucketConfigImportPath = remoteRepo.string("configImportPath"),
+            sonarQubeServerUrl = sonarQube.string("serverUrl"),
+            sonarQubeProjectKey = sonarQube.string("projectKey"),
+            sonarQubeToken = sonarQube.string("token"),
+            sonarQubeTokenEnv = sonarQube.string("tokenEnv"),
+            sonarQubeTargetCoverage = sonarQube.string("targetCoverage").ifBlank { "80" },
+            sonarQubeMaxFiles = sonarQube.string("maxFiles").ifBlank { "5" },
             suppressedGlobalPrompts = suppressedGlobalPrompts
         )
     }
@@ -462,6 +469,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
         root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
+        root["sonarQube"] = buildSonarQubeMap(model)
         root.remove("generation")
         root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
         writeRootMap(project, root)
@@ -741,6 +749,15 @@ object LlmSettingsLoader {
         }
 
         return llm
+    }
+
+    private fun buildSonarQubeMap(model: AiTestSettingsModel): MutableMap<String, Any> = linkedMapOf<String, Any>().apply {
+        put("serverUrl", model.sonarQubeServerUrl)
+        put("projectKey", model.sonarQubeProjectKey)
+        put("token", model.sonarQubeToken)
+        put("tokenEnv", model.sonarQubeTokenEnv)
+        put("targetCoverage", model.sonarQubeTargetCoverage.toDoubleOrNull() ?: 80.0)
+        put("maxFiles", model.sonarQubeMaxFiles.toIntOrNull() ?: 5)
     }
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {

@@ -44,5 +44,11 @@ data class AiTestSettingsModel(
     val bitbucketPromptRepoUsername: String = "",
     val bitbucketPromptRepoPassword: String = "",
     val bitbucketConfigImportPath: String = "",
+    val sonarQubeServerUrl: String = "",
+    val sonarQubeProjectKey: String = "",
+    val sonarQubeToken: String = "",
+    val sonarQubeTokenEnv: String = "",
+    val sonarQubeTargetCoverage: String = "80",
+    val sonarQubeMaxFiles: String = "5",
     val suppressedGlobalPrompts: List<String> = emptyList()
 )
