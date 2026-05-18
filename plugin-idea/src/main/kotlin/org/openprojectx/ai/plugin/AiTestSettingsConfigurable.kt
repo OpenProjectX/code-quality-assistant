@@ -1,6 +1,7 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.options.SearchableConfigurable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -234,22 +235,26 @@ class AiTestSettingsConfigurable(
                 add(JButton("Import Repo Config").apply {
                     addActionListener {
                         usage.record("settings.toolbar.import_repo_config")
-                        runCatching {
-                            LlmSettingsLoader.importConfigFromRepo(project, collectState())
-                        }.onSuccess { sourcePath ->
-                            reset()
-                            Messages.showInfoMessage(
-                                project,
-                                "Imported config from: $sourcePath",
-                                "AI Test Generator"
-                            )
-                        }.onFailure { ex ->
-                            Messages.showErrorDialog(
-                                project,
-                                detailedErrorMessage("Import repo config failed", ex),
-                                "AI Test Generator"
-                            )
-                        }
+                        val state = collectState()
+                        runOffEdt(
+                            label = "Import repo config",
+                            block = { LlmSettingsLoader.importConfigFromRepo(project, state) },
+                            onSuccess = { sourcePath ->
+                                reset()
+                                Messages.showInfoMessage(
+                                    project,
+                                    "Imported config from: $sourcePath",
+                                    "AI Test Generator"
+                                )
+                            },
+                            onFailure = { ex ->
+                                Messages.showErrorDialog(
+                                    project,
+                                    detailedErrorMessage("Import repo config failed", ex),
+                                    "AI Test Generator"
+                                )
+                            }
+                        )
                     }
                 })
             }, BorderLayout.EAST)
@@ -301,6 +306,25 @@ class AiTestSettingsConfigurable(
         pathLabel = null
     }
 
+
+    private fun <T> runOffEdt(
+        label: String,
+        block: () -> T,
+        onSuccess: (T) -> Unit,
+        onFailure: (Throwable) -> Unit
+    ) {
+        RuntimeLogStore.append("INFO | Settings | Started background task: $label")
+        ApplicationManager.getApplication().executeOnPooledThread {
+            runCatching(block)
+                .onSuccess { value ->
+                    ApplicationManager.getApplication().invokeLater { onSuccess(value) }
+                }
+                .onFailure { ex ->
+                    ApplicationManager.getApplication().invokeLater { onFailure(ex) }
+                }
+        }
+    }
+
     private fun llmTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
@@ -331,40 +355,51 @@ class AiTestSettingsConfigurable(
             addActionListener {
                 usage.record("settings.bitbucket_prompt_repo.update")
                 if (!saveCurrentState()) return@addActionListener
-                try {
-                    val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
-                    if (!status.configured) {
-                        Notifications.warn(project, "Bitbucket Prompt Repo", status.message)
-                        return@addActionListener
+                runOffEdt(
+                    label = "Update Bitbucket prompts",
+                    block = {
+                        val status = LlmSettingsLoader.pullBitbucketPromptUpdates(project)
+                        val latest = if (status.configured && !status.error) LlmSettingsLoader.loadSettingsModel(project) else null
+                        status to latest
+                    },
+                    onSuccess = { (status, latest) ->
+                        when {
+                            !status.configured -> Notifications.warn(project, "Bitbucket Prompt Repo", status.message)
+                            status.error -> Notifications.error(project, "Bitbucket Prompt Repo", status.message)
+                            else -> {
+                                if (latest != null) {
+                                    applyState(latest)
+                                    initialState = latest
+                                }
+                                Notifications.info(
+                                    project,
+                                    "Bitbucket Prompt Repo",
+                                    "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
+                                )
+                            }
+                        }
+                    },
+                    onFailure = { ex ->
+                        Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
                     }
-                    if (status.error) {
-                        Notifications.error(project, "Bitbucket Prompt Repo", status.message)
-                        return@addActionListener
-                    }
-                    val latest = LlmSettingsLoader.loadSettingsModel(project)
-                    applyState(latest)
-                    initialState = latest
-                    Notifications.info(
-                        project,
-                        "Bitbucket Prompt Repo",
-                        "${status.message} Remote=${status.remoteCount}, LocalCache=${status.cachedCount}."
-                    )
-                } catch (ex: Exception) {
-                    Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
-                }
+                )
             }
         }
         val checkHardcodedPathButton = JButton("Check Hardcoded Path").apply {
             addActionListener {
                 usage.record("settings.bitbucket_prompt_repo.check_hardcoded_path")
                 if (!saveCurrentState()) return@addActionListener
-                runCatching {
-                    LlmSettingsLoader.checkBitbucketHardcodedPath(project, bitbucketHardcodedPathField.text)
-                }.onSuccess {
-                    Notifications.info(project, "Bitbucket Prompt Repo", "Hardcoded path check succeeded.")
-                }.onFailure { ex ->
-                    Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
-                }
+                val hardcodedPath = bitbucketHardcodedPathField.text
+                runOffEdt(
+                    label = "Check Bitbucket hardcoded path",
+                    block = { LlmSettingsLoader.checkBitbucketHardcodedPath(project, hardcodedPath) },
+                    onSuccess = {
+                        Notifications.info(project, "Bitbucket Prompt Repo", "Hardcoded path check succeeded.")
+                    },
+                    onFailure = { ex ->
+                        Notifications.error(project, "Bitbucket Prompt Repo", ex.message ?: ex.toString())
+                    }
+                )
             }
         }
         add(formSection("Bitbucket Prompt Repo (Global Prompts)", listOf(
