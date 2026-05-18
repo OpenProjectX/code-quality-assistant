@@ -98,6 +98,31 @@ object AiPromptDefaults {
         {{extraRequirements}}
     """
 
+
+    const val SONARQUBE_MISSING_TESTS = """
+        You are a senior test engineer.
+
+        Generate missing tests to improve SonarQube coverage for the project below.
+
+        Requirements:
+        - Prioritize files with uncovered lines and coverage below target
+        - Generate concrete test code, including imports and realistic assertions
+        - Infer the most likely test framework and style from the source snippets
+        - If a dependency must be mocked, include the mock setup
+        - Group output by target source file and proposed test file path
+        - Do not claim tests were executed
+        - Do not include unrelated commentary
+
+        Project key: {{projectKey}}
+        Target coverage: {{targetCoverage}}
+
+        Coverage summary:
+        {{coverageSummary}}
+
+        Source context:
+        {{fileContexts}}
+    """
+
     const val CODE_REVIEW = """
         You are a senior code reviewer.
 

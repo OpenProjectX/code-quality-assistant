@@ -68,16 +68,16 @@ class ButtonUsageReportService(private val project: Project) {
             isPrettyFlow = true
         }
         runCatching {
+            val path = reportPath()
+            path.parent?.let { Files.createDirectories(it) }
             val text = Yaml(options).dump(root)
-            Files.writeString(reportPath(), text)
+            Files.writeString(path, text)
         }
     }
 
     private fun reportPath(): Path {
-        val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() }
-            ?: System.getenv("HOME")?.takeIf { it.isNotBlank() }
-            ?: "."
-        return Path.of(userHome).resolve(".ai-test-button-usage-report.yaml")
+        val configPath = Path.of(LlmSettingsLoader.configFilePath(project))
+        return (configPath.parent ?: Path.of(".")).resolve("usage.yaml")
     }
 
     private fun projectKey(): String {
