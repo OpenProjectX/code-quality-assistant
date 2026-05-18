@@ -19,6 +19,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import javax.swing.BoxLayout
 import javax.swing.JCheckBox
