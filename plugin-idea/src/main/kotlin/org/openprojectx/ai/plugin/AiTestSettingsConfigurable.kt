@@ -96,6 +96,9 @@ class AiTestSettingsConfigurable(
     private lateinit var sonarQubeProjectKeyField: JTextField
     private lateinit var sonarQubeTokenField: JPasswordField
     private lateinit var sonarQubeTokenEnvField: JTextField
+    private lateinit var sonarQubeUsernameField: JTextField
+    private lateinit var sonarQubePasswordField: JPasswordField
+    private lateinit var sonarQubePasswordEnvField: JTextField
     private lateinit var sonarQubeTargetCoverageField: JTextField
     private lateinit var sonarQubeMaxFilesField: JTextField
     private lateinit var promptTypeField: JComboBox<PromptCategory>
@@ -203,6 +206,9 @@ class AiTestSettingsConfigurable(
         sonarQubeProjectKeyField = JTextField()
         sonarQubeTokenField = JPasswordField()
         sonarQubeTokenEnvField = JTextField()
+        sonarQubeUsernameField = JTextField()
+        sonarQubePasswordField = JPasswordField()
+        sonarQubePasswordEnvField = JTextField()
         sonarQubeTargetCoverageField = JTextField("80")
         sonarQubeMaxFilesField = JTextField("5")
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
@@ -436,14 +442,17 @@ class AiTestSettingsConfigurable(
     private fun sonarCubeTab(): JComponent = scrollableTab(JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
-        add(infoBanner("Configure SonarQube/SonarCloud access used by the Sonar Cube side tab and Tools → SonarQube Coverage action. Authentication currently uses a token/PAT or token environment variable."))
+        add(infoBanner("Configure SonarQube/SonarCloud access used by the Sonar Cube side tab and Tools → SonarQube Coverage action. Prefer Token/PAT auth; username/password basic auth is also supported for SonarQube instances that allow it."))
         add(formSection("Connection", listOf(
             "Server URL" to sonarQubeServerUrlField,
             "Project Key" to sonarQubeProjectKeyField
         )))
         add(formSection("Authentication", listOf(
             "Token / PAT" to sonarQubeTokenField,
-            "Token env var" to sonarQubeTokenEnvField
+            "Token env var" to sonarQubeTokenEnvField,
+            "Username" to sonarQubeUsernameField,
+            "Password" to sonarQubePasswordField,
+            "Password env var" to sonarQubePasswordEnvField
         )))
         add(formSection("Coverage", listOf(
             "Target coverage %" to sonarQubeTargetCoverageField,
@@ -857,6 +866,9 @@ class AiTestSettingsConfigurable(
         sonarQubeProjectKey = sonarQubeProjectKeyField.text.trim(),
         sonarQubeToken = String(sonarQubeTokenField.password).trim(),
         sonarQubeTokenEnv = sonarQubeTokenEnvField.text.trim(),
+        sonarQubeUsername = sonarQubeUsernameField.text.trim(),
+        sonarQubePassword = String(sonarQubePasswordField.password).trim(),
+        sonarQubePasswordEnv = sonarQubePasswordEnvField.text.trim(),
         sonarQubeTargetCoverage = sonarQubeTargetCoverageField.text.trim(),
         sonarQubeMaxFiles = sonarQubeMaxFilesField.text.trim(),
         suppressedGlobalPrompts = suppressedGlobalPrompts.sorted()
@@ -911,6 +923,9 @@ class AiTestSettingsConfigurable(
         sonarQubeProjectKeyField.text = state.sonarQubeProjectKey
         sonarQubeTokenField.text = state.sonarQubeToken
         sonarQubeTokenEnvField.text = state.sonarQubeTokenEnv
+        sonarQubeUsernameField.text = state.sonarQubeUsername
+        sonarQubePasswordField.text = state.sonarQubePassword
+        sonarQubePasswordEnvField.text = state.sonarQubePasswordEnv
         sonarQubeTargetCoverageField.text = state.sonarQubeTargetCoverage
         sonarQubeMaxFilesField.text = state.sonarQubeMaxFiles
         suppressedGlobalPrompts = state.suppressedGlobalPrompts.toSet()

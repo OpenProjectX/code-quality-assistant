@@ -19,8 +19,6 @@ import java.awt.Font
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.BorderFactory
@@ -156,9 +154,7 @@ object SonarCubeToolWindowPanel {
 }
 
 private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
-    private val authHeader = config.resolvedToken.takeIf { it.isNotBlank() }?.let {
-        "Basic " + Base64.getEncoder().encodeToString("$it:".toByteArray(StandardCharsets.UTF_8))
-    }
+    private val authHeader = SonarQubeAuth.authorizationHeader(config)
 
     suspend fun load(): SonarCubeResult {
         val client = HttpClients.shared(timeoutSeconds = 60)

@@ -19,14 +19,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.Locale
 import javax.swing.BoxLayout
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JPasswordField
 import javax.swing.JTextField
 
 class SonarQubeCoverageAction : AnAction("SonarQube Coverage"), DumbAware {
@@ -89,6 +88,8 @@ private data class SonarQubeCoverageRequest(
     val serverUrl: String,
     val projectKey: String,
     val token: String,
+    val username: String,
+    val password: String,
     val targetCoverage: Double,
     val maxFiles: Int,
     val generateMissingTests: Boolean
@@ -101,6 +102,8 @@ private class SonarQubeCoverageDialog(
     private val serverUrlField = JTextField(config.serverUrl, 40)
     private val projectKeyField = JTextField(config.projectKey, 40)
     private val tokenField = JTextField(config.resolvedToken, 40)
+    private val usernameField = JTextField(config.username, 40)
+    private val passwordField = JPasswordField(config.resolvedPassword, 40)
     private val targetCoverageField = JTextField(config.targetCoverage.toString(), 8)
     private val maxFilesField = JTextField(config.maxFiles.toString(), 8)
     private val generateMissingTestsBox = JCheckBox("Generate missing tests with AI", true)
@@ -118,6 +121,10 @@ private class SonarQubeCoverageDialog(
         add(projectKeyField)
         add(JLabel("Token (optional; tokenEnv can be configured in .ai-test.yaml)"))
         add(tokenField)
+        add(JLabel("Username (optional; used only when token is blank)"))
+        add(usernameField)
+        add(JLabel("Password (optional; passwordEnv can be configured in .ai-test.yaml)"))
+        add(passwordField)
         add(JLabel("Target coverage %"))
         add(targetCoverageField)
         add(JLabel("Max uncovered files to inspect"))
@@ -129,6 +136,8 @@ private class SonarQubeCoverageDialog(
         serverUrl = serverUrlField.text.trim(),
         projectKey = projectKeyField.text.trim(),
         token = tokenField.text.trim(),
+        username = usernameField.text.trim(),
+        password = String(passwordField.password).trim(),
         targetCoverage = targetCoverageField.text.trim().toDoubleOrNull() ?: 80.0,
         maxFiles = maxFilesField.text.trim().toIntOrNull()?.coerceIn(1, 20) ?: 5,
         generateMissingTests = generateMissingTestsBox.isSelected
@@ -153,9 +162,11 @@ private data class SonarQubeFileCoverage(
 )
 
 private class SonarQubeCoverageClient(private val request: SonarQubeCoverageRequest) {
-    private val authHeader = request.token.takeIf { it.isNotBlank() }?.let {
-        "Basic " + Base64.getEncoder().encodeToString("$it:".toByteArray(StandardCharsets.UTF_8))
-    }
+    private val authHeader = SonarQubeAuth.authorizationHeader(
+        token = request.token,
+        username = request.username,
+        password = request.password
+    )
 
     suspend fun loadCoverage(): SonarQubeCoverageReport {
         val jsonClient = HttpClients.shared(timeoutSeconds = 60)

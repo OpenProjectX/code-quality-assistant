@@ -16,11 +16,17 @@ data class SonarQubeConfig(
     val projectKey: String = "",
     val token: String = "",
     val tokenEnv: String = "",
+    val username: String = "",
+    val password: String = "",
+    val passwordEnv: String = "",
     val targetCoverage: Double = 80.0,
     val maxFiles: Int = 5
 ) {
     val resolvedToken: String
         get() = token.ifBlank { tokenEnv.takeIf { it.isNotBlank() }?.let { System.getenv(it).orEmpty() }.orEmpty() }
+
+    val resolvedPassword: String
+        get() = password.ifBlank { passwordEnv.takeIf { it.isNotBlank() }?.let { System.getenv(it).orEmpty() }.orEmpty() }
 }
 
 data class PromptOverrides(

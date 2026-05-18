@@ -459,6 +459,9 @@ object LlmSettingsLoader {
             sonarQubeProjectKey = sonarQube.string("projectKey"),
             sonarQubeToken = sonarQube.string("token"),
             sonarQubeTokenEnv = sonarQube.string("tokenEnv"),
+            sonarQubeUsername = sonarQube.string("username"),
+            sonarQubePassword = sonarQube.string("password"),
+            sonarQubePasswordEnv = sonarQube.string("passwordEnv"),
             sonarQubeTargetCoverage = sonarQube.string("targetCoverage").ifBlank { "80" },
             sonarQubeMaxFiles = sonarQube.string("maxFiles").ifBlank { "5" },
             suppressedGlobalPrompts = suppressedGlobalPrompts
@@ -573,6 +576,9 @@ object LlmSettingsLoader {
             projectKey = sonar.string("projectKey"),
             token = sonar.string("token"),
             tokenEnv = sonar.string("tokenEnv"),
+            username = sonar.string("username"),
+            password = sonar.string("password"),
+            passwordEnv = sonar.string("passwordEnv"),
             targetCoverage = sonar.double("targetCoverage") ?: 80.0,
             maxFiles = sonar.int("maxFiles") ?: 5
         )
@@ -756,6 +762,9 @@ object LlmSettingsLoader {
         put("projectKey", model.sonarQubeProjectKey)
         put("token", model.sonarQubeToken)
         put("tokenEnv", model.sonarQubeTokenEnv)
+        put("username", model.sonarQubeUsername)
+        put("password", model.sonarQubePassword)
+        put("passwordEnv", model.sonarQubePasswordEnv)
         put("targetCoverage", model.sonarQubeTargetCoverage.toDoubleOrNull() ?: 80.0)
         put("maxFiles", model.sonarQubeMaxFiles.toIntOrNull() ?: 5)
     }
