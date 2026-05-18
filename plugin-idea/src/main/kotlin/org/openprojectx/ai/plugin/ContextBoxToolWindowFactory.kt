@@ -170,6 +170,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val tabs = JTabbedPane().apply {
             addTab("Context", panel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab("Sonar Cube", SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))
             if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
                 addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
             }

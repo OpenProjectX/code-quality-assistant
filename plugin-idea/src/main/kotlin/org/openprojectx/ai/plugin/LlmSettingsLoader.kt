@@ -198,7 +198,7 @@ object LlmSettingsLoader {
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
         val model = loadSettingsModel(project)
-        if (model.bitbucketPromptRepoUrl.isBlank()) {
+        if (!model.bitbucketPromptRepoEnabled || model.bitbucketPromptRepoUrl.isBlank()) {
             return PromptUpdateStatus(
                 configured = false,
                 remoteCount = 0,
@@ -271,7 +271,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project)
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteConfig = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
-        if (remoteConfig.repoUrl.isBlank()) {
+        if (!remoteConfig.enabled || remoteConfig.repoUrl.isBlank()) {
             return PromptUpdateStatus(
                 configured = false,
                 remoteCount = 0,
@@ -474,6 +474,8 @@ object LlmSettingsLoader {
         writeRootMap(project, root)
     }
 
+    fun loadSonarQubeConfig(project: Project): SonarQubeConfig = parseSonarQubeConfig(readRootMap(project))
+
     fun loadConfig(project: Project): AiTestConfig {
         val configFile = findConfigFile()
             ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} under ${configHomeDir().absolutePath}.")
@@ -486,11 +488,13 @@ object LlmSettingsLoader {
         val llm = parseLlmSettings(root)
         val generation = parseGenerationConfig(root)
         val prompts = parsePromptOverrides(project, root)
+        val sonarQube = parseSonarQubeConfig(root)
 
         return AiTestConfig(
             llm = llm,
             generation = generation,
-            prompts = prompts
+            prompts = prompts,
+            sonarQube = sonarQube
         )
     }
 
@@ -551,6 +555,18 @@ object LlmSettingsLoader {
                     suppressedGlobalPrompts = suppressedGlobalPrompts
                 )
             )
+        )
+    }
+
+    private fun parseSonarQubeConfig(root: Map<*, *>): SonarQubeConfig {
+        val sonar = root["sonarQube"] as? Map<*, *> ?: return SonarQubeConfig()
+        return SonarQubeConfig(
+            serverUrl = sonar.string("serverUrl"),
+            projectKey = sonar.string("projectKey"),
+            token = sonar.string("token"),
+            tokenEnv = sonar.string("tokenEnv"),
+            targetCoverage = sonar.double("targetCoverage") ?: 80.0,
+            maxFiles = sonar.int("maxFiles") ?: 5
         )
     }
 
@@ -1122,7 +1138,7 @@ object LlmSettingsLoader {
     }
 
     private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {
-        if (config.repoUrl.isBlank()) return emptyList()
+        if (!config.enabled || config.repoUrl.isBlank()) return emptyList()
         val result = runCatching {
             val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(config.repoUrl)
             val repo = directBitbucketRawBaseUrl?.let {
@@ -1440,6 +1456,18 @@ object LlmSettingsLoader {
 
     private fun Map<*, *>?.string(key: String): String =
         this?.get(key)?.toString()?.trim().orEmpty()
+
+    private fun Map<*, *>?.double(key: String): Double? = when (val value = this?.get(key)) {
+        is Number -> value.toDouble()
+        is String -> value.trim().toDoubleOrNull()
+        else -> null
+    }
+
+    private fun Map<*, *>?.int(key: String): Int? = when (val value = this?.get(key)) {
+        is Number -> value.toInt()
+        is String -> value.trim().toIntOrNull()
+        else -> null
+    }
 
     private fun Map<*, *>?.map(key: String): Map<*, *> =
         this?.get(key) as? Map<*, *> ?: emptyMap<Any?, Any?>()

@@ -7,8 +7,21 @@ import org.openprojectx.ai.plugin.llm.LlmSettings
 data class AiTestConfig(
     val llm: LlmSettings,
     val generation: GenerationConfig = GenerationConfig(),
-    val prompts: PromptOverrides = PromptOverrides()
+    val prompts: PromptOverrides = PromptOverrides(),
+    val sonarQube: SonarQubeConfig = SonarQubeConfig()
 )
+
+data class SonarQubeConfig(
+    val serverUrl: String = "",
+    val projectKey: String = "",
+    val token: String = "",
+    val tokenEnv: String = "",
+    val targetCoverage: Double = 80.0,
+    val maxFiles: Int = 5
+) {
+    val resolvedToken: String
+        get() = token.ifBlank { tokenEnv.takeIf { it.isNotBlank() }?.let { System.getenv(it).orEmpty() }.orEmpty() }
+}
 
 data class PromptOverrides(
     val generation: GenerationPromptTemplate = GenerationPromptTemplate(),
