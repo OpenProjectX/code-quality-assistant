@@ -2,9 +2,6 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import io.ktor.client.call.body
@@ -25,6 +22,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
@@ -66,44 +64,45 @@ object SonarCubeToolWindowPanel {
         }
         val refreshButton = JButton("Refresh")
         val openButton = JButton("Open Selected")
+        val loading = AtomicBoolean(false)
+
+        fun finishLoading() {
+            loading.set(false)
+            refreshButton.isEnabled = true
+            openButton.isEnabled = true
+        }
 
         fun load() {
+            if (!loading.compareAndSet(false, true)) return
             refreshButton.isEnabled = false
             openButton.isEnabled = false
             issueListModel.clear()
             summaryArea.text = "Loading SonarQube results..."
-            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Load SonarQube Results", false) {
-                override fun run(indicator: ProgressIndicator) {
-                    try {
-                        indicator.text = "Reading SonarQube configuration..."
-                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
-                        if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
-                            ApplicationManager.getApplication().invokeLater {
-                                summaryArea.text = "SonarQube is not configured. Add sonarQube.serverUrl and sonarQube.projectKey to .ai-test.yaml."
-                                refreshButton.isEnabled = true
-                                openButton.isEnabled = true
-                            }
-                            return
+            ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                    if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            summaryArea.text = "SonarQube is not configured. Add sonarQube.serverUrl and sonarQube.projectKey to .ai-test.yaml."
+                            finishLoading()
                         }
+                        return@executeOnPooledThread
+                    }
 
-                        indicator.text = "Fetching SonarQube issues..."
-                        val result = runBlocking { SonarCubeToolWindowClient(config).load() }
-                        ApplicationManager.getApplication().invokeLater {
-                            summaryArea.text = SonarCubeResultRenderer.render(result)
-                            result.issues.forEach(issueListModel::addElement)
-                            refreshButton.isEnabled = true
-                            openButton.isEnabled = true
-                        }
-                    } catch (ex: Exception) {
-                        ApplicationManager.getApplication().invokeLater {
-                            summaryArea.text = "Failed to load SonarQube results: ${ex.message ?: ex.toString()}"
-                            refreshButton.isEnabled = true
-                            openButton.isEnabled = true
-                            Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
-                        }
+                    val result = runBlocking { SonarCubeToolWindowClient(config).load() }
+                    ApplicationManager.getApplication().invokeLater {
+                        summaryArea.text = SonarCubeResultRenderer.render(result)
+                        result.issues.forEach(issueListModel::addElement)
+                        finishLoading()
+                    }
+                } catch (ex: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        summaryArea.text = "Failed to load SonarQube results: ${ex.message ?: ex.toString()}"
+                        finishLoading()
+                        Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
                     }
                 }
-            })
+            }
         }
 
         refreshButton.addActionListener { load() }
