@@ -1,46 +1,63 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.FilePath
+import com.intellij.openapi.vcs.changes.Change
 import git4idea.repo.GitRepositoryManager
 import java.io.File
 
 object GitDiffProvider {
 
-    fun getDiff(project: Project): String {
-        val basePath = project.basePath ?: error("Project base path is unavailable")
+    fun getDiffForSelectedChanges(project: Project, changes: List<Change>, unversionedFiles: List<FilePath>): String {
         val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
             ?: error("No Git repository found for project")
+        val repoRoot = repo.root.path
 
-        val process = ProcessBuilder(
-            "git",
-            "diff",
-            "--cached",
-            "--",
-            "."
+        fun toRelativePath(absolutePath: String): String? {
+            val f = File(absolutePath)
+            val canonical = if (f.isAbsolute) f.canonicalPath else File(repoRoot, absolutePath).canonicalPath
+            return if (canonical != null && canonical.startsWith(repoRoot)) {
+                canonical.removePrefix(repoRoot).removePrefix("/").removePrefix("\\")
+            } else null
+        }
+
+        val filePaths = changes.mapNotNull { change ->
+            val revision = change.afterRevision ?: change.beforeRevision
+            revision?.file?.path?.let { toRelativePath(it) }
+        } + unversionedFiles.mapNotNull { it.path?.let { p -> toRelativePath(p) } }
+        val uniquePaths = filePaths.distinct()
+
+        if (uniquePaths.isEmpty()) return ""
+
+        val stagedProcess = ProcessBuilder(
+            mutableListOf("git", "diff", "--cached", "--") + uniquePaths
         )
             .directory(File(repo.root.path))
             .redirectErrorStream(true)
             .start()
 
-        val staged = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor()
+        val staged = stagedProcess.inputStream.bufferedReader().use { it.readText() }
+        stagedProcess.waitFor()
 
-        if (staged.isNotBlank()) return staged
-
-        val workingTreeProcess = ProcessBuilder(
-            "git",
-            "diff",
-            "--",
-            "."
+        val unstagedProcess = ProcessBuilder(
+            mutableListOf("git", "diff", "--") + uniquePaths
         )
             .directory(File(repo.root.path))
             .redirectErrorStream(true)
             .start()
 
-        val unstaged = workingTreeProcess.inputStream.bufferedReader().use { it.readText() }
-        workingTreeProcess.waitFor()
+        val unstaged = unstagedProcess.inputStream.bufferedReader().use { it.readText() }
+        unstagedProcess.waitFor()
 
-        return unstaged
+        return buildString {
+            if (staged.isNotBlank()) {
+                appendLine(staged.trimEnd())
+            }
+            if (unstaged.isNotBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(unstaged.trimEnd())
+            }
+        }
     }
 
 

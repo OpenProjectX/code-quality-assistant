@@ -9,7 +9,9 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vcs.VcsDataKeys
+import com.intellij.openapi.vcs.changes.Change
 
 class GenerateCommitMessagePromptMenuAction : ActionGroup("Generate Commit Message (Choose Prompt)", true), DumbAware {
     init {
@@ -44,6 +46,10 @@ private class GenerateCommitMessageByPromptAction(
         val project = e.project ?: return
         val commitMessageUi = e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) ?: return
 
+        val workflowUi = e.getData(VcsDataKeys.COMMIT_WORKFLOW_UI)
+        val includedChanges = getIncludedChanges(workflowUi)
+        val includedUnversioned = getIncludedUnversionedFiles(workflowUi)
+
         saveDefaultCommitPromptProfile(project, promptName)
         ButtonUsageReportService.getInstance(project).recordPromptUsage("commit.message", promptName)
 
@@ -51,10 +57,10 @@ private class GenerateCommitMessageByPromptAction(
             override fun run(indicator: ProgressIndicator) {
                 try {
                     indicator.text = "Collecting git diff..."
-                    val diff = GitDiffProvider.getDiff(project)
+                    val diff = GitDiffProvider.getDiffForSelectedChanges(project, includedChanges, includedUnversioned)
 
                     if (diff.isBlank()) {
-                        Notifications.error(project, "Generate Commit Message", "No local git changes found.")
+                        Notifications.error(project, "Generate Commit Message", "No selected changes to commit.")
                         return
                     }
 
@@ -76,6 +82,28 @@ private class GenerateCommitMessageByPromptAction(
                 }
             }
         })
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getIncludedChanges(workflowUi: Any?): List<Change> {
+        if (workflowUi == null) return emptyList()
+        return try {
+            val method = workflowUi.javaClass.getMethod("getIncludedChanges")
+            (method.invoke(workflowUi) as? List<*>)?.filterIsInstance<Change>().orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getIncludedUnversionedFiles(workflowUi: Any?): List<FilePath> {
+        if (workflowUi == null) return emptyList()
+        return try {
+            val method = workflowUi.javaClass.getMethod("getIncludedUnversionedFiles")
+            (method.invoke(workflowUi) as? List<*>)?.filterIsInstance<FilePath>().orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun saveDefaultCommitPromptProfile(project: Project, selectedName: String) {

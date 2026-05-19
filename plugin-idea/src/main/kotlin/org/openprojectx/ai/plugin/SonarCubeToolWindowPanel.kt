@@ -47,16 +47,20 @@ object SonarCubeToolWindowPanel {
             border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
             text = "Click Refresh to load configured SonarQube results."
         }
+        var selectedIssue: SonarCubeIssue? = null
         val issueList = JList(issueListModel).apply {
             selectionMode = ListSelectionModel.SINGLE_SELECTION
             background = Color(0x11, 0x1C, 0x2F)
             foreground = fgColor
             fixedCellHeight = 54
             cellRenderer = SonarCubeIssueRenderer()
+            addListSelectionListener {
+                if (!it.valueIsAdjusting) selectedIssue = selectedValue
+            }
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     if (e.clickCount >= 2) {
-                        selectedValue?.let { openIssue(project, it) }
+                        selectedValue?.let { issue -> openIssue(project, issue) }
                     }
                 }
             })
@@ -106,7 +110,12 @@ object SonarCubeToolWindowPanel {
 
         refreshButton.addActionListener { load() }
         openButton.addActionListener {
-            issueList.selectedValue?.let { openIssue(project, it) }
+            val issue = selectedIssue
+            if (issue == null) {
+                Notifications.warn(project, "Sonar Cube", "Please select an issue first.")
+            } else {
+                openIssue(project, issue)
+            }
         }
 
         val root = JPanel(BorderLayout(8, 8)).apply {
@@ -158,7 +167,7 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
     private val authHeader = SonarQubeAuth.authorizationHeader(config)
 
     suspend fun load(): SonarCubeResult {
-        val client = HttpClients.shared(timeoutSeconds = 60)
+        val client = HttpClients.shared(disableTlsVerification = true, timeoutSeconds = 60)
         try {
             val baseUrl = config.serverUrl.trimEnd('/')
             val projectKey = encoded(config.projectKey)

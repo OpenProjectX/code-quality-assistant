@@ -53,5 +53,7 @@ data class AiTestSettingsModel(
     val sonarQubePasswordEnv: String = "",
     val sonarQubeTargetCoverage: String = "80",
     val sonarQubeMaxFiles: String = "5",
-    val suppressedGlobalPrompts: List<String> = emptyList()
+    val suppressedGlobalPrompts: List<String> = emptyList(),
+    val skillProfilesYaml: String = "",
+    val suppressedGlobalSkills: List<String> = emptyList()
 )
