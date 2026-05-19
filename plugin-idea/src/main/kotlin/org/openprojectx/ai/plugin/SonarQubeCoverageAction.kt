@@ -93,7 +93,8 @@ private data class SonarQubeCoverageRequest(
     val password: String,
     val targetCoverage: Double,
     val maxFiles: Int,
-    val generateMissingTests: Boolean
+    val generateMissingTests: Boolean,
+    val skipPkixCheck: Boolean
 )
 
 private class SonarQubeCoverageDialog(
@@ -108,6 +109,7 @@ private class SonarQubeCoverageDialog(
     private val targetCoverageField = JTextField(config.targetCoverage.toString(), 8)
     private val maxFilesField = JTextField(config.maxFiles.toString(), 8)
     private val generateMissingTestsBox = JCheckBox("Generate missing tests with AI", true)
+    private val skipPkixCheckBox = JCheckBox("Skip PKIX/TLS certificate check", true)
 
     init {
         title = "SonarQube Coverage"
@@ -131,6 +133,7 @@ private class SonarQubeCoverageDialog(
         add(JLabel("Max uncovered files to inspect"))
         add(maxFilesField)
         add(generateMissingTestsBox)
+        add(skipPkixCheckBox)
     }
 
     fun request(): SonarQubeCoverageRequest = SonarQubeCoverageRequest(
@@ -141,7 +144,8 @@ private class SonarQubeCoverageDialog(
         password = String(passwordField.password).trim(),
         targetCoverage = targetCoverageField.text.trim().toDoubleOrNull() ?: 80.0,
         maxFiles = maxFilesField.text.trim().toIntOrNull()?.coerceIn(1, 20) ?: 5,
-        generateMissingTests = generateMissingTestsBox.isSelected
+        generateMissingTests = generateMissingTestsBox.isSelected,
+        skipPkixCheck = skipPkixCheckBox.isSelected
     )
 }
 
@@ -170,7 +174,7 @@ private class SonarQubeCoverageClient(private val request: SonarQubeCoverageRequ
     )
 
     suspend fun loadCoverage(): SonarQubeCoverageReport {
-        val jsonClient = HttpClients.shared(timeoutSeconds = 60)
+        val jsonClient = HttpClients.shared(disableTlsVerification = request.skipPkixCheck, timeoutSeconds = 60)
         try {
             val baseUrl = request.serverUrl.trimEnd('/')
             val component = encoded(request.projectKey)
