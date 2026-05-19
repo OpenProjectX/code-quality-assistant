@@ -1009,16 +1009,17 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
         fun allSkills(): List<SkillDefinition> {
             val model = LlmSettingsLoader.loadSettingsModel(project)
+            val suppressed = model.suppressedGlobalSkills.toSet()
             val items = Yaml().load<Any?>(model.skillProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>()
             val yamlSkills = items.mapNotNull { (k, v) ->
                 val key = k?.toString()?.trim().orEmpty()
                 val value = v?.toString().orEmpty()
-                if (key.isBlank() || value.isBlank()) null
+                if (key.isBlank() || value.isBlank() || key in suppressed) null
                 else SkillDefinition(key, value, isGlobalSkillName(key), updatedText(key))
             }
             val yamlDisplayNames = yamlSkills.map { it.displayName }.toSet()
             val localSkills = LlmSettingsLoader.loadLocalSkillFiles()
-                .filter { (name, _) -> name !in yamlDisplayNames && !isGlobalSkillName(name) }
+                .filter { (name, _) -> name !in yamlDisplayNames && !isGlobalSkillName(name) && name !in suppressed }
                 .map { (name, content) ->
                     SkillDefinition(name, content, false, "—")
                 }

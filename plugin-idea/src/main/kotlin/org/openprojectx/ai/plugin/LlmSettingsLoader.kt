@@ -222,7 +222,7 @@ object LlmSettingsLoader {
             validateBitbucketPromptRepoConnection(project, remoteConfig)
             val remoteEntries = fetchBitbucketGlobalPromptEntries(project, remoteConfig, strict = true)
             val visibleRemoteEntries = remoteEntries.filterNot {
-                globalPromptSuppressionKey(it.category, it.cacheKey) in model.suppressedGlobalPrompts
+                isPromptGloballySuppressed(it.category, it.cacheKey, model.suppressedGlobalPrompts)
             }
             val remoteGlobalKeys = visibleRemoteEntries
                 .map { it.cacheKey }
@@ -289,7 +289,7 @@ object LlmSettingsLoader {
 
             val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
             val visibleRemoteEntries = remoteEntries.filterNot {
-                globalPromptSuppressionKey(it.category, it.cacheKey) in suppressedGlobalPrompts
+                isPromptGloballySuppressed(it.category, it.cacheKey, suppressedGlobalPrompts)
             }
             val remoteGlobalKeys = visibleRemoteEntries.map { it.cacheKey }.toSet()
             val cachedGlobalKeys = readCachedGlobalPromptKeys(project)
@@ -1084,7 +1084,7 @@ object LlmSettingsLoader {
 
             remoteEntries
                 .filter { it.category == target.category }
-                .filterNot { globalPromptSuppressionKey(it.category, it.cacheKey) in suppressedGlobalPrompts }
+                .filterNot { isPromptGloballySuppressed(it.category, it.cacheKey, suppressedGlobalPrompts) }
                 .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
                 .forEach { meta ->
                     itemsWithoutOldGlobal[meta.cacheKey] = ensurePromptUpdateMetadata(meta)
@@ -1148,7 +1148,7 @@ object LlmSettingsLoader {
         suppressedGlobalPrompts: Collection<String> = emptyList()
     ): Map<String, String> {
         val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)[category].orEmpty()
-            .filterKeys { globalPromptSuppressionKey(category, it) !in suppressedGlobalPrompts }
+            .filterKeys { !isPromptGloballySuppressed(category, it, suppressedGlobalPrompts) }
         if (globalPrompts.isEmpty()) return items
         val normalized = linkedMapOf<String, String>()
         globalPrompts.forEach { (name, content) ->
@@ -1759,7 +1759,13 @@ object LlmSettingsLoader {
             .distinct()
     }
 
-    private fun globalPromptSuppressionKey(category: String, name: String): String = "$category:$name"
+    private fun isPromptGloballySuppressed(category: String, cacheKey: String, suppressed: Collection<String>): Boolean {
+        if (suppressed.isEmpty()) return false
+        val fullKey = "$category:$cacheKey"
+        if (fullKey in suppressed) return true
+        val displayName = cacheKey.removePrefix("global/").replace(Regex("\\s*\\[[^]]+]$"), "")
+        return "$category:$displayName" in suppressed
+    }
 
     private fun readCachedGlobalPromptKeys(project: Project): Set<String> {
         val root = readRootMap(project)
@@ -1891,7 +1897,7 @@ object LlmSettingsLoader {
             .toMutableMap()
 
         remoteEntries
-            .filterNot { "skill:${it.cacheKey}" in suppressedGlobalSkills }
+            .filterNot { it.cacheKey in suppressedGlobalSkills }
             .sortedWith(compareByDescending<GlobalPromptMeta> { it.updatedAt }.thenBy { it.name })
             .forEach { meta ->
                 itemsWithoutOldGlobal[meta.cacheKey] = ensurePromptUpdateMetadata(meta)
