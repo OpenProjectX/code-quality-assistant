@@ -4,11 +4,13 @@ import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import kotlinx.coroutines.runBlocking
+import org.openprojectx.ai.plugin.llm.LlmRuntimeLogger
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.LlmUnauthorizedException
 import org.openprojectx.ai.plugin.llm.TemplateRequestExecutor
@@ -20,6 +22,7 @@ class LlmAuthSessionService(
     private var sessionApiKey: String? = null
 
     fun resolve(settings: LlmSettings): LlmSettings {
+        installRuntimeLogSink()
         if (!settings.apiKey.isNullOrBlank()) {
             sessionApiKey = settings.apiKey
             return settings
@@ -65,17 +68,24 @@ class LlmAuthSessionService(
     }
 
     fun loginNow(): String {
+        installRuntimeLogSink()
         val settings = LlmSettingsLoader.load(project)
         val resolved = if (settings.auth != null) relogin(settings) else resolve(settings)
         return resolved.apiKey ?: error("LLM login did not produce an API key")
     }
 
     fun loginNowWithFeedback() {
-        try {
-            loginNow()
-            Messages.showInfoMessage(project, "LLM login succeeded.", "AI Test Generator")
-        } catch (e: Exception) {
-            Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "AI Test Generator")
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                loginNow()
+                ApplicationManager.getApplication().invokeLater({
+                    Messages.showInfoMessage(project, "LLM login succeeded.", "Code Quality Improver")
+                }, ModalityState.any())
+            } catch (e: Exception) {
+                ApplicationManager.getApplication().invokeLater({
+                    Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "Code Quality Improver")
+                }, ModalityState.any())
+            }
         }
     }
 
@@ -114,6 +124,10 @@ class LlmAuthSessionService(
         }
     }
 
+    private fun installRuntimeLogSink() {
+        LlmRuntimeLogger.sink = { message -> RuntimeLogStore.append(message) }
+    }
+
     private fun promptCredentials(settings: LlmSettings): LoginCredentials {
         lateinit var credentials: LoginCredentials
         val saved = loadSavedCredentials(settings)
@@ -146,7 +160,7 @@ class LlmAuthSessionService(
         if (app.isDispatchThread) {
             showDialog()
         } else {
-            app.invokeAndWait(showDialog)
+            app.invokeAndWait(showDialog, ModalityState.any())
         }
         return credentials
     }

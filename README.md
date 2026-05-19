@@ -121,6 +121,21 @@ generation:
 - `OPENAI_API_KEY` - Your OpenAI API key (or any OpenAI-compatible provider)
 - Use `${ENV_VAR}` syntax in config for secrets
 
+### SonarQube Coverage Assistant
+
+Configure SonarQube in `.ai-test.yaml` to let the plugin fetch current project coverage, list files with missing coverage, and optionally ask the configured LLM to generate tests for the uncovered code.
+
+```yaml
+sonarQube:
+  serverUrl: "https://sonarqube.example.com"
+  projectKey: "my-service"
+  tokenEnv: "SONAR_TOKEN"
+  targetCoverage: 80
+  maxFiles: 5
+```
+
+Use **Tools → SonarQube Coverage** in IntelliJ IDEA. The action shows a coverage summary in the AI Context Box, highlights files with uncovered lines, and can generate missing test code in one click.
+
 ## Prompt Types & Prompt File Samples
 
 ### Current Prompt Types

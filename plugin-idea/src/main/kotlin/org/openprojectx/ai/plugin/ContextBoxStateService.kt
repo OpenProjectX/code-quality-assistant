@@ -67,6 +67,23 @@ class ContextBoxStateService(private val project: Project) {
         }.trimEnd())
     }
 
+    fun recordSonarQubeCoverage(projectKey: String, coverageSummary: String, generation: String) {
+        val now = LocalDateTime.now().format(formatter)
+        appendResult(buildString {
+            appendLine("Type: SonarQube Coverage")
+            appendLine("Time: $now")
+            appendLine("Project Key: $projectKey")
+            appendLine()
+            appendLine("Coverage Summary:")
+            appendLine(coverageSummary.trim().ifBlank { "(empty coverage summary)" })
+            if (generation.isNotBlank()) {
+                appendLine()
+                appendLine("Generated Missing Tests:")
+                append(generation.trim())
+            }
+        }.trimEnd())
+    }
+
     fun recordFollowUp(extraRequirement: String, result: String) {
         val now = LocalDateTime.now().format(formatter)
         appendResult(buildString {

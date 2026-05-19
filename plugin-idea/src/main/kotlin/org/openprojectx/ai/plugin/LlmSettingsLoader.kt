@@ -198,7 +198,7 @@ object LlmSettingsLoader {
 
     fun checkBitbucketPromptUpdates(project: Project): PromptUpdateStatus {
         val model = loadSettingsModel(project)
-        if (model.bitbucketPromptRepoUrl.isBlank()) {
+        if (!model.bitbucketPromptRepoEnabled || model.bitbucketPromptRepoUrl.isBlank()) {
             return PromptUpdateStatus(
                 configured = false,
                 remoteCount = 0,
@@ -271,7 +271,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project)
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteConfig = parseBitbucketPromptRepoConfig(prompts.map("remoteRepo"))
-        if (remoteConfig.repoUrl.isBlank()) {
+        if (!remoteConfig.enabled || remoteConfig.repoUrl.isBlank()) {
             return PromptUpdateStatus(
                 configured = false,
                 remoteCount = 0,
@@ -448,6 +448,7 @@ object LlmSettingsLoader {
         val http = llm["http"] as? Map<*, *>
         val ui = root["ui"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val sonarQube = root["sonarQube"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
         val remoteRepo = prompts.map("remoteRepo")
         val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
@@ -556,6 +557,15 @@ object LlmSettingsLoader {
             bitbucketPromptRepoUsername = remoteRepo.string("username"),
             bitbucketPromptRepoPassword = remoteRepo.string("password"),
             bitbucketConfigImportPath = remoteRepo.string("configImportPath"),
+            sonarQubeServerUrl = sonarQube.string("serverUrl"),
+            sonarQubeProjectKey = sonarQube.string("projectKey"),
+            sonarQubeToken = sonarQube.string("token"),
+            sonarQubeTokenEnv = sonarQube.string("tokenEnv"),
+            sonarQubeUsername = sonarQube.string("username"),
+            sonarQubePassword = sonarQube.string("password"),
+            sonarQubePasswordEnv = sonarQube.string("passwordEnv"),
+            sonarQubeTargetCoverage = sonarQube.string("targetCoverage").ifBlank { "80" },
+            sonarQubeMaxFiles = sonarQube.string("maxFiles").ifBlank { "5" },
             suppressedGlobalPrompts = suppressedGlobalPrompts,
             skillProfilesYaml = dumpPromptProfilesYaml(
                 parsePromptProfileItems(
@@ -572,6 +582,7 @@ object LlmSettingsLoader {
         val root = readRootMap(project).toMutableLinkedMap()
         root["llm"] = buildLlmMap(root["llm"] as? Map<*, *>, model)
         root["ui"] = buildUiMap(root["ui"] as? Map<*, *>, model)
+        root["sonarQube"] = buildSonarQubeMap(model)
         root.remove("generation")
         root["prompts"] = buildPromptsMap(project, root["prompts"] as? Map<*, *>, model)
         root["skills"] = buildSkillsMap(model)
@@ -586,6 +597,8 @@ object LlmSettingsLoader {
         writeRootMap(project, root)
     }
 
+    fun loadSonarQubeConfig(project: Project): SonarQubeConfig = parseSonarQubeConfig(readRootMap(project))
+
     fun loadConfig(project: Project): AiTestConfig {
         val configFile = findConfigFile()
             ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} under ${configHomeDir().absolutePath}.")
@@ -598,11 +611,13 @@ object LlmSettingsLoader {
         val llm = parseLlmSettings(root)
         val generation = parseGenerationConfig(root)
         val prompts = parsePromptOverrides(project, root)
+        val sonarQube = parseSonarQubeConfig(root)
 
         return AiTestConfig(
             llm = llm,
             generation = generation,
-            prompts = prompts
+            prompts = prompts,
+            sonarQube = sonarQube
         )
     }
 
@@ -663,6 +678,21 @@ object LlmSettingsLoader {
                     suppressedGlobalPrompts = suppressedGlobalPrompts
                 )
             )
+        )
+    }
+
+    private fun parseSonarQubeConfig(root: Map<*, *>): SonarQubeConfig {
+        val sonar = root["sonarQube"] as? Map<*, *> ?: return SonarQubeConfig()
+        return SonarQubeConfig(
+            serverUrl = sonar.string("serverUrl"),
+            projectKey = sonar.string("projectKey"),
+            token = sonar.string("token"),
+            tokenEnv = sonar.string("tokenEnv"),
+            username = sonar.string("username"),
+            password = sonar.string("password"),
+            passwordEnv = sonar.string("passwordEnv"),
+            targetCoverage = sonar.double("targetCoverage") ?: 80.0,
+            maxFiles = sonar.int("maxFiles") ?: 5
         )
     }
 
@@ -837,6 +867,18 @@ object LlmSettingsLoader {
         }
 
         return llm
+    }
+
+    private fun buildSonarQubeMap(model: AiTestSettingsModel): MutableMap<String, Any> = linkedMapOf<String, Any>().apply {
+        put("serverUrl", model.sonarQubeServerUrl)
+        put("projectKey", model.sonarQubeProjectKey)
+        put("token", model.sonarQubeToken)
+        put("tokenEnv", model.sonarQubeTokenEnv)
+        put("username", model.sonarQubeUsername)
+        put("password", model.sonarQubePassword)
+        put("passwordEnv", model.sonarQubePasswordEnv)
+        put("targetCoverage", model.sonarQubeTargetCoverage.toDoubleOrNull() ?: 80.0)
+        put("maxFiles", model.sonarQubeMaxFiles.toIntOrNull() ?: 5)
     }
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
@@ -1308,7 +1350,7 @@ object LlmSettingsLoader {
     }
 
     private fun fetchBitbucketGlobalPromptEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {
-        if (config.repoUrl.isBlank()) return emptyList()
+        if (!config.enabled || config.repoUrl.isBlank()) return emptyList()
         val result = runCatching {
             val directBitbucketRawBaseUrl = parseDirectBitbucketRawBaseUrl(config.repoUrl)
             val repo = directBitbucketRawBaseUrl?.let {
@@ -1589,8 +1631,9 @@ object LlmSettingsLoader {
         } else {
             "Authorization=<absent>"
         }
+        val curlCommand = buildBitbucketCurlCommand(url, normalized, credentials)
         RuntimeLogStore.append(
-            "INFO | Bitbucket API | Request method=GET url=$url headers[$authHeaderLog] credentialSources=${credentials.joinToString(",") { it.source }.ifBlank { "<none>" }}"
+            "INFO | Bitbucket API | Request method=GET url=$url headers[$authHeaderLog] credentialSources=${credentials.joinToString(",") { it.source }.ifBlank { "<none>" }} | curl=$curlCommand"
         )
         val code = conn.responseCode
         val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
@@ -1609,6 +1652,25 @@ object LlmSettingsLoader {
         return body
     }
 
+
+    private fun buildBitbucketCurlCommand(url: String, token: String, credentials: List<BitbucketCredential>): String {
+        val authorizationHeader = when {
+            token.isNotBlank() && token.contains(":") -> {
+                val username = token.substringBefore(':')
+                "Authorization: Basic ${displayHeaderValue(username)}:***"
+            }
+            token.isNotBlank() -> "Authorization: Bearer ***"
+            credentials.isNotEmpty() -> {
+                val credential = credentials.first()
+                "Authorization: Basic ${displayHeaderValue(credential.username)}:***"
+            }
+            else -> null
+        }
+        val authPart = authorizationHeader?.let { " -H " + shellQuote(it) }.orEmpty()
+        return "curl -X GET " + shellQuote(url) + authPart
+    }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
     private fun describeBasicTokenHeader(token: String): String {
         val separatorIndex = token.indexOf(':')
         val username = token.substring(0, separatorIndex)
@@ -1626,6 +1688,18 @@ object LlmSettingsLoader {
 
     private fun Map<*, *>?.string(key: String): String =
         this?.get(key)?.toString()?.trim().orEmpty()
+
+    private fun Map<*, *>?.double(key: String): Double? = when (val value = this?.get(key)) {
+        is Number -> value.toDouble()
+        is String -> value.trim().toDoubleOrNull()
+        else -> null
+    }
+
+    private fun Map<*, *>?.int(key: String): Int? = when (val value = this?.get(key)) {
+        is Number -> value.toInt()
+        is String -> value.trim().toIntOrNull()
+        else -> null
+    }
 
     private fun Map<*, *>?.map(key: String): Map<*, *> =
         this?.get(key) as? Map<*, *> ?: emptyMap<Any?, Any?>()
