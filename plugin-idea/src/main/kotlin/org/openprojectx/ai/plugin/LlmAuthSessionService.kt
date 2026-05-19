@@ -78,11 +78,11 @@ class LlmAuthSessionService(
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 loginNow()
-                ApplicationManager.getApplication().invokeLater {
+                ApplicationManager.getApplication().invokeLater({
                     Messages.showInfoMessage(project, "LLM login succeeded.", "Code Quality Improver")
                 }, ModalityState.any())
             } catch (e: Exception) {
-                ApplicationManager.getApplication().invokeLater {
+                ApplicationManager.getApplication().invokeLater({
                     Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "Code Quality Improver")
                 }, ModalityState.any())
             }
