@@ -4,6 +4,7 @@ import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
@@ -79,11 +80,11 @@ class LlmAuthSessionService(
                 loginNow()
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showInfoMessage(project, "LLM login succeeded.", "Code Quality Improver")
-                }
+                }, ModalityState.any())
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "Code Quality Improver")
-                }
+                }, ModalityState.any())
             }
         }
     }
@@ -159,7 +160,7 @@ class LlmAuthSessionService(
         if (app.isDispatchThread) {
             showDialog()
         } else {
-            app.invokeAndWait(showDialog)
+            app.invokeAndWait(showDialog, ModalityState.any())
         }
         return credentials
     }
