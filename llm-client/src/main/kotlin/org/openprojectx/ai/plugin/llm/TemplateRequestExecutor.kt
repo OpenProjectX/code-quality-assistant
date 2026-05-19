@@ -31,8 +31,9 @@ class TemplateRequestExecutor(
             }
             val safeRequestHeaders = redactHeaders(effectiveRequestHeaders)
             val safeRequestBody = redactSensitivePayload(renderedBody)
+            val curlCommand = toCurlCommand(config.method.uppercase(), renderedUrl, effectiveRequestHeaders, renderedBody)
             LlmRuntimeLogger.info(
-                "Template request start | method=${config.method.uppercase()} | url=$renderedUrl | headers=$safeRequestHeaders | body=$safeRequestBody"
+                "Template request start | method=${config.method.uppercase()} | url=$renderedUrl | headers=$safeRequestHeaders | body=$safeRequestBody | curl=$curlCommand"
             )
 
             val response = http.request {
@@ -135,6 +136,29 @@ class TemplateRequestExecutor(
         if (value.isBlank()) return "<blank>"
         return "***"
     }
+
+    private fun toCurlCommand(method: String, url: String, headers: Map<String, String>, body: String): String {
+        val headerArgs = headers.entries.joinToString(" ") { (name, value) ->
+            "-H " + shellQuote("$name: ${redactHeaderValue(name, value)}")
+        }
+        val redactedBody = redactSensitivePayload(body)
+        val bodyArg = if (redactedBody.isNotBlank()) " --data " + shellQuote(redactedBody) else ""
+        return "curl -X $method " + shellQuote(url) +
+            (if (headerArgs.isNotBlank()) " $headerArgs" else "") +
+            bodyArg
+    }
+
+    private fun redactHeaderValue(name: String, value: String): String {
+        return if (name.contains("authorization", true) ||
+            name.contains("token", true) ||
+            name.contains("key", true) ||
+            name.contains("secret", true) ||
+            name.contains("password", true) ||
+            name.contains("cookie", true)
+        ) "***" else value
+    }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
 
     private companion object {
         const val MAX_LOG_BODY_CHARS = 4_000

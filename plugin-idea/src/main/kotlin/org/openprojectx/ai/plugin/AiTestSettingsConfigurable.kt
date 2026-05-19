@@ -2,6 +2,7 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -336,10 +337,10 @@ class AiTestSettingsConfigurable(
         ApplicationManager.getApplication().executeOnPooledThread {
             runCatching(block)
                 .onSuccess { value ->
-                    ApplicationManager.getApplication().invokeLater { onSuccess(value) }
+                    ApplicationManager.getApplication().invokeLater({ onSuccess(value) }, ModalityState.any())
                 }
                 .onFailure { ex ->
-                    ApplicationManager.getApplication().invokeLater { onFailure(ex) }
+                    ApplicationManager.getApplication().invokeLater({ onFailure(ex) }, ModalityState.any())
                 }
         }
     }
