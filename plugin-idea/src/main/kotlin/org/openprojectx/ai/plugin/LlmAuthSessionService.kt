@@ -114,7 +114,10 @@ class LlmAuthSessionService(
             block(resolved)
         } catch (_: LlmUnauthorizedException) {
             if (baseSettings.auth == null) {
-                throw LlmUnauthorizedException("Unauthorized LLM request and no login template is configured")
+                if (baseSettings.apiKey.isNullOrBlank()) {
+                    throw LlmUnauthorizedException("Unauthorized LLM request and no API key or login template is configured")
+                }
+                throw LlmUnauthorizedException("Unauthorized LLM request — your API key may be invalid or expired. Update the key in .ai-test.yaml or configure a login template for automatic renewal.")
             }
             if (loginAlreadyAttempted) {
                 throw LlmUnauthorizedException("Unauthorized LLM request after login attempt; please verify login endpoint/credentials")

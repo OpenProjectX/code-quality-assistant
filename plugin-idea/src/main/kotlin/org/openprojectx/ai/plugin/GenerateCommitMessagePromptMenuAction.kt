@@ -57,10 +57,12 @@ private class GenerateCommitMessageByPromptAction(
             override fun run(indicator: ProgressIndicator) {
                 try {
                     indicator.text = "Collecting git diff..."
-                    val diff = GitDiffProvider.getDiffForSelectedChanges(project, includedChanges, includedUnversioned)
-
+                    var diff = GitDiffProvider.getDiffForSelectedChanges(project, includedChanges, includedUnversioned)
                     if (diff.isBlank()) {
-                        Notifications.error(project, "Generate Commit Message", "No selected changes to commit.")
+                        diff = GitDiffProvider.getAllUncommittedDiff(project)
+                    }
+                    if (diff.isBlank()) {
+                        Notifications.error(project, "Generate Commit Message", "No changes to commit.")
                         return
                     }
 

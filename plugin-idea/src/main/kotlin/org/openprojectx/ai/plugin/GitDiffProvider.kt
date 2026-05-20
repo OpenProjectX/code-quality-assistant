@@ -61,6 +61,36 @@ object GitDiffProvider {
     }
 
 
+    fun getAllUncommittedDiff(project: Project): String {
+        val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
+            ?: error("No Git repository found for project")
+        val repoDir = File(repo.root.path)
+
+        val stagedProcess = ProcessBuilder("git", "diff", "--cached")
+            .directory(repoDir)
+            .redirectErrorStream(true)
+            .start()
+        val staged = stagedProcess.inputStream.bufferedReader().use { it.readText() }
+        stagedProcess.waitFor()
+
+        val unstagedProcess = ProcessBuilder("git", "diff")
+            .directory(repoDir)
+            .redirectErrorStream(true)
+            .start()
+        val unstaged = unstagedProcess.inputStream.bufferedReader().use { it.readText() }
+        unstagedProcess.waitFor()
+
+        return buildString {
+            if (staged.isNotBlank()) {
+                appendLine(staged.trimEnd())
+            }
+            if (unstaged.isNotBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(unstaged.trimEnd())
+            }
+        }
+    }
+
     fun getDiffBetweenBranches(project: Project, sourceBranch: String, targetBranch: String): String {
         val repo = GitRepositoryManager.getInstance(project).repositories.firstOrNull()
             ?: error("No Git repository found for project")

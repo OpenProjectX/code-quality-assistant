@@ -20,7 +20,8 @@ data class SonarQubeConfig(
     val password: String = "",
     val passwordEnv: String = "",
     val targetCoverage: Double = 80.0,
-    val maxFiles: Int = 5
+    val maxFiles: Int = 5,
+    val mockEnabled: Boolean = false
 ) {
     val resolvedToken: String
         get() = token.ifBlank { tokenEnv.takeIf { it.isNotBlank() }?.let { System.getenv(it).orEmpty() }.orEmpty() }

@@ -94,7 +94,8 @@ private data class SonarQubeCoverageRequest(
     val targetCoverage: Double,
     val maxFiles: Int,
     val generateMissingTests: Boolean,
-    val skipPkixCheck: Boolean
+    val skipPkixCheck: Boolean,
+    val mockEnabled: Boolean
 )
 
 private class SonarQubeCoverageDialog(
@@ -110,6 +111,7 @@ private class SonarQubeCoverageDialog(
     private val maxFilesField = JTextField(config.maxFiles.toString(), 8)
     private val generateMissingTestsBox = JCheckBox("Generate missing tests with AI", true)
     private val skipPkixCheckBox = JCheckBox("Skip PKIX/TLS certificate check", true)
+    private val mockEnabled = config.mockEnabled
 
     init {
         title = "SonarQube Coverage"
@@ -145,11 +147,12 @@ private class SonarQubeCoverageDialog(
         targetCoverage = targetCoverageField.text.trim().toDoubleOrNull() ?: 80.0,
         maxFiles = maxFilesField.text.trim().toIntOrNull()?.coerceIn(1, 20) ?: 5,
         generateMissingTests = generateMissingTestsBox.isSelected,
-        skipPkixCheck = skipPkixCheckBox.isSelected
+        skipPkixCheck = skipPkixCheckBox.isSelected,
+        mockEnabled = mockEnabled
     )
 }
 
-private data class SonarQubeCoverageReport(
+internal data class SonarQubeCoverageReport(
     val projectKey: String,
     val projectCoverage: Double?,
     val projectLineCoverage: Double?,
@@ -158,7 +161,7 @@ private data class SonarQubeCoverageReport(
     val files: List<SonarQubeFileCoverage>
 )
 
-private data class SonarQubeFileCoverage(
+internal data class SonarQubeFileCoverage(
     val key: String,
     val path: String,
     val name: String,
@@ -174,6 +177,9 @@ private class SonarQubeCoverageClient(private val request: SonarQubeCoverageRequ
     )
 
     suspend fun loadCoverage(): SonarQubeCoverageReport {
+        if (request.mockEnabled) {
+            return SonarQubeMockData.coverageReport(request.projectKey, request.targetCoverage)
+        }
         val jsonClient = HttpClients.shared(disableTlsVerification = request.skipPkixCheck, timeoutSeconds = 60)
         try {
             val baseUrl = request.serverUrl.trimEnd('/')

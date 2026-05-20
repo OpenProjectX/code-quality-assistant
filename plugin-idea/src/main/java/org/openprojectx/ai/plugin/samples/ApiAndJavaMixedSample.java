@@ -27,26 +27,34 @@ public class ApiAndJavaMixedSample {
         this.httpClient = httpClient;
     }
 
-    public int fetchUserStatusCode(String baseUrl, String userId) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/users/" + userId))
-                .timeout(Duration.ofSeconds(10))
-                .GET()
-                .build();
+    public int fetchUserStatusCode(String baseUrl, String userId) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/users/" + userId))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return response.statusCode();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return response.statusCode();
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to fetch user status code", e);
+        }
     }
 
-    public String fetchOrderBody(String baseUrl, String orderId) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/orders/" + orderId))
-                .timeout(Duration.ofSeconds(10))
-                .GET()
-                .build();
+    public String fetchOrderBody(String baseUrl, String orderId) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/orders/" + orderId))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return response.body();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return response.body();
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to fetch order body", e);
+        }
     }
 
     public int sum(List<Integer> values) {

@@ -140,6 +140,40 @@ object AiPromptDefaults {
         Extra requirements from user:
         {{extraRequirements}}
     """
+
+    const val SONARQUBE_FIX_ISSUE = """
+        You are a senior software engineer fixing a SonarQube issue.
+
+        Analyze the issue below and produce a concrete code fix.
+
+        Issue details:
+        - Rule: {{rule}}
+        - Severity: {{severity}}
+        - Type: {{type}}
+        - Message: {{message}}
+        - File: {{filePath}}
+        - Line: {{line}}
+
+        Source file content:
+        ```java
+        {{sourceCode}}
+        ```
+
+        Requirements:
+        - First, explain the problem in 2-3 sentences (what the issue means and why it matters).
+        - If the fix is unambiguous and safe, output a fenced code block (```java ... ```) containing the corrected ENTIRE file. Do not include any other explanation beyond the 2-3 sentence intro.
+        - If there are multiple valid approaches (e.g., different library choices, architectural trade-offs), output a JSON array of options:
+          ```json
+          [
+            {"label": "Option A description", "code": "fixed code for option A"},
+            {"label": "Option B description", "code": "fixed code for option B"}
+          ]
+          ```
+          Each option's "code" field must contain the full corrected file.
+        - Do NOT invent code not present in the source.
+        - Preserve all existing imports and add only necessary new ones.
+        - Keep formatting consistent with the original.
+    """
     val GENERATION_WRAPPER: String = PromptBuilder.DEFAULT_WRAPPER_TEMPLATE
     val GENERATION_REST_ASSURED: String = PromptBuilder.DEFAULT_REST_ASSURED_RULES
     val GENERATION_KARATE: String = PromptBuilder.DEFAULT_KARATE_RULES

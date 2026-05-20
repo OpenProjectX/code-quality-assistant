@@ -1,92 +1,214 @@
 package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.VfsUtil
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.GridLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JCheckBox
+import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
+import javax.swing.JMenuItem
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JTextArea
 import javax.swing.ListSelectionModel
+import javax.swing.SwingConstants
 import javax.swing.UIManager
 
 object SonarCubeToolWindowPanel {
+    private val allTypes = listOf("BUG", "VULNERABILITY", "CODE_SMELL")
+    private val allSeverities = listOf("BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO")
+    private val json = Json { ignoreUnknownKeys = true }
+
     fun create(project: Project, bgColor: Color, fgColor: Color, borderColor: Color, commonFont: Font): JPanel {
+        val allIssues = mutableListOf<SonarCubeIssue>()
+        val fixedKeys = mutableSetOf<String>()
         val issueListModel = DefaultListModel<SonarCubeIssue>()
-        val summaryArea = JTextArea().apply {
-            isEditable = false
-            lineWrap = true
-            wrapStyleWord = true
-            font = commonFont
-            background = bgColor
-            foreground = fgColor
-            caretColor = fgColor
-            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
-            text = "Click Refresh to load configured SonarQube results."
-        }
+        var isMockMode = false
         var selectedIssue: SonarCubeIssue? = null
+        var dashboardPanel = JPanel()
+
+        val typeBoxes = allTypes.associateWith { JCheckBox(it, true) }
+        val severityBoxes = allSeverities.associateWith { JCheckBox(it, true) }
+        val showFixedBox = JCheckBox("Fixed", true)
+        val filterCount = JLabel("").apply {
+            foreground = fgColor
+            font = commonFont.deriveFont(Font.PLAIN)
+        }
+
+        fun applyFilters() {
+            val enabledTypes = typeBoxes.filter { it.value.isSelected }.keys.map { it.uppercase() }.toSet()
+            val enabledSeverities = severityBoxes.filter { it.value.isSelected }.keys.map { it.uppercase() }.toSet()
+            val filtered = allIssues.filter {
+                it.type.uppercase() in enabledTypes &&
+                    it.severity.uppercase() in enabledSeverities &&
+                    (showFixedBox.isSelected || it.key !in fixedKeys)
+            }
+            val activeSize = allIssues.count { it.key !in fixedKeys }
+            issueListModel.clear()
+            filtered.forEach(issueListModel::addElement)
+            val fixedText = if (fixedKeys.isNotEmpty()) "  ${fixedKeys.size} fixed" else ""
+            filterCount.text = "($activeSize active)$fixedText"
+        }
+
+        fun showContextMenu(comp: Component, x: Int, y: Int) {
+            val issue = selectedIssue ?: return
+            val menu = JPopupMenu()
+
+            val goToItem = JMenuItem("Go to Line")
+            goToItem.addActionListener { openIssue(project, issue, isMockMode) }
+            menu.add(goToItem)
+
+            val aiFixItem = JMenuItem("AI Fix...")
+            aiFixItem.addActionListener { executeAiFix(project, issue) }
+            menu.add(aiFixItem)
+
+            menu.addSeparator()
+
+            if (issue.key in fixedKeys) {
+                val unfixItem = JMenuItem("Unmark as fixed")
+                unfixItem.addActionListener {
+                    fixedKeys.remove(issue.key)
+                    applyFilters()
+                }
+                menu.add(unfixItem)
+            } else {
+                val fixItem = JMenuItem("Mark as fixed")
+                fixItem.addActionListener {
+                    fixedKeys.add(issue.key)
+                    applyFilters()
+                }
+                menu.add(fixItem)
+            }
+
+            menu.show(comp, x, y)
+        }
+
         val issueList = JList(issueListModel).apply {
             selectionMode = ListSelectionModel.SINGLE_SELECTION
             background = Color(0x11, 0x1C, 0x2F)
             foreground = fgColor
-            fixedCellHeight = 54
-            cellRenderer = SonarCubeIssueRenderer()
+            fixedCellHeight = 58
+            cellRenderer = SonarCubeIssueRenderer(fixedKeys)
             addListSelectionListener {
                 if (!it.valueIsAdjusting) selectedIssue = selectedValue
             }
             addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) {
+                    if (e.isPopupTrigger) maybeShowMenu(e)
+                }
+                override fun mouseReleased(e: MouseEvent) {
+                    if (e.isPopupTrigger) maybeShowMenu(e)
+                }
                 override fun mouseClicked(e: MouseEvent) {
                     if (e.clickCount >= 2) {
-                        selectedValue?.let { issue -> openIssue(project, issue) }
+                        selectedValue?.let { openIssue(project, it, isMockMode) }
+                    }
+                }
+                private fun maybeShowMenu(e: MouseEvent) {
+                    val idx = locationToIndex(e.point)
+                    if (idx >= 0) {
+                        setSelectedIndex(idx)
+                        selectedIssue = selectedValue
+                        showContextMenu(this@apply, e.x, e.y)
                     }
                 }
             })
         }
         val refreshButton = JButton("Refresh")
-        val openButton = JButton("Open Selected")
+        val reportDate = JLabel("").apply {
+            foreground = Color(0x94, 0xA3, 0xB8)
+            font = commonFont.deriveFont(Font.PLAIN, 10f)
+        }
         val loading = AtomicBoolean(false)
+
+        typeBoxes.values.forEach { box ->
+            box.foreground = fgColor
+            box.isOpaque = false
+            box.font = commonFont.deriveFont(Font.PLAIN, 11f)
+            box.addActionListener { applyFilters() }
+        }
+        severityBoxes.values.forEach { box ->
+            box.foreground = fgColor
+            box.isOpaque = false
+            box.font = commonFont.deriveFont(Font.PLAIN, 11f)
+            box.addActionListener { applyFilters() }
+        }
+        showFixedBox.foreground = fgColor
+        showFixedBox.isOpaque = false
+        showFixedBox.font = commonFont.deriveFont(Font.PLAIN, 11f)
+        showFixedBox.addActionListener { applyFilters() }
+
+        fun filterByType(type: String) {
+            typeBoxes.forEach { (key, box) -> box.isSelected = key.uppercase() == type.uppercase() }
+            applyFilters()
+        }
+
+        fun resetTypeFilters() {
+            typeBoxes.values.forEach { it.isSelected = true }
+            applyFilters()
+        }
 
         fun finishLoading() {
             loading.set(false)
             refreshButton.isEnabled = true
-            openButton.isEnabled = true
         }
 
         fun load() {
             if (!loading.compareAndSet(false, true)) return
             refreshButton.isEnabled = false
-            openButton.isEnabled = false
+            allIssues.clear()
+            fixedKeys.clear()
             issueListModel.clear()
-            summaryArea.text = "Loading SonarQube results..."
+            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Loading...")
+            reportDate.text = ""
             ApplicationManager.getApplication().executeOnPooledThread {
                 try {
                     val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                    isMockMode = config.mockEnabled
                     if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
                         ApplicationManager.getApplication().invokeLater {
-                            summaryArea.text = "SonarQube is not configured. Add sonarQube.serverUrl and sonarQube.projectKey to .ai-test.yaml."
+                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "SonarQube not configured.")
+                            reportDate.text = ""
                             finishLoading()
                         }
                         return@executeOnPooledThread
@@ -94,13 +216,19 @@ object SonarCubeToolWindowPanel {
 
                     val result = runBlocking { SonarCubeToolWindowClient(config).load() }
                     ApplicationManager.getApplication().invokeLater {
-                        summaryArea.text = SonarCubeResultRenderer.render(result)
-                        result.issues.forEach(issueListModel::addElement)
+                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result, { filterByType(it) }, { resetTypeFilters() })
+                        reportDate.text = result.reportTimestamp ?: ""
+                        allIssues.clear()
+                        allIssues.addAll(result.issues)
+                        typeBoxes.values.forEach { it.isSelected = true }
+                        severityBoxes.values.forEach { it.isSelected = true }
+                        applyFilters()
                         finishLoading()
                     }
                 } catch (ex: Exception) {
                     ApplicationManager.getApplication().invokeLater {
-                        summaryArea.text = "Failed to load SonarQube results: ${ex.message ?: ex.toString()}"
+                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Failed: ${ex.message ?: ex}", null, null)
+                        reportDate.text = ""
                         finishLoading()
                         Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
                     }
@@ -109,13 +237,49 @@ object SonarCubeToolWindowPanel {
         }
 
         refreshButton.addActionListener { load() }
-        openButton.addActionListener {
-            val issue = selectedIssue
-            if (issue == null) {
-                Notifications.warn(project, "Sonar Cube", "Please select an issue first.")
-            } else {
-                openIssue(project, issue)
-            }
+
+        val typeFilterRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            add(JLabel("Type:").apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                font = commonFont.deriveFont(Font.PLAIN, 10f)
+            })
+            typeBoxes.values.forEach { add(it) }
+        }
+        val severityFilterRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            add(JLabel("Severity:").apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                font = commonFont.deriveFont(Font.PLAIN, 10f)
+            })
+            severityBoxes.values.forEach { add(it) }
+            add(Box.createHorizontalStrut(12))
+            add(showFixedBox)
+        }
+        val filterBar = JPanel(BorderLayout(0, 0)).apply {
+            isOpaque = false
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, borderColor),
+                BorderFactory.createEmptyBorder(3, 6, 3, 6)
+            )
+            add(typeFilterRow, BorderLayout.NORTH)
+            add(severityFilterRow, BorderLayout.CENTER)
+        }
+        val issueScrollPane = com.intellij.ui.components.JBScrollPane(issueList).apply {
+            preferredSize = Dimension(320, 340)
+            viewport.background = Color(0x11, 0x1C, 0x2F)
+            border = BorderFactory.createLineBorder(borderColor)
+        }
+        val dashboardAndFilter = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            add(dashboardPanel)
+            add(filterBar)
+        }
+        val filterPanel = JPanel(BorderLayout(0, 0)).apply {
+            isOpaque = false
+            add(dashboardAndFilter, BorderLayout.NORTH)
+            add(issueScrollPane, BorderLayout.CENTER)
         }
 
         val root = JPanel(BorderLayout(8, 8)).apply {
@@ -127,39 +291,458 @@ object SonarCubeToolWindowPanel {
                 add(JLabel("Sonar Cube").apply { foreground = fgColor }, BorderLayout.WEST)
                 add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     isOpaque = false
-                    add(openButton)
+                    add(filterCount)
+                    add(reportDate)
                     add(refreshButton)
                 }, BorderLayout.EAST)
             }, BorderLayout.NORTH)
-            add(com.intellij.ui.components.JBScrollPane(summaryArea).apply {
-                preferredSize = Dimension(320, 150)
-                viewport.background = bgColor
-                border = BorderFactory.createLineBorder(borderColor)
-            }, BorderLayout.CENTER)
-            add(com.intellij.ui.components.JBScrollPane(issueList).apply {
-                preferredSize = Dimension(320, 360)
-                viewport.background = Color(0x11, 0x1C, 0x2F)
-                border = BorderFactory.createLineBorder(borderColor)
-            }, BorderLayout.SOUTH)
+            add(filterPanel, BorderLayout.CENTER)
         }
+        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Click Refresh to load configured SonarQube results.", null, null)
         load()
         return root
     }
 
-    private fun openIssue(project: Project, issue: SonarCubeIssue) {
+    private fun executeAiFix(project: Project, issue: SonarCubeIssue) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "AI Fix: ${issue.rule}", false) {
+            override fun run(indicator: ProgressIndicator) {
+                try {
+                    indicator.text = "Reading source file..."
+                    val sourceCode = readSourceFile(project, issue.path)
+                    if (sourceCode.isNullOrBlank()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            Notifications.warn(project, "AI Fix", "Cannot read source file: ${issue.path}")
+                        }
+                        return
+                    }
+
+                    indicator.text = "Calling AI to generate fix..."
+                    val prompt = AiPromptDefaults.render(
+                        AiPromptDefaults.SONARQUBE_FIX_ISSUE,
+                        mapOf(
+                            "rule" to issue.rule,
+                            "severity" to issue.severity,
+                            "type" to issue.type,
+                            "message" to issue.message,
+                            "filePath" to issue.path,
+                            "line" to (issue.line?.toString() ?: "unknown"),
+                            "sourceCode" to sourceCode
+                        )
+                    )
+                    val provider = LlmProviderFactory.create(LlmSettingsLoader.load(project))
+                    val response = runBlocking { provider.generateCode(prompt) }
+
+                    ApplicationManager.getApplication().invokeLater {
+                        handleFixResponse(project, issue, response, sourceCode)
+                    }
+                } catch (ex: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        Notifications.error(project, "AI Fix failed", ex.message ?: ex.toString())
+                    }
+                }
+            }
+        })
+    }
+
+    private fun handleFixResponse(project: Project, issue: SonarCubeIssue, response: String, originalCode: String) {
+        val explanation = extractExplanation(response)
+        val codeBlock = extractCodeBlock(response)
+        if (codeBlock != null) {
+            val dialog = SonarQubeFixDialog(project, issue, explanation, originalCode, codeBlock)
+            if (dialog.showAndGet()) {
+                applyCodeChange(project, issue.path, codeBlock)
+            }
+            return
+        }
+
+        val options = tryParseOptions(response)
+        if (options.isNotEmpty()) {
+            val labels = options.map { it.label }.toTypedArray()
+            val choice = Messages.showDialog(
+                project,
+                "Multiple approaches are possible. Choose one:",
+                "AI Fix — ${issue.rule}",
+                labels + "Cancel",
+                labels.size,
+                null
+            )
+            if (choice >= 0 && choice < options.size) {
+                applyCodeChange(project, issue.path, options[choice].code)
+            }
+            return
+        }
+
+        Messages.showInfoMessage(project, response, "AI Fix — ${issue.rule}")
+    }
+
+    private fun applyCodeChange(project: Project, relativePath: String, newCode: String) {
+        val basePath = project.basePath
+        if (basePath.isNullOrBlank()) {
+            Notifications.warn(project, "AI Fix", "Cannot determine project base path.")
+            return
+        }
+        val file = java.io.File(basePath, relativePath)
+        val virtualFile = VfsUtil.findFileByIoFile(file, true)
+        if (virtualFile == null) {
+            Notifications.warn(project, "AI Fix", "Cannot find file to apply fix: $relativePath")
+            return
+        }
+        WriteCommandAction.runWriteCommandAction(project) {
+            virtualFile.setBinaryContent(newCode.toByteArray(StandardCharsets.UTF_8))
+        }
+        FileEditorManager.getInstance(project).openFile(virtualFile, true)
+        Notifications.info(project, "AI Fix", "Fix applied to $relativePath. Check IDE local history to revert if needed.")
+    }
+
+    private fun extractExplanation(response: String): String {
+        val fenceIdx = response.indexOf("```")
+        return if (fenceIdx > 0) response.substring(0, fenceIdx).trim() else ""
+    }
+
+    private fun readSourceFile(project: Project, relativePath: String): String? {
+        val basePath = project.basePath ?: return null
+        val file = java.io.File(basePath, relativePath)
+        if (!file.exists() || !file.isFile) return null
+        return file.readText(Charsets.UTF_8)
+    }
+
+    private fun extractCodeBlock(response: String): String? {
+        val fence = "```"
+        val start = response.indexOf(fence)
+        if (start < 0) return null
+        val contentStart = response.indexOf('\n', start)
+        if (contentStart < 0) return null
+        val end = response.indexOf(fence, contentStart + 1)
+        if (end < 0) return null
+        return response.substring(contentStart + 1, end).trimEnd()
+    }
+
+    private fun tryParseOptions(response: String): List<FixOption> {
+        return try {
+            val trimmed = response.trim()
+            if (!trimmed.startsWith("[")) return emptyList()
+            val arr = json.parseToJsonElement(trimmed).jsonArray
+            arr.map { el ->
+                val obj = el.jsonObject
+                FixOption(
+                    label = obj["label"]?.jsonPrimitive?.content ?: "Option",
+                    code = obj["code"]?.jsonPrimitive?.content ?: ""
+                )
+            }.filter { it.code.isNotBlank() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun refreshDashboard(
+        container: JPanel,
+        bgColor: Color,
+        borderColor: Color,
+        font: Font,
+        result: Any,
+        onFilterByType: ((String) -> Unit)? = null,
+        onResetFilters: (() -> Unit)? = null
+    ) {
+        container.removeAll()
+        container.background = bgColor
+        container.layout = BorderLayout(0, 0)
+
+        if (result is String) {
+            val label = JLabel(result).apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                isOpaque = false
+                horizontalAlignment = SwingConstants.CENTER
+            }
+            container.add(label, BorderLayout.CENTER)
+            container.revalidate()
+            container.repaint()
+            return
+        }
+
+        val r = result as SonarCubeResult
+        val cardFont = font.deriveFont(Font.PLAIN, 10f)
+        val valueFont = font.deriveFont(Font.BOLD, 14f)
+
+        val cards = JPanel(GridLayout(2, 4, 4, 4)).apply {
+            isOpaque = false
+        }
+
+        cards.add(metricCard("Coverage", r.coverage?.formatPercent() ?: "—", "#42A5F5", r.coverage != null, valueFont, cardFont, borderColor))
+        cards.add(metricCard("Line Cov.", r.lineCoverage?.formatPercent() ?: "—", "#26C6DA", r.lineCoverage != null, valueFont, cardFont, borderColor))
+        cards.add(metricCard("Branch Cov.", r.branchCoverage?.formatPercent() ?: "—", "#009688", r.branchCoverage != null, valueFont, cardFont, borderColor))
+        cards.add(metricCard("Uncovered", r.uncoveredLines?.toString() ?: "—", "#EF5350", r.uncoveredLines != null, valueFont, cardFont, borderColor))
+        cards.add(metricCard("Bugs", r.bugs?.toString() ?: "—", "#F44336", r.bugs != null && r.bugs > 0, valueFont, cardFont, borderColor) { onFilterByType?.invoke("BUG") })
+        cards.add(metricCard("Vulnerabilities", r.vulnerabilities?.toString() ?: "—", "#FF9800", r.vulnerabilities != null && r.vulnerabilities > 0, valueFont, cardFont, borderColor) { onFilterByType?.invoke("VULNERABILITY") })
+        cards.add(metricCard("Code Smells", r.codeSmells?.toString() ?: "—", "#FFC107", r.codeSmells != null && r.codeSmells > 0, valueFont, cardFont, borderColor) { onFilterByType?.invoke("CODE_SMELL") })
+        cards.add(metricCard("Open Issues", r.issues.size.toString(), "#E0E0E0", r.issues.isNotEmpty(), valueFont, cardFont, borderColor) { onResetFilters?.invoke() })
+
+        container.add(cards, BorderLayout.CENTER)
+        container.revalidate()
+        container.repaint()
+    }
+
+    private fun metricCard(
+        label: String,
+        value: String,
+        accentColor: String,
+        highlight: Boolean,
+        valueFont: Font,
+        labelFont: Font,
+        borderColor: Color,
+        onClick: (() -> Unit)? = null
+    ): JComponent {
+        return JPanel(BorderLayout(0, 0)).apply {
+            isOpaque = false
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(if (highlight) Color.decode(accentColor).darker() else borderColor),
+                BorderFactory.createEmptyBorder(2, 6, 2, 6)
+            )
+            if (onClick != null) {
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) = onClick()
+                    override fun mouseEntered(e: MouseEvent) { background = Color(0x22, 0x28, 0x33); isOpaque = true }
+                    override fun mouseExited(e: MouseEvent) { isOpaque = false }
+                })
+            }
+
+            val valueColor = if (highlight) Color.decode(accentColor) else Color(0x94, 0xA3, 0xB8)
+            add(JLabel(value).apply {
+                foreground = valueColor
+                font = valueFont
+                horizontalAlignment = SwingConstants.CENTER
+            }, BorderLayout.CENTER)
+            add(JLabel(label).apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                font = labelFont
+                horizontalAlignment = SwingConstants.CENTER
+            }, BorderLayout.SOUTH)
+        }
+    }
+
+    private fun openIssue(project: Project, issue: SonarCubeIssue, mockEnabled: Boolean = false) {
         val basePath = project.basePath
         if (basePath.isNullOrBlank()) {
             Notifications.warn(project, "Sonar Cube", "Cannot open file because project base path is unknown.")
             return
         }
         val file = java.io.File(basePath, issue.path)
-        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+        val virtualFile = VfsUtil.findFileByIoFile(file, true)
         if (virtualFile == null) {
-            Notifications.warn(project, "Sonar Cube", "Cannot find local file: ${issue.path}")
+            if (mockEnabled) {
+                Notifications.info(project, "Sonar Cube", "${issue.path}:${issue.line ?: 1} — this is mock scan data; no local file exists.")
+            } else {
+                Notifications.warn(project, "Sonar Cube", "Cannot find local file: ${issue.path}")
+            }
             return
         }
         val lineIndex = issue.line?.minus(1)?.coerceAtLeast(0) ?: 0
         OpenFileDescriptor(project, virtualFile, lineIndex, 0).navigate(true)
+    }
+
+    private data class FixOption(val label: String, val code: String)
+
+    private class SonarQubeFixDialog(
+        project: Project,
+        private val issue: SonarCubeIssue,
+        private val explanation: String,
+        private val originalCode: String,
+        private val fixedCode: String
+    ) : DialogWrapper(project) {
+
+        private val severityColor = when (issue.severity.uppercase()) {
+            "BLOCKER" -> Color(0xD3, 0x2F, 0x2F)
+            "CRITICAL" -> Color(0xE6, 0x51, 0x00)
+            "MAJOR" -> Color(0xF9, 0xA8, 0x25)
+            "MINOR" -> Color(0x38, 0x8E, 0x3C)
+            "INFO" -> Color(0x19, 0x76, 0xD2)
+            else -> Color(0x94, 0xA3, 0xB8)
+        }
+
+        private val codeFont = Font("Monospaced", Font.PLAIN, 12)
+        private val bgCode = Color(0x0D, 0x11, 0x17)
+        private val fgCode = Color(0xCC, 0xCC, 0xCC)
+
+        init {
+            title = "AI Fix — ${issue.rule}"
+            init()
+            myOKAction.putValue(javax.swing.Action.NAME, "Apply Fix")
+        }
+
+        override fun createCenterPanel(): JComponent = JPanel(BorderLayout(0, 8)).apply {
+            add(createIssueHeader(), BorderLayout.NORTH)
+            add(createSideBySideDiff(), BorderLayout.CENTER)
+            add(createExplanation(), BorderLayout.SOUTH)
+            preferredSize = Dimension(800, 460)
+        }
+
+        private fun createIssueHeader(): JComponent = JPanel(BorderLayout(8, 0)).apply {
+            border = BorderFactory.createEmptyBorder(0, 0, 6, 0)
+            isOpaque = false
+
+            val severityLabel = JLabel(" ${issue.severity} ").apply {
+                foreground = Color.WHITE
+                background = severityColor
+                isOpaque = true
+                font = font.deriveFont(Font.BOLD, 11f)
+                border = BorderFactory.createEmptyBorder(2, 6, 2, 6)
+            }
+            val typeLabel = JLabel("   ${issue.type}").apply {
+                font = font.deriveFont(Font.PLAIN, 12f)
+                foreground = Color(0xE0, 0xE0, 0xE0)
+            }
+            val locationLabel = JLabel("${issue.path}:${issue.line}  —  ${issue.rule}").apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                font = font.deriveFont(Font.PLAIN, 11f)
+            }
+
+            val topRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                isOpaque = false
+                add(severityLabel)
+                add(typeLabel)
+                add(locationLabel)
+            }
+
+            val messageLabel = JLabel("<html><b>${escapeHtml(issue.message)}</b></html>").apply {
+                foreground = Color(0xE0, 0xE0, 0xE0)
+                font = font.deriveFont(Font.PLAIN, 13f)
+                border = BorderFactory.createEmptyBorder(4, 6, 0, 6)
+            }
+
+            add(topRow, BorderLayout.NORTH)
+            add(messageLabel, BorderLayout.CENTER)
+        }
+
+        private fun createSideBySideDiff(): JComponent {
+            val beforeText = extractChangedRegion(originalCode, fixedCode, side = "before")
+            val afterText = extractChangedRegion(originalCode, fixedCode, side = "after")
+
+            val beforeArea = JTextArea(beforeText).apply {
+                isEditable = false
+                foreground = fgCode
+                background = bgCode
+                font = codeFont
+                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            }
+            val afterArea = JTextArea(afterText).apply {
+                isEditable = false
+                foreground = fgCode
+                background = bgCode
+                font = codeFont
+                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            }
+
+            val beforeScroll = com.intellij.ui.components.JBScrollPane(beforeArea).apply {
+                border = BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(Color(0x30, 0x40, 0x50)),
+                    "Current code",
+                    javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
+                    javax.swing.border.TitledBorder.DEFAULT_POSITION,
+                    null,
+                    Color(0x94, 0xA3, 0xB8)
+                )
+                preferredSize = Dimension(350, 220)
+                viewport.background = bgCode
+            }
+            val afterScroll = com.intellij.ui.components.JBScrollPane(afterArea).apply {
+                border = BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(Color(0x38, 0x8E, 0x3C)),
+                    "Proposed fix",
+                    javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
+                    javax.swing.border.TitledBorder.DEFAULT_POSITION,
+                    null,
+                    Color(0x94, 0xA3, 0xB8)
+                )
+                preferredSize = Dimension(350, 220)
+                viewport.background = bgCode
+            }
+
+            val arrowLabel = JLabel("<html><div style='font-size:28pt;color:#F9A825;padding:0 12px'>&#10140;</div></html>").apply {
+                isOpaque = false
+            }
+
+            val diffPanel = JPanel(GridBagLayout()).apply {
+                isOpaque = false
+                val gbc = GridBagConstraints()
+                gbc.fill = GridBagConstraints.BOTH
+                gbc.weightx = 1.0
+                gbc.weighty = 1.0
+                gbc.gridx = 0; gbc.gridy = 0
+                add(beforeScroll, gbc)
+                gbc.gridx = 1; gbc.weightx = 0.0
+                add(arrowLabel, gbc)
+                gbc.gridx = 2; gbc.weightx = 1.0
+                add(afterScroll, gbc)
+            }
+
+            return diffPanel
+        }
+
+        private fun createExplanation(): JComponent {
+            if (explanation.isBlank()) return JPanel()
+            val area = JTextArea(explanation).apply {
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                foreground = Color(0xB0, 0xB0, 0xB0)
+                background = Color(0x16, 0x1B, 0x22)
+                font = font.deriveFont(Font.PLAIN, 12f)
+                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            }
+            return com.intellij.ui.components.JBScrollPane(area).apply {
+                border = BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(Color(0x30, 0x40, 0x50)),
+                    "Fix logic — how the issue is resolved",
+                    javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
+                    javax.swing.border.TitledBorder.DEFAULT_POSITION,
+                    null,
+                    Color(0x94, 0xA3, 0xB8)
+                )
+                preferredSize = Dimension(780, 60)
+                viewport.background = Color(0x16, 0x1B, 0x22)
+            }
+        }
+
+        private fun extractChangedRegion(original: String, fixed: String, side: String): String {
+            val origLines = original.split("\n")
+            val fixedLines = fixed.split("\n")
+
+            var firstDiff = 0
+            while (firstDiff < origLines.size && firstDiff < fixedLines.size &&
+                origLines[firstDiff] == fixedLines[firstDiff]
+            ) firstDiff++
+
+            var lastOrig = origLines.lastIndex
+            var lastFixed = fixedLines.lastIndex
+            while (lastOrig > firstDiff && lastFixed > firstDiff &&
+                origLines[lastOrig] == fixedLines[lastFixed]
+            ) {
+                lastOrig--
+                lastFixed--
+            }
+
+            val context = 3
+            val showStart = (firstDiff - context).coerceAtLeast(0)
+            val showEndO = (lastOrig + context + 1).coerceAtMost(origLines.size)
+            val showEndF = (lastFixed + context + 1).coerceAtMost(fixedLines.size)
+
+            return buildString {
+                val lines = if (side == "before") origLines else fixedLines
+                val end = if (side == "before") showEndO else showEndF
+                for (i in showStart..<end) {
+                    val line = if (i < lines.size) lines[i] else ""
+                    val num = i + 1
+                    val isTarget = if (side == "before") i == (issue.line ?: 1) - 1 else false
+                    val prefix = if (isTarget && side == "before") "▶" else " "
+                    appendLine("$prefix ${num.toString().padStart(4)}  $line")
+                }
+            }.trimEnd()
+        }
+
+        private fun escapeHtml(value: String): String = value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
     }
 }
 
@@ -167,6 +750,9 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
     private val authHeader = SonarQubeAuth.authorizationHeader(config)
 
     suspend fun load(): SonarCubeResult {
+        if (config.mockEnabled) {
+            return SonarQubeMockData.scanResult(config.projectKey, config.serverUrl)
+        }
         val client = HttpClients.shared(disableTlsVerification = true, timeoutSeconds = 60)
         try {
             val baseUrl = config.serverUrl.trimEnd('/')
@@ -181,6 +767,7 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
             ) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
+            val now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
             return SonarCubeResult(
                 projectKey = config.projectKey,
                 serverUrl = config.serverUrl,
@@ -191,7 +778,8 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
                 bugs = measures.component.measureValue("bugs")?.toIntOrNull(),
                 vulnerabilities = measures.component.measureValue("vulnerabilities")?.toIntOrNull(),
                 codeSmells = measures.component.measureValue("code_smells")?.toIntOrNull(),
-                issues = issues.issues.map { it.toDomain(config.projectKey) }
+                issues = issues.issues.map { it.toDomain(config.projectKey) },
+                reportTimestamp = now
             )
         } finally {
             client.close()
@@ -201,7 +789,7 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
     private fun encoded(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.name())
 }
 
-private data class SonarCubeResult(
+internal data class SonarCubeResult(
     val projectKey: String,
     val serverUrl: String,
     val coverage: Double?,
@@ -211,10 +799,11 @@ private data class SonarCubeResult(
     val bugs: Int?,
     val vulnerabilities: Int?,
     val codeSmells: Int?,
-    val issues: List<SonarCubeIssue>
+    val issues: List<SonarCubeIssue>,
+    val reportTimestamp: String? = null
 )
 
-private data class SonarCubeIssue(
+internal data class SonarCubeIssue(
     val key: String,
     val path: String,
     val line: Int?,
@@ -273,24 +862,19 @@ private data class SonarCubeIssueDto(
 @Serializable
 private data class SonarCubeTextRange(val startLine: Int? = null)
 
-private object SonarCubeResultRenderer {
-    fun render(result: SonarCubeResult): String = buildString {
-        appendLine("Project: ${result.projectKey}")
-        appendLine("Server: ${result.serverUrl}")
-        appendLine("Coverage: ${result.coverage?.formatPercent() ?: "n/a"}")
-        appendLine("Line coverage: ${result.lineCoverage?.formatPercent() ?: "n/a"}")
-        appendLine("Branch coverage: ${result.branchCoverage?.formatPercent() ?: "n/a"}")
-        appendLine("Uncovered lines: ${result.uncoveredLines ?: 0}")
-        appendLine("Bugs: ${result.bugs ?: 0}")
-        appendLine("Vulnerabilities: ${result.vulnerabilities ?: 0}")
-        appendLine("Code smells: ${result.codeSmells ?: 0}")
-        appendLine("Open issues: ${result.issues.size}")
-        appendLine()
-        appendLine("Double-click an issue below, or select it and click Open Selected, to jump to the local source line.")
-    }.trimEnd()
-}
+private class SonarCubeIssueRenderer(
+    private val fixedKeys: MutableSet<String>
+) : DefaultListCellRenderer() {
 
-private class SonarCubeIssueRenderer : DefaultListCellRenderer() {
+    private fun severityColor(severity: String): String = when (severity.uppercase()) {
+        "BLOCKER" -> "#D32F2F"
+        "CRITICAL" -> "#E65100"
+        "MAJOR" -> "#F9A825"
+        "MINOR" -> "#388E3C"
+        "INFO" -> "#1976D2"
+        else -> "#94A3B8"
+    }
+
     override fun getListCellRendererComponent(
         list: JList<*>?,
         value: Any?,
@@ -301,9 +885,28 @@ private class SonarCubeIssueRenderer : DefaultListCellRenderer() {
         val label = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
         val issue = value as? SonarCubeIssue
         if (issue != null) {
-            label.text = "<html><b>${issue.severity}</b> [${issue.type}] ${issue.locationText}<br/>${escapeHtml(issue.message)}<br/><span style='color:#94A3B8'>${issue.rule}</span></html>"
+            val isFixed = issue.key in fixedKeys
+            val color = if (isFixed) "#388E3C" else severityColor(issue.severity)
+            val borderColor = if (isFixed) "#2E7D32" else color
+            val severityBadge = if (isFixed) {
+                "<span style='color:#A5D6A7;font-weight:bold'>FIXED</span>"
+            } else {
+                "<span style='color:$color;font-weight:bold'>${issue.severity}</span>"
+            }
+            val typeBadge = "[${issue.type}]"
+            val textColor = if (isFixed) "#888" else "#E0E0E0"
+            val msgColor = if (isFixed) "#777" else "#B0B0B0"
+            val ruleColor = if (isFixed) "#666" else "#94A3B8"
+            val decoration = if (isFixed) "text-decoration:line-through;" else ""
+            label.text = "<html>" +
+                "<table cellpadding='0' cellspacing='0' style='border-left:3px solid $borderColor;padding-left:6px;width:100%'>" +
+                "<tr><td>$severityBadge $typeBadge " +
+                "<span style='color:$textColor;$decoration'>${issue.locationText}</span></td></tr>" +
+                "<tr><td style='color:$msgColor;$decoration'>${escapeHtml(issue.message)}</td></tr>" +
+                "<tr><td style='color:$ruleColor;font-size:90%'>${issue.rule}</td></tr>" +
+                "</table></html>"
         }
-        label.border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+        label.border = BorderFactory.createEmptyBorder(3, 4, 3, 8)
         label.font = UIManager.getFont("Label.font") ?: label.font
         return label
     }

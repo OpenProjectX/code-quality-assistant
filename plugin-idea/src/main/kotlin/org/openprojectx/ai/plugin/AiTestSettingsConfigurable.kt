@@ -102,6 +102,7 @@ class AiTestSettingsConfigurable(
     private lateinit var sonarQubePasswordEnvField: JTextField
     private lateinit var sonarQubeTargetCoverageField: JTextField
     private lateinit var sonarQubeMaxFilesField: JTextField
+    private lateinit var sonarQubeMockEnabledBox: JCheckBox
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -212,6 +213,7 @@ class AiTestSettingsConfigurable(
         sonarQubePasswordEnvField = JTextField()
         sonarQubeTargetCoverageField = JTextField("80")
         sonarQubeMaxFilesField = JTextField("5")
+        sonarQubeMockEnabledBox = JCheckBox("Use mock scan data (offline testing)")
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -458,6 +460,9 @@ class AiTestSettingsConfigurable(
         add(formSection("Coverage", listOf(
             "Target coverage %" to sonarQubeTargetCoverageField,
             "Max files to inspect" to sonarQubeMaxFilesField
+        )))
+        add(formSection("Development", listOf(
+            "Mock mode" to sonarQubeMockEnabledBox
         )))
     })
 
@@ -872,6 +877,7 @@ class AiTestSettingsConfigurable(
         sonarQubePasswordEnv = sonarQubePasswordEnvField.text.trim(),
         sonarQubeTargetCoverage = sonarQubeTargetCoverageField.text.trim(),
         sonarQubeMaxFiles = sonarQubeMaxFilesField.text.trim(),
+        sonarQubeMockEnabled = sonarQubeMockEnabledBox.isSelected,
         suppressedGlobalPrompts = suppressedGlobalPrompts.sorted()
     )
 
@@ -929,6 +935,7 @@ class AiTestSettingsConfigurable(
         sonarQubePasswordEnvField.text = state.sonarQubePasswordEnv
         sonarQubeTargetCoverageField.text = state.sonarQubeTargetCoverage
         sonarQubeMaxFilesField.text = state.sonarQubeMaxFiles
+        sonarQubeMockEnabledBox.isSelected = state.sonarQubeMockEnabled
         suppressedGlobalPrompts = state.suppressedGlobalPrompts.toSet()
 
         refreshPromptManager()
