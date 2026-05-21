@@ -17,7 +17,8 @@ data class RepositoryRef(
     val provider: GitHostingProviderType,
     val host: String,
     val projectKey: String,
-    val repoSlug: String
+    val repoSlug: String,
+    val apiBaseUrl: String = "https://$host"
 )
 
 enum class GitHostingProviderType {
