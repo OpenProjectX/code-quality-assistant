@@ -1,5 +1,6 @@
 package org.openprojectx.ai.plugin.llm
 
+import com.github.jknack.handlebars.EscapingStrategy
 import com.github.jknack.handlebars.Handlebars
 import com.github.jknack.handlebars.Template
 import com.jayway.jsonpath.JsonPath
@@ -17,7 +18,7 @@ import io.ktor.http.contentType
 class TemplateRequestExecutor(
     private val http: HttpClient
 ) {
-    private val handlebars = Handlebars()
+    private val handlebars = Handlebars().with(EscapingStrategy { it })
 
     suspend fun execute(config: TemplateRequestConfig, variables: Map<String, Any>): String {
         try {
