@@ -49,4 +49,37 @@ object HttpClients {
         builder.sslSocketFactory(sslContext.socketFactory, trustAll[0] as X509TrustManager)
         builder.hostnameVerifier { _, _ -> true }
     }
+
+    fun logCurl(method: String, url: String, headers: Map<String, String>, body: String = "") {
+        val safeHeaders = headers.mapValues { (name, value) ->
+            if (name.contains("authorization", true) ||
+                name.contains("token", true) ||
+                name.contains("key", true) ||
+                name.contains("secret", true) ||
+                name.contains("password", true) ||
+                name.contains("cookie", true)
+            ) "***" else value
+        }
+        val safeBody = redactSensitivePayload(body)
+        val headerArgs = safeHeaders.entries.joinToString(" ") { (name, value) ->
+            "-H \"$name: $value\""
+        }
+        val bodyArg = if (safeBody.isNotBlank()) " --data '${safeBody.replace("'", "'\"'\"'")}'" else ""
+        org.openprojectx.ai.plugin.llm.LlmRuntimeLogger.info(
+            "curl -X $method '$url'$headerArgs$bodyArg"
+        )
+    }
+
+    private fun redactSensitivePayload(text: String): String {
+        if (text.isBlank()) return text
+        val sensitiveKeys = listOf("password", "token", "access_token", "id_token", "refresh_token", "apiKey", "api_key", "secret")
+        var result = text
+        sensitiveKeys.forEach { key ->
+            val quotedJsonPattern = Regex("""("${Regex.escape(key)}"\s*:\s*")[^"]*(")""", RegexOption.IGNORE_CASE)
+            result = result.replace(quotedJsonPattern) { "${it.groupValues[1]}***${it.groupValues[2]}" }
+            val formPattern = Regex("""(?i)(^|[&\s])(${Regex.escape(key)}=)[^&\s]+""")
+            result = result.replace(formPattern) { "${it.groupValues[1]}${it.groupValues[2]}***" }
+        }
+        return result
+    }
 }

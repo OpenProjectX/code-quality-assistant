@@ -216,7 +216,18 @@ object SonarCubeToolWindowPanel {
 
                     val result = runBlocking { SonarCubeToolWindowClient(config).load() }
                     ApplicationManager.getApplication().invokeLater {
-                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result, { filterByType(it) }, { resetTypeFilters() })
+                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result, { filterByType(it) }, { resetTypeFilters() }) {
+                            val action = com.intellij.openapi.actionSystem.ActionManager.getInstance()
+                                .getAction("org.openprojectx.ai.plugin.SonarQubeCoverageAction")
+                            action?.let {
+                                val event = com.intellij.openapi.actionSystem.AnActionEvent.createFromDataContext(
+                                    "SonarCubeToolWindow", null
+                                ) { dataId ->
+                                    if (com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT.`is`(dataId)) project else null
+                                }
+                                it.actionPerformed(event)
+                            }
+                        }
                         reportDate.text = result.reportTimestamp ?: ""
                         allIssues.clear()
                         allIssues.addAll(result.issues)
@@ -329,8 +340,10 @@ object SonarCubeToolWindowPanel {
                             "sourceCode" to sourceCode
                         )
                     )
-                    val provider = LlmProviderFactory.create(LlmSettingsLoader.load(project))
-                    val response = runBlocking { provider.generateCode(prompt) }
+                    val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+                        val provider = LlmProviderFactory.create(settings)
+                        runBlocking { provider.generateCode(prompt) }
+                    }
 
                     ApplicationManager.getApplication().invokeLater {
                         handleFixResponse(project, issue, response, sourceCode)
@@ -441,7 +454,8 @@ object SonarCubeToolWindowPanel {
         font: Font,
         result: Any,
         onFilterByType: ((String) -> Unit)? = null,
-        onResetFilters: (() -> Unit)? = null
+        onResetFilters: (() -> Unit)? = null,
+        onCoverageClick: (() -> Unit)? = null
     ) {
         container.removeAll()
         container.background = bgColor
@@ -467,7 +481,7 @@ object SonarCubeToolWindowPanel {
             isOpaque = false
         }
 
-        cards.add(metricCard("Coverage", r.coverage?.formatPercent() ?: "—", "#42A5F5", r.coverage != null, valueFont, cardFont, borderColor))
+        cards.add(metricCard("Coverage", r.coverage?.formatPercent() ?: "—", "#42A5F5", r.coverage != null, valueFont, cardFont, borderColor, onCoverageClick))
         cards.add(metricCard("Line Cov.", r.lineCoverage?.formatPercent() ?: "—", "#26C6DA", r.lineCoverage != null, valueFont, cardFont, borderColor))
         cards.add(metricCard("Branch Cov.", r.branchCoverage?.formatPercent() ?: "—", "#009688", r.branchCoverage != null, valueFont, cardFont, borderColor))
         cards.add(metricCard("Uncovered", r.uncoveredLines?.toString() ?: "—", "#EF5350", r.uncoveredLines != null, valueFont, cardFont, borderColor))
@@ -757,14 +771,14 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
         try {
             val baseUrl = config.serverUrl.trimEnd('/')
             val projectKey = encoded(config.projectKey)
-            val measures: SonarCubeMeasuresResponse = client.get(
-                "$baseUrl/api/measures/component?component=$projectKey&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines,bugs,vulnerabilities,code_smells"
-            ) {
+            val measuresUrl = "$baseUrl/api/measures/component?component=$projectKey&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines,bugs,vulnerabilities,code_smells"
+            HttpClients.logCurl("GET", measuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
+            val measures: SonarCubeMeasuresResponse = client.get(measuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
-            val issues: SonarCubeIssuesResponse = client.get(
-                "$baseUrl/api/issues/search?componentKeys=$projectKey&resolved=false&ps=100&s=SEVERITY&asc=false"
-            ) {
+            val issuesUrl = "$baseUrl/api/issues/search?componentKeys=$projectKey&resolved=false&ps=100&s=SEVERITY&asc=false"
+            HttpClients.logCurl("GET", issuesUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
+            val issues: SonarCubeIssuesResponse = client.get(issuesUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
             val now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
