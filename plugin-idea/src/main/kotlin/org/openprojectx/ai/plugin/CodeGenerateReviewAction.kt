@@ -67,7 +67,6 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 try {
                     indicator.text = "Calling LLM..."
-                    val provider = LlmProviderFactory.create(LlmSettingsLoader.load(project))
                     val finalPrompt = AiPromptDefaults.render(
                         selectedPrompt.template,
                         mapOf(
@@ -75,7 +74,10 @@ class CodeGenerateReviewAction : AnAction("Code Generate & Review"), DumbAware {
                             "extraRequirements" to extraRequirements
                         )
                     )
-                    val response = runBlocking { provider.generateCode(finalPrompt) }
+                    val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+                        val provider = LlmProviderFactory.create(settings)
+                        runBlocking { provider.generateCode(finalPrompt) }
+                    }
                     ApplicationManager.getApplication().invokeLater {
                         ContextBoxStateService.getInstance(project).recordCodePromptResult(
                             promptType = selectedPrompt.category.label,

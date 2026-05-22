@@ -6,6 +6,7 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 class OpenAiCompatibleProvider(
     private val http: HttpClient,
@@ -28,6 +29,9 @@ class OpenAiCompatibleProvider(
                 ),
                 temperature = 0.1
             )
+
+            val curlCmd = buildCurlCommand(endpoint, apiKey, req)
+            LlmRuntimeLogger.info("curl | $curlCmd")
 
             val response = http.post(endpoint) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
@@ -71,5 +75,15 @@ class OpenAiCompatibleProvider(
     ) {
         @Serializable
         data class Choice(val message: Message)
+    }
+
+    companion object {
+        private val curlJson = Json { prettyPrint = false }
+
+        private fun buildCurlCommand(endpoint: String, apiKey: String, req: ChatCompletionsRequest): String {
+            val body = curlJson.encodeToString(ChatCompletionsRequest.serializer(), req)
+                .replace("'", "'\"'\"'")
+            return "curl -X POST '$endpoint' -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' --data '$body'"
+        }
     }
 }

@@ -63,8 +63,10 @@ class SonarQubeCoverageAction : AnAction("SonarQube Coverage"), DumbAware {
                     val generation = if (request.generateMissingTests) {
                         indicator.text = "Generating tests for uncovered code..."
                         val prompt = SonarQubeCoveragePromptBuilder.build(project, report, request.targetCoverage)
-                        val provider = LlmProviderFactory.create(LlmSettingsLoader.load(project))
-                        runBlocking { provider.generateCode(prompt) }
+                        LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+                            val provider = LlmProviderFactory.create(settings)
+                            runBlocking { provider.generateCode(prompt) }
+                        }
                     } else {
                         ""
                     }
@@ -184,14 +186,14 @@ private class SonarQubeCoverageClient(private val request: SonarQubeCoverageRequ
         try {
             val baseUrl = request.serverUrl.trimEnd('/')
             val component = encoded(request.projectKey)
-            val projectMeasures: SonarComponentMeasuresResponse = jsonClient.get(
-                "$baseUrl/api/measures/component?component=$component&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines"
-            ) {
+            val projectMeasuresUrl = "$baseUrl/api/measures/component?component=$component&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines"
+            HttpClients.logCurl("GET", projectMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
+            val projectMeasures: SonarComponentMeasuresResponse = jsonClient.get(projectMeasuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
-            val fileMeasures: SonarComponentTreeResponse = jsonClient.get(
-                "$baseUrl/api/measures/component_tree?component=$component&metricKeys=coverage,uncovered_lines&qualifiers=FIL&s=metric&metricSort=uncovered_lines&asc=false&ps=${request.maxFiles.coerceIn(1, 100)}"
-            ) {
+            val fileMeasuresUrl = "$baseUrl/api/measures/component_tree?component=$component&metricKeys=coverage,uncovered_lines&qualifiers=FIL&s=metric&metricSort=uncovered_lines&asc=false&ps=${request.maxFiles.coerceIn(1, 100)}"
+            HttpClients.logCurl("GET", fileMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
+            val fileMeasures: SonarComponentTreeResponse = jsonClient.get(fileMeasuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
 
