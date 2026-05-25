@@ -567,6 +567,7 @@ object LlmSettingsLoader {
             sonarQubeTargetCoverage = sonarQube.string("targetCoverage").ifBlank { "80" },
             sonarQubeMaxFiles = sonarQube.string("maxFiles").ifBlank { "5" },
             sonarQubeMockEnabled = sonarQube["mockEnabled"] as? Boolean ?: false,
+            sonarQubeLocalScanEnabled = sonarQube["localScanEnabled"] as? Boolean ?: false,
             suppressedGlobalPrompts = suppressedGlobalPrompts,
             skillProfilesYaml = dumpPromptProfilesYaml(
                 parsePromptProfileItems(
@@ -694,7 +695,8 @@ object LlmSettingsLoader {
             passwordEnv = sonar.string("passwordEnv"),
             targetCoverage = sonar.double("targetCoverage") ?: 80.0,
             maxFiles = sonar.int("maxFiles") ?: 5,
-            mockEnabled = sonar["mockEnabled"] as? Boolean ?: false
+            mockEnabled = sonar["mockEnabled"] as? Boolean ?: false,
+            localScanEnabled = sonar["localScanEnabled"] as? Boolean ?: false
         )
     }
 
@@ -882,6 +884,7 @@ object LlmSettingsLoader {
         put("targetCoverage", model.sonarQubeTargetCoverage.toDoubleOrNull() ?: 80.0)
         put("maxFiles", model.sonarQubeMaxFiles.toIntOrNull() ?: 5)
         put("mockEnabled", model.sonarQubeMockEnabled)
+        put("localScanEnabled", model.sonarQubeLocalScanEnabled)
     }
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {

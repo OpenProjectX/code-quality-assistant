@@ -43,6 +43,7 @@ import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
@@ -59,11 +60,14 @@ object SonarCubeToolWindowPanel {
     private val allSeverities = listOf("BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO")
     private val json = Json { ignoreUnknownKeys = true }
 
+    private enum class ScanMode { ONLINE, LOCAL }
+
     fun create(project: Project, bgColor: Color, fgColor: Color, borderColor: Color, commonFont: Font): JPanel {
         val allIssues = mutableListOf<SonarCubeIssue>()
         val fixedKeys = mutableSetOf<String>()
         val issueListModel = DefaultListModel<SonarCubeIssue>()
         var isMockMode = false
+        var scanMode = ScanMode.ONLINE
         var selectedIssue: SonarCubeIssue? = null
         var dashboardPanel = JPanel()
 
@@ -201,47 +205,88 @@ object SonarCubeToolWindowPanel {
             issueListModel.clear()
             refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Loading...")
             reportDate.text = ""
-            ApplicationManager.getApplication().executeOnPooledThread {
-                try {
-                    val config = LlmSettingsLoader.loadSonarQubeConfig(project)
-                    isMockMode = config.mockEnabled
-                    if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
-                        ApplicationManager.getApplication().invokeLater {
-                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "SonarQube not configured.")
-                            reportDate.text = ""
-                            finishLoading()
-                        }
-                        return@executeOnPooledThread
-                    }
-
-                    val result = runBlocking { SonarCubeToolWindowClient(config).load() }
-                    ApplicationManager.getApplication().invokeLater {
-                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result, { filterByType(it) }, { resetTypeFilters() }) {
-                            val action = com.intellij.openapi.actionSystem.ActionManager.getInstance()
-                                .getAction("org.openprojectx.ai.plugin.SonarQubeCoverageAction")
-                            action?.let {
-                                val event = com.intellij.openapi.actionSystem.AnActionEvent.createFromDataContext(
-                                    "SonarCubeToolWindow", null
-                                ) { dataId ->
-                                    if (com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT.`is`(dataId)) project else null
+            if (scanMode == ScanMode.LOCAL) {
+                ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Sonar Cube Local Scan", false) {
+                    override fun run(indicator: ProgressIndicator) {
+                        try {
+                            val result = SonarCubeLocalScanner.scan(project, indicator)
+                            ApplicationManager.getApplication().invokeLater {
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result,
+                                    { filterByType(it) }, { resetTypeFilters() }) {
+                                    val action = com.intellij.openapi.actionSystem.ActionManager.getInstance()
+                                        .getAction("org.openprojectx.ai.plugin.SonarQubeCoverageAction")
+                                    action?.let {
+                                        val event = com.intellij.openapi.actionSystem.AnActionEvent.createFromDataContext(
+                                            "SonarCubeToolWindow", null
+                                        ) { dataId ->
+                                            if (com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT.`is`(dataId)) project else null
+                                        }
+                                        it.actionPerformed(event)
+                                    }
                                 }
-                                it.actionPerformed(event)
+                                reportDate.text = result.reportTimestamp ?: ""
+                                allIssues.clear()
+                                allIssues.addAll(result.issues)
+                                typeBoxes.values.forEach { it.isSelected = true }
+                                severityBoxes.values.forEach { it.isSelected = true }
+                                applyFilters()
+                                finishLoading()
+                            }
+                        } catch (ex: Exception) {
+                            ApplicationManager.getApplication().invokeLater {
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont,
+                                    "Local scan failed: ${ex.message ?: ex}", null, null)
+                                reportDate.text = ""
+                                finishLoading()
+                                Notifications.error(project, "Local Scan failed", ex.message ?: ex.toString())
                             }
                         }
-                        reportDate.text = result.reportTimestamp ?: ""
-                        allIssues.clear()
-                        allIssues.addAll(result.issues)
-                        typeBoxes.values.forEach { it.isSelected = true }
-                        severityBoxes.values.forEach { it.isSelected = true }
-                        applyFilters()
-                        finishLoading()
                     }
-                } catch (ex: Exception) {
-                    ApplicationManager.getApplication().invokeLater {
-                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Failed: ${ex.message ?: ex}", null, null)
-                        reportDate.text = ""
-                        finishLoading()
-                        Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
+                })
+            } else {
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    try {
+                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                        isMockMode = config.mockEnabled
+                        if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
+                            ApplicationManager.getApplication().invokeLater {
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "SonarQube not configured.")
+                                reportDate.text = ""
+                                finishLoading()
+                            }
+                            return@executeOnPooledThread
+                        }
+
+                        val result = runBlocking { SonarCubeToolWindowClient(config).load() }
+                        ApplicationManager.getApplication().invokeLater {
+                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result,
+                                { filterByType(it) }, { resetTypeFilters() }) {
+                                val action = com.intellij.openapi.actionSystem.ActionManager.getInstance()
+                                    .getAction("org.openprojectx.ai.plugin.SonarQubeCoverageAction")
+                                action?.let {
+                                    val event = com.intellij.openapi.actionSystem.AnActionEvent.createFromDataContext(
+                                        "SonarCubeToolWindow", null
+                                    ) { dataId ->
+                                        if (com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT.`is`(dataId)) project else null
+                                    }
+                                    it.actionPerformed(event)
+                                }
+                            }
+                            reportDate.text = result.reportTimestamp ?: ""
+                            allIssues.clear()
+                            allIssues.addAll(result.issues)
+                            typeBoxes.values.forEach { it.isSelected = true }
+                            severityBoxes.values.forEach { it.isSelected = true }
+                            applyFilters()
+                            finishLoading()
+                        }
+                    } catch (ex: Exception) {
+                        ApplicationManager.getApplication().invokeLater {
+                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Failed: ${ex.message ?: ex}", null, null)
+                            reportDate.text = ""
+                            finishLoading()
+                            Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
+                        }
                     }
                 }
             }
@@ -297,9 +342,32 @@ object SonarCubeToolWindowPanel {
             background = bgColor
             foreground = fgColor
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            val modeCombo = JComboBox(arrayOf("Online", "Local")).apply {
+                foreground = fgColor
+                background = Color(0x11, 0x1C, 0x2F)
+                font = commonFont.deriveFont(Font.PLAIN, 11f)
+                toolTipText = "Online: fetch from SonarQube server / Local: run IntelliJ inspections"
+                addActionListener {
+                    scanMode = if (selectedItem == "Local") ScanMode.LOCAL else ScanMode.ONLINE
+                    allIssues.clear()
+                    fixedKeys.clear()
+                    issueListModel.clear()
+                    val msg = if (scanMode == ScanMode.LOCAL) {
+                        "Local scan mode. Click Refresh to run IntelliJ inspections."
+                    } else {
+                        "Online mode. Click Refresh to load configured SonarQube results."
+                    }
+                    refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, msg, null, null, null)
+                    reportDate.text = ""
+                }
+            }
             add(JPanel(BorderLayout()).apply {
                 isOpaque = false
-                add(JLabel("Sonar Cube").apply { foreground = fgColor }, BorderLayout.WEST)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false
+                    add(JLabel("Sonar Cube").apply { foreground = fgColor })
+                    add(modeCombo)
+                }, BorderLayout.WEST)
                 add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     isOpaque = false
                     add(filterCount)

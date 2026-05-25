@@ -103,6 +103,7 @@ class AiTestSettingsConfigurable(
     private lateinit var sonarQubeTargetCoverageField: JTextField
     private lateinit var sonarQubeMaxFilesField: JTextField
     private lateinit var sonarQubeMockEnabledBox: JCheckBox
+    private lateinit var sonarQubeLocalScanEnabledBox: JCheckBox
     private lateinit var promptTypeField: JComboBox<PromptCategory>
     private lateinit var promptNameField: JTextField
     private lateinit var promptListPanel: JPanel
@@ -214,6 +215,7 @@ class AiTestSettingsConfigurable(
         sonarQubeTargetCoverageField = JTextField("80")
         sonarQubeMaxFilesField = JTextField("5")
         sonarQubeMockEnabledBox = JCheckBox("Use mock scan data (offline testing)")
+        sonarQubeLocalScanEnabledBox = JCheckBox("Enable local scan mode (IntelliJ inspections)")
         promptTypeField = JComboBox(PromptCategory.entries.toTypedArray())
         promptNameField = JTextField()
         promptContentField = textArea(8)
@@ -462,7 +464,8 @@ class AiTestSettingsConfigurable(
             "Max files to inspect" to sonarQubeMaxFilesField
         )))
         add(formSection("Development", listOf(
-            "Mock mode" to sonarQubeMockEnabledBox
+            "Mock mode" to sonarQubeMockEnabledBox,
+            "Local scan" to sonarQubeLocalScanEnabledBox
         )))
     })
 
@@ -878,6 +881,7 @@ class AiTestSettingsConfigurable(
         sonarQubeTargetCoverage = sonarQubeTargetCoverageField.text.trim(),
         sonarQubeMaxFiles = sonarQubeMaxFilesField.text.trim(),
         sonarQubeMockEnabled = sonarQubeMockEnabledBox.isSelected,
+        sonarQubeLocalScanEnabled = sonarQubeLocalScanEnabledBox.isSelected,
         suppressedGlobalPrompts = suppressedGlobalPrompts.sorted()
     )
 
@@ -936,6 +940,7 @@ class AiTestSettingsConfigurable(
         sonarQubeTargetCoverageField.text = state.sonarQubeTargetCoverage
         sonarQubeMaxFilesField.text = state.sonarQubeMaxFiles
         sonarQubeMockEnabledBox.isSelected = state.sonarQubeMockEnabled
+        sonarQubeLocalScanEnabledBox.isSelected = state.sonarQubeLocalScanEnabled
         suppressedGlobalPrompts = state.suppressedGlobalPrompts.toSet()
 
         refreshPromptManager()

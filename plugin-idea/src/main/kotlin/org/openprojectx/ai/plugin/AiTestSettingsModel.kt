@@ -54,6 +54,7 @@ data class AiTestSettingsModel(
     val sonarQubeTargetCoverage: String = "80",
     val sonarQubeMaxFiles: String = "5",
     val sonarQubeMockEnabled: Boolean = false,
+    val sonarQubeLocalScanEnabled: Boolean = false,
     val suppressedGlobalPrompts: List<String> = emptyList(),
     val skillProfilesYaml: String = "",
     val suppressedGlobalSkills: List<String> = emptyList()
