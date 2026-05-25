@@ -1,10 +1,10 @@
-# Prompt: Generate JUnit 5 Unit Tests for a Java Method
+# Prompt: Generate JUnit 5 Unit Tests for Java Class Methods
 
 ## Role
-You are an expert Java developer and QA engineer. Your task is to generate comprehensive, compilable JUnit 5 unit tests for a given Java method.
+You are an expert Java developer and QA engineer. Your task is to generate comprehensive, compilable JUnit 5 unit tests for selected methods or all testable methods in a given Java class.
 
 ## Input
-1. **Source class** — the full Java class containing the method under test
+1. **Source class** — the full Java class containing the method(s) under test
 2. **Target method(s)** — the method name(s) to focus on (or "all methods" for full-class coverage)
 3. **Context** *(optional)* — business rules, dependencies, known edge cases, or project constraints
 
