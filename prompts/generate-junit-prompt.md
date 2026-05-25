@@ -1,72 +1,89 @@
----
-global: true
-category: test
-type: test
-time: 2026-04-28T00:00:00Z
-name: junit
----
-
 # Prompt: Generate JUnit 5 Unit Tests for a Java Method
 
 ## Role
-You are an expert Java developer and QA engineer. Your task is to generate comprehensive JUnit 5 unit tests for a given Java method.
+You are an expert Java developer and QA engineer. Your task is to generate comprehensive, compilable JUnit 5 unit tests for a given Java method.
 
-## Input Format
-You will receive:
+## Input
 1. **Source class** — the full Java class containing the method under test
-2. **Target method(s)** — the method name(s) to focus on (or "all methods" to cover the entire class)
-3. **Context** *(optional)* — any business rules, known edge cases, or dependencies to be aware of
+2. **Target method(s)** — the method name(s) to focus on (or "all methods" for full-class coverage)
+3. **Context** *(optional)* — business rules, dependencies, known edge cases, or project constraints
 
-## Instructions
+## Core Principles
 
-Generate a complete, compilable JUnit 5 test class that:
+### Correctness over completeness
+- Derive assertions **only** from the source code, Javadoc/comments, provided context, and unambiguous method names. Do not invent expected behavior.
+- If behavior is ambiguous, test only what is clearly implied. Skip a test rather than guess business rules.
+- If the method depends on current time, randomness, system time, or external I/O without an injection seam: assert only invariants clearly guaranteed by the source code, such as type, nullability, bounds, format, size, or containment. Add a `// NOTE:` comment explaining what was skipped and why. Do **not** assert exact values or refactor the source.
 
-### Coverage Requirements
-- **Happy path**: at least one test for the expected, normal-case behavior
-- **Edge cases**: boundary values (0, 1, max/min integers, empty collections, single-element collections, etc.)
-  - For length/size comparisons, always test **both sides of the boundary**: e.g., `length == limit` (no truncation) AND `length == limit + 1` (truncation kicks in)
-- **Null, empty, and blank inputs**: every `String` parameter should cover null, empty (`""`), and whitespace-only (`"   "`) — unless the Javadoc explicitly treats them identically. Use `@NullSource`, `@EmptySource`, or `@NullAndEmptySource` with `@ParameterizedTest` to collapse these into a single test method when they produce the same result
-- **Error cases**: every documented or inferable exception should be verified with `assertThrows` in a dedicated `@Test` method
-- **Parameterized tests — use broadly, not sparingly**: `@ParameterizedTest` is the default choice whenever multiple inputs share the same assertion pattern. Prefer one well-named `@ParameterizedTest` with `@CsvSource` rows over many individual `@Test` methods. Reserve standalone `@Test` methods only for: (a) `assertThrows` cases, and (b) scenarios too unique to fit a row. Name the test method to describe the *group* (e.g., `method_validInputs_returnExpectedOutput`), not just "variousCases"
+### Coverage requirements
 
-### Code Quality Rules
-1. One assertion concept per test — keep tests focused
-2. Test method names follow the pattern: `methodName_condition_expectedBehavior`
-3. Use `@BeforeEach` to construct the class under test; never instantiate it inside individual tests
-4. Do not use mocks unless the method has external dependencies (services, repositories, etc.); if mocks are needed, use Mockito
-5. Do not test private methods directly; test them through public methods
-6. Use `assertEquals`, `assertTrue`, `assertFalse`, `assertNull`, `assertNotNull`, and `assertThrows` from `org.junit.jupiter.api.Assertions`
-   - Prefer `assertTrue`/`assertFalse` over `assertEquals(true/false, result)` for boolean-returning methods — this produces clearer failure output
-7. For floating-point comparisons, always specify a delta (e.g., `assertEquals(expected, actual, 1e-9)`)
-8. Add a failure message to every `@ParameterizedTest` assertion so the failing input is visible in the test report: e.g., `assertEquals(expected, actual, "input: " + param)`
-9. When null/empty/blank all produce the same result, use `@NullAndEmptySource` (or combine `@NullSource` + `@EmptySource` + a `@ValueSource` blank entry) instead of writing separate `@Test` methods for each
-10. Import only what is used; do not add unnecessary imports
-11. The test class package must exactly match the package declaration of the source class — copy it verbatim. Do not infer, shorten, or alter it.
+| Category | Requirement |
+|---|---|
+| Happy path | At least one normal-case test |
+| Boundaries | Test **both sides** of every numeric/length boundary (e.g., `n == limit` AND `n == limit + 1`); cover `0`, `1`, empty collection, single-element collection when relevant |
+| Null / empty / blank `String` | For each `String` parameter, cover `null`, `""`, and `"   "` when the code defines or clearly implies their behavior |
+| Exceptions | Every documented exception, explicit guard clause, or directly thrown exception -> dedicated `assertThrows` test. Do not assert incidental exceptions. |
 
-### Output Format
-Return **only** the Java source code for the test class, wrapped in a fenced code block:
+### Parameterization rules
+- Use **one** `@ParameterizedTest` (prefer `@CsvSource`) when multiple inputs share the same setup, action, and assertion shape.
+- Use `@NullAndEmptySource` (or `@NullSource` + `@EmptySource` + a blank `@ValueSource`) to collapse null/empty/blank cases **only when they produce the same result**.
+- Reserve standalone `@Test` for: `assertThrows` cases, unique scenarios, or cases where parameterization would hide intent.
+- Name parameterized tests after the **group** they cover (`reverse_validInputs_returnReversed`), not "variousCases".
+- Pass a message when the failing input would not be obvious in the report: `assertEquals(expected, actual, "input: " + param)`.
+
+## Code Quality Rules
+
+1. **Naming**: `methodName_condition_expectedBehavior`.
+2. **Setup**: Use `@BeforeEach` to construct the class under test when most tests share the same instance. For `static` methods, utility classes, or tests needing different constructor arguments, instantiate inside the test or omit `@BeforeEach`.
+3. **Visibility**: Because the test class shares the package, test `public`, `protected`, and package-private target methods directly when appropriate. Do **not** test `private` methods directly — exercise them through public callers.
+4. **Mocks**:
+   - Use Mockito only when the project dependencies include Mockito or the user explicitly allows it.
+   - Only mock external dependencies (services, repositories, clocks, HTTP clients, etc.).
+   - Wrap `mockStatic` and `mockConstruction` in try-with-resources.
+   - Never mock the class under test itself.
+   - If no external dependency exists, do not introduce mocks.
+5. **Assertions** — pick the most specific from `org.junit.jupiter.api.Assertions`:
+
+   | Return type | Use |
+   |---|---|
+   | `boolean` | `assertTrue` / `assertFalse` (prefer over `assertEquals(true, ...)`) |
+   | `double` / `float` | `assertEquals(expected, actual, delta)` with explicit delta (e.g., `1e-9`) |
+   | `double[]` / `float[]` | `assertArrayEquals(expected, actual, delta)` |
+   | `Object[]` | `assertArrayEquals` |
+   | Ordered `List` / `Collection` | `assertIterableEquals` or `assertEquals` |
+   | Unordered `Collection` | `assertEquals(Set.of(...), new HashSet<>(actual))` |
+   | `Optional<T>` | Prefer `assertEquals(Optional.of(expected), actual)` or `assertEquals(Optional.empty(), actual)`; inspect the value only when needed |
+   | `Stream<T>` | Collect first (`.toList()`), then assert |
+   | `Map<K,V>` | `assertEquals(expectedMap, actualMap)` |
+   | Exception | `assertThrows(ExceptionType.class, () -> ...)`; assert message only if it is part of the contract |
+
+6. **Assertion granularity**: one *concept* per test. Multiple `assertEquals` on different fields of the same returned object is fine — group them with `assertAll` so all failures surface. Do not bundle unrelated scenarios into one test.
+7. **Imports**: Use `import static org.junit.jupiter.api.Assertions.*;`. Import only what is used.
+
+## Output Format
+
+Return your **entire response** as a single fenced ```java code block containing only the test class. Output no prose, no commentary, and no markdown outside the block.
+
+The test class must:
+- Share the same `package` declaration as the source class
+- Be named `<SourceClassName>Test`
+- Compile as-is against JUnit 5 (Jupiter), and Mockito 5.x only if Mockito is available and mocks are used
 
 ```java
-package <copy the exact package statement from the source class, e.g. "com.example.myapp.utils">;
+package <same package as source class>;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-// ... other imports
+// imports
 
 class <ClassName>Test {
-    // tests here
+    // tests
 }
 ```
 
-Do not include any explanation outside the code block.
-
 ---
 
-## Example Usage
+## Example
 
 **Input:**
-
-> Source class:
 > ```java
 > public class StringUtils {
 >     public String reverse(String input) {
@@ -77,22 +94,11 @@ Do not include any explanation outside the code block.
 > ```
 > Target method: `reverse`
 
-**Expected output structure (not the answer itself):**
-- Test for normal string → reversed string
-- Test for empty string → empty string
-- Test for single character → same character
-- Test for palindrome → same string
-- Test for null → `assertThrows(IllegalArgumentException.class, ...)`
+**Expected test categories (not the answer itself):**
+- Happy path: normal string -> reversed
+- Edge: empty string, single character, palindrome
+- Error: `null` -> `assertThrows(IllegalArgumentException.class, ...)`
 
 ---
 
-## Now generate tests for the following:
-
-**Source class:**
-```java
-// Paste the full Java class here
-```
-
-**Target method(s):** `// method name(s) here, or "all methods"`
-
-**Context:** `// any additional context, or "none"`
+## Now generate tests for the following code:
