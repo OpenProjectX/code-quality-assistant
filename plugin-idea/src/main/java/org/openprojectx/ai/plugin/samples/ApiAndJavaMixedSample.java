@@ -38,7 +38,7 @@ public class ApiAndJavaMixedSample {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             return response.statusCode();
         } catch (IOException | InterruptedException e) {
-            throw new RuntimeException("Failed to fetch user status code", e);
+            throw new IllegalStateException("Failed to fetch user status code", e);
         }
     }
 
@@ -53,7 +53,7 @@ public class ApiAndJavaMixedSample {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             return response.body();
         } catch (IOException | InterruptedException e) {
-            throw new RuntimeException("Failed to fetch order body", e);
+            throw new IllegalStateException("Failed to fetch order body", e);
         }
     }
 

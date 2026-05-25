@@ -52,14 +52,63 @@ internal object SonarCubeLocalScanner {
         val vulnerabilities = allIssues.count { it.type.equals("VULNERABILITY", ignoreCase = true) }
         val codeSmells = allIssues.count { it.type.equals("CODE_SMELL", ignoreCase = true) }
 
+        val localCoverage = collectLocalCoverage(project, sourceFiles)
+
         return SonarCubeResult(
             projectKey = project.name,
             serverUrl = "local",
             coverage = null, lineCoverage = null, branchCoverage = null, uncoveredLines = null,
             bugs = bugs, vulnerabilities = vulnerabilities, codeSmells = codeSmells,
             issues = allIssues,
-            reportTimestamp = "Local scan ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}"
+            reportTimestamp = "Local scan ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}",
+            fileCoverages = localCoverage
         )
+    }
+
+    private fun collectLocalCoverage(
+        project: Project,
+        sourceFiles: List<VirtualFile>
+    ): List<SonarQubeFileCoverage> {
+        try {
+            // Use reflection to avoid compile-time dependency on coverage module
+            val managerClass = Class.forName("com.intellij.coverage.CoverageDataManager")
+            val getInstance = managerClass.getMethod("getInstance", Project::class.java)
+            val coverageManager = getInstance.invoke(null, project)
+            val getBundle = coverageManager.javaClass.getMethod("getCurrentSuitesBundle")
+            val bundle = getBundle.invoke(coverageManager) ?: return emptyList()
+
+            val result = mutableListOf<SonarQubeFileCoverage>()
+            val getCoverageMethod = bundle.javaClass.getMethod("getCoverageData", VirtualFile::class.java)
+
+            for (file in sourceFiles) {
+                val relPath = relativePath(project, file)
+                try {
+                    val coverageData = getCoverageMethod.invoke(bundle, file) ?: continue
+                    val getLineCount = coverageData.javaClass.getMethod("getLineCount")
+                    val getCoveredLineCount = coverageData.javaClass.getMethod("getCoveredLineCount")
+                    val total = getLineCount.invoke(coverageData) as? Int ?: 0
+                    val covered = getCoveredLineCount.invoke(coverageData) as? Int ?: 0
+
+                    if (total > 0) {
+                        result.add(SonarQubeFileCoverage(
+                            key = "LOCAL:$relPath",
+                            path = relPath,
+                            name = file.name,
+                            coverage = covered * 100.0 / total,
+                            uncoveredLines = (total - covered).coerceAtLeast(0)
+                        ))
+                    }
+                } catch (_: Exception) {
+                    // file not in coverage data
+                }
+            }
+
+            return result.sortedBy { it.coverage ?: 100.0 }
+        } catch (_: ClassNotFoundException) {
+            return emptyList()
+        } catch (_: Exception) {
+            return emptyList()
+        }
     }
 
     private fun emptyResult(project: Project, message: String) = SonarCubeResult(
@@ -79,6 +128,13 @@ internal object SonarCubeLocalScanner {
         val rule: String,
         val message: String
     )
+
+    fun scanFile(project: Project, virtualFile: VirtualFile): List<SonarCubeIssue> {
+        return ReadAction.nonBlocking<List<SonarCubeIssue>> {
+            val psiFile = PsiManager.getInstance(project).findFile(virtualFile) ?: return@nonBlocking emptyList()
+            analyzeFile(project, virtualFile, psiFile)
+        }.executeSynchronously()
+    }
 
     private fun analyzeFile(project: Project, file: VirtualFile, psiFile: PsiFile): List<SonarCubeIssue> {
         val textIssues = mutableListOf<TextIssue>()
