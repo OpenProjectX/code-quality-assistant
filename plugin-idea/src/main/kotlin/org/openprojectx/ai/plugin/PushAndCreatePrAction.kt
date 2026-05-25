@@ -6,12 +6,16 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
-import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.vcs.VcsDataKeys
 import org.openprojectx.ai.plugin.pr.AiPullRequestService
 import org.openprojectx.ai.plugin.pr.GitRepositoryContextService
+import org.openprojectx.ai.plugin.pr.PullRequestOptionsPanel
 import org.openprojectx.ai.plugin.pr.PullRequestSettingsState
+import org.openprojectx.ai.plugin.pr.PullRequestUiOptions
 import java.io.File
+import javax.swing.JComponent
 
 class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
 
@@ -28,17 +32,21 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
         }
 
         val settings = PullRequestSettingsState.getInstance(project).state
-        val targetBranch = Messages.showInputDialog(
-            project,
-            "Target branch for Pull Request:",
-            "Push and Create PR",
-            null,
-            settings.targetBranch,
-            null
-        )?.trim().orEmpty()
+        val dialog = PushAndCreatePrDialog(
+            project = project,
+            initialCreateAfterPush = settings.createAfterPush,
+            initialTargetBranch = settings.targetBranch
+        )
+        if (!dialog.showAndGet()) return
 
-        if (targetBranch.isBlank()) return
-        settings.targetBranch = targetBranch
+        val options = dialog.getOptions()
+        if (options.createAfterPush && options.targetBranch.isBlank()) {
+            Notifications.error(project, "Push and Create PR", "Target branch is required when creating a pull request.")
+            return
+        }
+
+        settings.createAfterPush = options.createAfterPush
+        settings.targetBranch = options.targetBranch.ifBlank { settings.targetBranch }
         PullRequestSettingsState.getInstance(project).loadState(settings)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Push and Create PR", false) {
@@ -47,8 +55,13 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
                     indicator.text = "Pushing ${repoContext.currentBranch} to origin..."
                     runGitPush(repoContext.repositoryRoot, repoContext.currentBranch)
 
+                    if (!options.createAfterPush) {
+                        Notifications.info(project, "Push and Create PR", "Push succeeded.")
+                        return
+                    }
+
                     indicator.text = "Collecting branch diff..."
-                    val diff = GitRepositoryContextService.getDiffAgainstTarget(project, targetBranch)
+                    val diff = GitRepositoryContextService.getDiffAgainstTarget(project, options.targetBranch)
                     if (diff.isBlank()) {
                         Notifications.warn(project, "Push and Create PR", "Push succeeded, but no branch diff found.")
                         return
@@ -57,7 +70,7 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
                     indicator.text = "Generating branch summary..."
                     val summary = AiBranchDiffSummaryService(project).generate(
                         sourceBranch = repoContext.currentBranch,
-                        targetBranch = targetBranch,
+                        targetBranch = options.targetBranch,
                         diff = diff
                     )
 
@@ -65,13 +78,13 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
                     val pr = AiPullRequestService(project).createAfterPush(
                         remoteUrl = repoContext.remoteUrl,
                         sourceBranch = repoContext.currentBranch,
-                        targetBranch = targetBranch,
+                        targetBranch = options.targetBranch,
                         diff = diff,
                         summaryComment = summary
                     )
 
                     ContextBoxStateService.getInstance(project).recordBranchSummary(
-                        targetBranch = targetBranch,
+                        targetBranch = options.targetBranch,
                         sourceBranch = repoContext.currentBranch,
                         summary = summary
                     )
@@ -93,5 +106,30 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
         if (code != 0) {
             error("git push failed: $output")
         }
+    }
+}
+
+private class PushAndCreatePrDialog(
+    project: Project,
+    initialCreateAfterPush: Boolean,
+    initialTargetBranch: String
+) : DialogWrapper(project) {
+
+    private val optionsPanel = PullRequestOptionsPanel(
+        initialCreateAfterPush = initialCreateAfterPush,
+        initialTargetBranch = initialTargetBranch
+    )
+
+    init {
+        title = "Push"
+        init()
+    }
+
+    override fun createCenterPanel(): JComponent {
+        return optionsPanel.panel
+    }
+
+    fun getOptions(): PullRequestUiOptions {
+        return optionsPanel.getOptions()
     }
 }

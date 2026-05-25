@@ -38,7 +38,7 @@ class PullRequestOptionsPanel(
     fun getOptions(): PullRequestUiOptions {
         return PullRequestUiOptions(
             createAfterPush = createPrCheckBox.isSelected,
-            targetBranch = targetBranchField.text.trim().ifBlank { "main" }
+            targetBranch = targetBranchField.text.trim()
         )
     }
 

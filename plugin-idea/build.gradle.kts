@@ -112,6 +112,9 @@ dependencies {
 
     implementation(platform("org.bsc.langgraph4j:langgraph4j-bom:1.8.13"))
     implementation("org.bsc.langgraph4j:langgraph4j-core")
+
+    testImplementation(kotlin("test-junit5"))
+    testImplementation(libs.ktor.client.mock)
 }
 
 publishing {

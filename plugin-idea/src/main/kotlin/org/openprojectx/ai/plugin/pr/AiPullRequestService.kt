@@ -27,8 +27,8 @@ class AiPullRequestService(private val project: Project) {
         val credential = GitCredentialHelper.resolve(remoteUrl)
         val auth = PullRequestAuth(
             token = settings.bitbucketPromptRepoToken.takeIf { it.isNotBlank() },
-            username = credential?.username,
-            password = credential?.password
+            username = settings.bitbucketPromptRepoUsername.takeIf { it.isNotBlank() } ?: credential?.username,
+            password = settings.bitbucketPromptRepoPassword.takeIf { it.isNotBlank() } ?: credential?.password
         )
 
         val prompt = PullRequestPromptBuilder.build(
