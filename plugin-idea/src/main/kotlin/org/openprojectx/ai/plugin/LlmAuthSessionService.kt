@@ -31,30 +31,25 @@ class LlmAuthSessionService(
         val auth = settings.auth ?: return settings
         sessionApiKey?.let { return settings.copy(apiKey = it) }
 
-        val credentials = promptCredentials(settings)
-        val apiKey = runBlocking {
-            TemplateRequestExecutor(
-                HttpClients.shared(
-                    disableTlsVerification = settings.httpDisableTlsVerification,
-                    timeoutSeconds = settings.timeoutSeconds
-                )
-            ).execute(
-                config = auth.login,
-                variables = mapOf(
-                    "username" to credentials.username,
-                    "password" to credentials.password,
-                    "model" to settings.model,
-                    "apiKey" to "",
-                    "prompt" to "",
-                    "promptJson" to "\"\""
-                )
+        // Try saved credentials silently first
+        val saved = loadSavedCredentials(settings)
+        if (saved != null) {
+            val apiKey = runLoginTemplate(
+                settings, saved.userName.orEmpty(), saved.getPasswordAsString().orEmpty()
             )
-        }.trim()
-
-        if (apiKey.isBlank()) {
-            error("LLM login returned an empty API key")
+            if (!apiKey.isNullOrBlank()) {
+                sessionApiKey = apiKey
+                return settings.copy(apiKey = apiKey)
+            }
+            // Saved credentials failed — fall through to prompt
         }
 
+        // Prompt user for credentials
+        val credentials = promptCredentials(settings, prefill = saved)
+        val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
+        if (apiKey.isNullOrBlank()) {
+            error("LLM login returned an empty API key")
+        }
         sessionApiKey = apiKey
         return settings.copy(apiKey = apiKey)
     }
@@ -64,7 +59,27 @@ class LlmAuthSessionService(
             return settings
         }
         sessionApiKey = null
-        return resolve(settings.copy(apiKey = null))
+
+        // Try saved credentials silently
+        val saved = loadSavedCredentials(settings)
+        if (saved != null) {
+            val apiKey = runLoginTemplate(
+                settings, saved.userName.orEmpty(), saved.getPasswordAsString().orEmpty()
+            )
+            if (!apiKey.isNullOrBlank()) {
+                sessionApiKey = apiKey
+                return settings.copy(apiKey = apiKey)
+            }
+        }
+
+        // Prompt for new credentials
+        val credentials = promptCredentials(settings, prefill = saved)
+        val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
+        if (apiKey.isNullOrBlank()) {
+            error("LLM relogin returned an empty API key")
+        }
+        sessionApiKey = apiKey
+        return settings.copy(apiKey = apiKey)
     }
 
     fun loginNow(): String {
@@ -102,7 +117,7 @@ class LlmAuthSessionService(
 
     fun promptLoginCredentialsForCurrentSettings(): LoginCredentials {
         val settings = LlmSettingsLoader.load(project)
-        return promptCredentials(settings)
+        return promptCredentials(settings, prefill = loadSavedCredentials(settings))
     }
 
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
@@ -127,19 +142,47 @@ class LlmAuthSessionService(
         }
     }
 
+    private fun runLoginTemplate(settings: LlmSettings, username: String, password: String): String? {
+        val auth = settings.auth ?: return null
+        return try {
+            runBlocking {
+                TemplateRequestExecutor(
+                    HttpClients.shared(
+                        disableTlsVerification = settings.httpDisableTlsVerification,
+                        timeoutSeconds = settings.timeoutSeconds
+                    )
+                ).execute(
+                    config = auth.login,
+                    variables = mapOf(
+                        "username" to username,
+                        "password" to password,
+                        "model" to settings.model,
+                        "apiKey" to "",
+                        "prompt" to "",
+                        "promptJson" to "\"\""
+                    )
+                )
+            }.trim().takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun installRuntimeLogSink() {
         LlmRuntimeLogger.sink = { message -> RuntimeLogStore.append(message) }
     }
 
-    private fun promptCredentials(settings: LlmSettings): LoginCredentials {
+    private fun promptCredentials(
+        settings: LlmSettings,
+        prefill: Credentials?
+    ): LoginCredentials {
         lateinit var credentials: LoginCredentials
-        val saved = loadSavedCredentials(settings)
         val showDialog = {
             val dialog = LlmLoginDialog(
                 project = project,
-                initialUsername = saved?.userName.orEmpty(),
-                initialPassword = saved?.getPasswordAsString().orEmpty(),
-                rememberByDefault = saved != null
+                initialUsername = prefill?.userName.orEmpty(),
+                initialPassword = prefill?.getPasswordAsString().orEmpty(),
+                rememberByDefault = prefill != null
             )
             if (!dialog.showAndGet()) {
                 error("LLM login cancelled")

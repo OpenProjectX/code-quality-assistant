@@ -1,5 +1,9 @@
 package org.openprojectx.ai.plugin
 
+import com.intellij.execution.ExecutorRegistry
+import com.intellij.execution.ProgramRunnerUtil
+import com.intellij.execution.RunManager
+import com.intellij.execution.configurations.ConfigurationTypeUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -22,6 +26,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
@@ -43,29 +48,38 @@ import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
+import javax.swing.JTable
 import javax.swing.JTextArea
+import javax.swing.JTextField
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.UIManager
+import javax.swing.table.DefaultTableModel
 
 object SonarCubeToolWindowPanel {
     private val allTypes = listOf("BUG", "VULNERABILITY", "CODE_SMELL")
     private val allSeverities = listOf("BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO")
     private val json = Json { ignoreUnknownKeys = true }
 
+    private enum class ScanMode { ONLINE, LOCAL }
+
     fun create(project: Project, bgColor: Color, fgColor: Color, borderColor: Color, commonFont: Font): JPanel {
         val allIssues = mutableListOf<SonarCubeIssue>()
         val fixedKeys = mutableSetOf<String>()
         val issueListModel = DefaultListModel<SonarCubeIssue>()
         var isMockMode = false
+        var scanMode = ScanMode.ONLINE
         var selectedIssue: SonarCubeIssue? = null
-        var dashboardPanel = JPanel()
+        var currentFileCoverages = emptyList<SonarQubeFileCoverage>()
+        var dashboardPanel = JPanel(CardLayout()).apply { isOpaque = false }
+        var currentDashboardMode = "metrics"
 
         val typeBoxes = allTypes.associateWith { JCheckBox(it, true) }
         val severityBoxes = allSeverities.associateWith { JCheckBox(it, true) }
@@ -90,6 +104,261 @@ object SonarCubeToolWindowPanel {
             filterCount.text = "($activeSize active)$fixedText"
         }
 
+        fun runAllTestsWithCoverage() {
+            try {
+                val coverageExecutor = ExecutorRegistry.getInstance().getExecutorById("Coverage")
+                if (coverageExecutor == null) {
+                    Notifications.warn(project, "Coverage", "Coverage executor is not available.")
+                    return
+                }
+                val runManager = RunManager.getInstance(project)
+                var testSettings = runManager.allSettings.firstOrNull {
+                    it.type.id == "JUnit" || it.type.id == "TestNG"
+                }
+
+                if (testSettings == null) {
+                    val junitType = ConfigurationTypeUtil.findConfigurationType("JUnit")
+                    if (junitType != null) {
+                        val factory = junitType.configurationFactories.first()
+                        val settings = runManager.createConfiguration("All Tests (CQA)", factory)
+                        try {
+                            val config = settings.configuration
+                            val testKindField = config.javaClass.getField("ALL_IN_PACKAGE")
+                            val testKindEnum = testKindField.get(null)
+                            config.javaClass.getMethod("setTestKind", testKindEnum.javaClass)
+                                .invoke(config, testKindEnum)
+                            config.javaClass.getMethod("setPackageName", String::class.java)
+                                .invoke(config, "")
+                        } catch (_: Exception) { }
+                        testSettings = settings
+                        runManager.addConfiguration(settings)
+                    }
+                }
+
+                if (testSettings == null) {
+                    Notifications.info(project, "Coverage", "No test run configuration could be created.\nPlease create one via Run → Edit Configurations, then try again.")
+                    return
+                }
+                runManager.selectedConfiguration = testSettings
+                ProgramRunnerUtil.executeConfiguration(project, testSettings, coverageExecutor)
+                Notifications.info(project, "Coverage", "Running tests with coverage. Click Refresh when done to see results.")
+            } catch (ex: Exception) {
+                Notifications.error(project, "Coverage", "Failed to run coverage: ${ex.message}")
+            }
+        }
+
+        fun showFileCoverageList() {
+            currentDashboardMode = "coverage"
+            dashboardPanel.removeAll()
+
+            val backButton = JButton("← Back to Dashboard").apply {
+                foreground = Color(0x3B, 0x82, 0xF6)
+                font = commonFont.deriveFont(Font.PLAIN, 12f)
+                isOpaque = false
+                isContentAreaFilled = false
+                border = BorderFactory.createEmptyBorder(4, 0, 8, 0)
+                addActionListener {
+                    (dashboardPanel.layout as CardLayout).show(dashboardPanel, "metrics")
+                    currentDashboardMode = "metrics"
+                }
+            }
+
+            val runCoverageButton = JButton("▶ Run with Coverage").apply {
+                foreground = Color(0x22, 0xC5, 0x5E)
+                font = commonFont.deriveFont(Font.BOLD, 12f)
+                isOpaque = false
+                isContentAreaFilled = false
+                border = BorderFactory.createEmptyBorder(4, 8, 8, 0)
+                toolTipText = "Run all tests with coverage, then Refresh to see results"
+                addActionListener {
+                    runAllTestsWithCoverage()
+                }
+            }
+
+            val emptyMessage = when {
+                currentFileCoverages.isEmpty() && scanMode == ScanMode.LOCAL -> "No coverage data available.\nRun tests with Run → Run with Coverage in IntelliJ, then Refresh."
+                currentFileCoverages.isEmpty() -> "No file coverage data returned from SonarQube.\nMake sure the project has been analyzed (sonar-scanner) and try Refresh."
+                else -> null
+            }
+
+            if (emptyMessage != null) {
+                val messageLabel = JLabel("<html>${emptyMessage.replace("\n", "<br>")}</html>").apply {
+                    foreground = Color(0x94, 0xA3, 0xB8)
+                    font = commonFont.deriveFont(Font.PLAIN, 13f)
+                    horizontalAlignment = SwingConstants.CENTER
+                    border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
+                }
+                val topBar = JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    add(backButton, BorderLayout.WEST)
+                    add(runCoverageButton, BorderLayout.EAST)
+                }
+                dashboardPanel.add(JPanel(BorderLayout(0, 6)).apply {
+                    isOpaque = false
+                    add(topBar, BorderLayout.NORTH)
+                    add(messageLabel, BorderLayout.CENTER)
+                }, "coverage")
+                (dashboardPanel.layout as CardLayout).show(dashboardPanel, "coverage")
+                return
+            }
+
+            val summaryLabel = JLabel("${currentFileCoverages.size} files, sorted by coverage (lowest first)").apply {
+                foreground = Color(0x94, 0xA3, 0xB8)
+                font = commonFont.deriveFont(Font.PLAIN, 12f)
+                border = BorderFactory.createEmptyBorder(0, 0, 8, 0)
+            }
+
+            val colNames = arrayOf("File", "Coverage", "Uncovered Lines")
+            val dataArray = Array(currentFileCoverages.size) { i ->
+                val fc = currentFileCoverages[i]
+                arrayOf<Any>(fc.path, fc.coverage?.let { String.format(Locale.US, "%.2f%%", it) } ?: "—", fc.uncoveredLines ?: 0)
+            }
+
+            fun generateTestsForCoverageFile(fileIndex: Int) {
+                val fcc = currentFileCoverages.getOrNull(fileIndex) ?: return
+                ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generate Tests: ${fcc.name}", false) {
+                    override fun run(indicator: ProgressIndicator) {
+                        try {
+                            indicator.text = "Reading source file..."
+                            val basePath = project.basePath
+                            if (basePath.isNullOrBlank()) {
+                                Notifications.warn(project, "Coverage", "Cannot resolve project base path")
+                                return
+                            }
+                            val sourceFile = java.io.File(basePath, fcc.path)
+                            if (!sourceFile.exists() || !sourceFile.isFile) {
+                                Notifications.warn(project, "Coverage", "Source file not found: ${fcc.path}")
+                                return
+                            }
+                            val sourceCode = sourceFile.readText(Charsets.UTF_8)
+
+                            indicator.text = "Building test generation prompt..."
+                            val cfg = LlmSettingsLoader.loadConfig(project)
+                            val generationTemplate = cfg.prompts.generation.copy(
+                                wrapper = PromptProfileResolver.resolve(
+                                    cfg.prompts.profiles.generation,
+                                    cfg.prompts.generation.wrapper
+                                )
+                            )
+                            val prompt = org.openprojectx.ai.plugin.core.PromptBuilder.buildTestForUncoveredFile(
+                                filePath = fcc.path,
+                                fileName = fcc.name,
+                                sourceCode = sourceCode,
+                                uncoveredLines = fcc.uncoveredLines ?: 0,
+                                coverage = fcc.coverage,
+                                generationTemplate = generationTemplate
+                            )
+
+                            indicator.text = "Calling AI to generate tests..."
+                            val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
+                                val provider = LlmProviderFactory.create(settings)
+                                runBlocking { provider.generateCode(prompt) }
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                handleCoverageTestGeneration(project, fcc, sourceCode, response) { newCoverages ->
+                                    currentFileCoverages = newCoverages
+                                    showFileCoverageList()
+                                }
+                            }
+                        } catch (ex: Exception) {
+                            ApplicationManager.getApplication().invokeLater {
+                                Notifications.error(project, "Test Generation failed", ex.message ?: ex.toString())
+                            }
+                        }
+                    }
+                })
+            }
+
+            fun showCoverageFileMenu(e: MouseEvent, row: Int, targetTable: JTable) {
+                val fcv = currentFileCoverages.getOrNull(row) ?: return
+                val menu = JPopupMenu()
+                val genItem = JMenuItem("Generate Missing Tests")
+                genItem.addActionListener { generateTestsForCoverageFile(row) }
+                menu.add(genItem)
+                menu.show(targetTable, e.x, e.y)
+            }
+
+            val tableModel = object : DefaultTableModel(dataArray, colNames) {
+                override fun isCellEditable(row: Int, column: Int) = false
+            }
+
+            val table = JTable(tableModel).apply {
+                background = Color(0x11, 0x1C, 0x2F)
+                foreground = fgColor
+                setShowGrid(true)
+                gridColor = Color(0x1E, 0x29, 0x3B)
+                rowHeight = 32
+                font = commonFont.deriveFont(Font.PLAIN, 12f)
+                tableHeader.apply {
+                    background = Color(0x0B, 0x12, 0x20)
+                    foreground = Color(0x94, 0xA3, 0xB8)
+                    font = commonFont.deriveFont(Font.BOLD, 11f)
+                }
+                setSelectionBackground(Color(0x3B, 0x82, 0xF6))
+                setSelectionForeground(Color.WHITE)
+
+                columnModel.getColumn(0).preferredWidth = 420
+                columnModel.getColumn(1).preferredWidth = 80
+                columnModel.getColumn(2).preferredWidth = 120
+
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        val row = rowAtPoint(e.point)
+                        if (row >= 0 && row < currentFileCoverages.size) {
+                            setRowSelectionInterval(row, row)
+                            if (e.clickCount >= 2) {
+                                generateTestsForCoverageFile(row)
+                            }
+                            if (e.isPopupTrigger) showCoverageFileMenu(e, row, this@apply)
+                        }
+                    }
+                    override fun mousePressed(e: MouseEvent) {
+                        if (e.isPopupTrigger) {
+                            val row = rowAtPoint(e.point)
+                            if (row >= 0 && row < currentFileCoverages.size) {
+                                setRowSelectionInterval(row, row)
+                                showCoverageFileMenu(e, row, this@apply)
+                            }
+                        }
+                    }
+                    override fun mouseReleased(e: MouseEvent) {
+                        if (e.isPopupTrigger) {
+                            val row = rowAtPoint(e.point)
+                            if (row >= 0 && row < currentFileCoverages.size) {
+                                setRowSelectionInterval(row, row)
+                                showCoverageFileMenu(e, row, this@apply)
+                            }
+                        }
+                    }
+                })
+            }
+
+            val scrollPane = com.intellij.ui.components.JBScrollPane(table).apply {
+                preferredSize = Dimension(320, 340)
+                viewport.background = Color(0x11, 0x1C, 0x2F)
+                border = BorderFactory.createLineBorder(borderColor)
+            }
+
+            val topBar = JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(backButton, BorderLayout.WEST)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 12, 0)).apply {
+                    isOpaque = false
+                    add(runCoverageButton)
+                    add(summaryLabel)
+                }, BorderLayout.EAST)
+            }
+
+            dashboardPanel.add(JPanel(BorderLayout(0, 6)).apply {
+                isOpaque = false
+                add(topBar, BorderLayout.NORTH)
+                add(scrollPane, BorderLayout.CENTER)
+            }, "coverage")
+
+            (dashboardPanel.layout as CardLayout).show(dashboardPanel, "coverage")
+        }
+
         fun showContextMenu(comp: Component, x: Int, y: Int) {
             val issue = selectedIssue ?: return
             val menu = JPopupMenu()
@@ -99,7 +368,33 @@ object SonarCubeToolWindowPanel {
             menu.add(goToItem)
 
             val aiFixItem = JMenuItem("AI Fix...")
-            aiFixItem.addActionListener { executeAiFix(project, issue) }
+            val fixingIssue = issue
+            aiFixItem.addActionListener {
+                executeAiFix(project, fixingIssue) {
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val basePath = project.basePath
+                        if (basePath != null) {
+                            val ioFile = java.io.File(basePath, fixingIssue.path)
+                            val vf = VfsUtil.findFileByIoFile(ioFile, true)
+                            if (vf != null) {
+                                val newFileIssues = SonarCubeLocalScanner.scanFile(project, vf)
+                                ApplicationManager.getApplication().invokeLater {
+                                    allIssues.removeAll { it.path == fixingIssue.path }
+                                    allIssues.addAll(newFileIssues)
+                                    val isResolved = newFileIssues.none { it.rule == fixingIssue.rule }
+                                    if (isResolved) {
+                                        fixedKeys.add(fixingIssue.key)
+                                        Notifications.info(project, "Sonar Fix", "Issue resolved: ${fixingIssue.rule}")
+                                    } else {
+                                        Notifications.warn(project, "Sonar Fix", "Issue may still exist after fix. Please verify manually.")
+                                    }
+                                    applyFilters()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             menu.add(aiFixItem)
 
             menu.addSeparator()
@@ -201,47 +496,68 @@ object SonarCubeToolWindowPanel {
             issueListModel.clear()
             refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Loading...")
             reportDate.text = ""
-            ApplicationManager.getApplication().executeOnPooledThread {
-                try {
-                    val config = LlmSettingsLoader.loadSonarQubeConfig(project)
-                    isMockMode = config.mockEnabled
-                    if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
-                        ApplicationManager.getApplication().invokeLater {
-                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "SonarQube not configured.")
-                            reportDate.text = ""
-                            finishLoading()
-                        }
-                        return@executeOnPooledThread
-                    }
-
-                    val result = runBlocking { SonarCubeToolWindowClient(config).load() }
-                    ApplicationManager.getApplication().invokeLater {
-                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result, { filterByType(it) }, { resetTypeFilters() }) {
-                            val action = com.intellij.openapi.actionSystem.ActionManager.getInstance()
-                                .getAction("org.openprojectx.ai.plugin.SonarQubeCoverageAction")
-                            action?.let {
-                                val event = com.intellij.openapi.actionSystem.AnActionEvent.createFromDataContext(
-                                    "SonarCubeToolWindow", null
-                                ) { dataId ->
-                                    if (com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT.`is`(dataId)) project else null
-                                }
-                                it.actionPerformed(event)
+            if (scanMode == ScanMode.LOCAL) {
+                ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Sonar Cube Local Scan", false) {
+                    override fun run(indicator: ProgressIndicator) {
+                        try {
+                            val result = SonarCubeLocalScanner.scan(project, indicator)
+                            ApplicationManager.getApplication().invokeLater {
+                                currentFileCoverages = result.fileCoverages
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result,
+                                    { filterByType(it) }, { resetTypeFilters() }) { showFileCoverageList() }
+                                reportDate.text = result.reportTimestamp ?: ""
+                                allIssues.clear()
+                                allIssues.addAll(result.issues)
+                                typeBoxes.values.forEach { it.isSelected = true }
+                                severityBoxes.values.forEach { it.isSelected = true }
+                                applyFilters()
+                                finishLoading()
+                            }
+                        } catch (ex: Exception) {
+                            ApplicationManager.getApplication().invokeLater {
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont,
+                                    "Local scan failed: ${ex.message ?: ex}", null, null)
+                                reportDate.text = ""
+                                finishLoading()
+                                Notifications.error(project, "Local Scan failed", ex.message ?: ex.toString())
                             }
                         }
-                        reportDate.text = result.reportTimestamp ?: ""
-                        allIssues.clear()
-                        allIssues.addAll(result.issues)
-                        typeBoxes.values.forEach { it.isSelected = true }
-                        severityBoxes.values.forEach { it.isSelected = true }
-                        applyFilters()
-                        finishLoading()
                     }
-                } catch (ex: Exception) {
-                    ApplicationManager.getApplication().invokeLater {
-                        refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Failed: ${ex.message ?: ex}", null, null)
-                        reportDate.text = ""
-                        finishLoading()
-                        Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
+                })
+            } else {
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    try {
+                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                        isMockMode = config.mockEnabled
+                        if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
+                            ApplicationManager.getApplication().invokeLater {
+                                refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "SonarQube not configured.")
+                                reportDate.text = ""
+                                finishLoading()
+                            }
+                            return@executeOnPooledThread
+                        }
+
+                        val result = runBlocking { SonarCubeToolWindowClient(config).load() }
+                        ApplicationManager.getApplication().invokeLater {
+                            currentFileCoverages = result.fileCoverages
+                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, result,
+                                { filterByType(it) }, { resetTypeFilters() }) { showFileCoverageList() }
+                            reportDate.text = result.reportTimestamp ?: ""
+                            allIssues.clear()
+                            allIssues.addAll(result.issues)
+                            typeBoxes.values.forEach { it.isSelected = true }
+                            severityBoxes.values.forEach { it.isSelected = true }
+                            applyFilters()
+                            finishLoading()
+                        }
+                    } catch (ex: Exception) {
+                        ApplicationManager.getApplication().invokeLater {
+                            refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, "Failed: ${ex.message ?: ex}", null, null)
+                            reportDate.text = ""
+                            finishLoading()
+                            Notifications.error(project, "SonarQube Results failed", ex.message ?: ex.toString())
+                        }
                     }
                 }
             }
@@ -297,9 +613,32 @@ object SonarCubeToolWindowPanel {
             background = bgColor
             foreground = fgColor
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            val modeCombo = JComboBox(arrayOf("Online", "Local")).apply {
+                foreground = fgColor
+                background = Color(0x11, 0x1C, 0x2F)
+                font = commonFont.deriveFont(Font.PLAIN, 11f)
+                toolTipText = "Online: fetch from SonarQube server / Local: run IntelliJ inspections"
+                addActionListener {
+                    scanMode = if (selectedItem == "Local") ScanMode.LOCAL else ScanMode.ONLINE
+                    allIssues.clear()
+                    fixedKeys.clear()
+                    issueListModel.clear()
+                    val msg = if (scanMode == ScanMode.LOCAL) {
+                        "Local scan mode. Click Refresh to run IntelliJ inspections."
+                    } else {
+                        "Online mode. Click Refresh to load configured SonarQube results."
+                    }
+                    refreshDashboard(dashboardPanel, bgColor, borderColor, commonFont, msg, null, null, null)
+                    reportDate.text = ""
+                }
+            }
             add(JPanel(BorderLayout()).apply {
                 isOpaque = false
-                add(JLabel("Sonar Cube").apply { foreground = fgColor }, BorderLayout.WEST)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false
+                    add(JLabel("Sonar Cube").apply { foreground = fgColor })
+                    add(modeCombo)
+                }, BorderLayout.WEST)
                 add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     isOpaque = false
                     add(filterCount)
@@ -314,7 +653,7 @@ object SonarCubeToolWindowPanel {
         return root
     }
 
-    private fun executeAiFix(project: Project, issue: SonarCubeIssue) {
+    private fun executeAiFix(project: Project, issue: SonarCubeIssue, onFixApplied: (() -> Unit)? = null) {
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "AI Fix: ${issue.rule}", false) {
             override fun run(indicator: ProgressIndicator) {
                 try {
@@ -346,7 +685,7 @@ object SonarCubeToolWindowPanel {
                     }
 
                     ApplicationManager.getApplication().invokeLater {
-                        handleFixResponse(project, issue, response, sourceCode)
+                        handleFixResponse(project, issue, response, sourceCode, onFixApplied)
                     }
                 } catch (ex: Exception) {
                     ApplicationManager.getApplication().invokeLater {
@@ -357,13 +696,13 @@ object SonarCubeToolWindowPanel {
         })
     }
 
-    private fun handleFixResponse(project: Project, issue: SonarCubeIssue, response: String, originalCode: String) {
+    private fun handleFixResponse(project: Project, issue: SonarCubeIssue, response: String, originalCode: String, onFixApplied: (() -> Unit)? = null) {
         val explanation = extractExplanation(response)
         val codeBlock = extractCodeBlock(response)
         if (codeBlock != null) {
             val dialog = SonarQubeFixDialog(project, issue, explanation, originalCode, codeBlock)
             if (dialog.showAndGet()) {
-                applyCodeChange(project, issue.path, codeBlock)
+                applyCodeChange(project, issue.path, codeBlock, onFixApplied)
             }
             return
         }
@@ -380,7 +719,7 @@ object SonarCubeToolWindowPanel {
                 null
             )
             if (choice >= 0 && choice < options.size) {
-                applyCodeChange(project, issue.path, options[choice].code)
+                applyCodeChange(project, issue.path, options[choice].code, onFixApplied)
             }
             return
         }
@@ -388,7 +727,7 @@ object SonarCubeToolWindowPanel {
         Messages.showInfoMessage(project, response, "AI Fix — ${issue.rule}")
     }
 
-    private fun applyCodeChange(project: Project, relativePath: String, newCode: String) {
+    private fun applyCodeChange(project: Project, relativePath: String, newCode: String, onFixApplied: (() -> Unit)? = null) {
         val basePath = project.basePath
         if (basePath.isNullOrBlank()) {
             Notifications.warn(project, "AI Fix", "Cannot determine project base path.")
@@ -404,7 +743,80 @@ object SonarCubeToolWindowPanel {
             virtualFile.setBinaryContent(newCode.toByteArray(StandardCharsets.UTF_8))
         }
         FileEditorManager.getInstance(project).openFile(virtualFile, true)
-        Notifications.info(project, "AI Fix", "Fix applied to $relativePath. Check IDE local history to revert if needed.")
+        if (onFixApplied != null) {
+            onFixApplied()
+        } else {
+            Notifications.info(project, "AI Fix", "Fix applied to $relativePath. Check IDE local history to revert if needed.")
+        }
+    }
+
+    private fun handleCoverageTestGeneration(
+        project: Project,
+        fileCoverage: SonarQubeFileCoverage,
+        sourceCode: String,
+        response: String,
+        onCoverageUpdated: (List<SonarQubeFileCoverage>) -> Unit
+    ) {
+        val sanitized = sanitizeGeneratedCode(response)
+        val codeBlock = extractCodeBlock(response)
+        val displayCode = codeBlock ?: sanitized
+
+        val sourceFileName = fileCoverage.name.removeSuffix(".java").removeSuffix(".kt")
+        val testClassName = "${sourceFileName}Test"
+        val packageHint = sourceCode.lines()
+            .firstOrNull { it.trimStart().startsWith("package ") }
+            ?.trim()?.removeSuffix(";")?.removePrefix("package ")
+        val testDir = if (fileCoverage.path.contains("/main/")) {
+            fileCoverage.path.replace("/main/", "/test/")
+                .substringBeforeLast("/")
+        } else {
+            "src/test/java/${packageHint?.replace('.', '/') ?: ""}"
+        }.trimEnd('/')
+
+        val dialog = CoverageTestGenerationDialog(
+            project, fileCoverage, testClassName, testDir, displayCode, sourceCode
+        )
+        if (dialog.showAndGet()) {
+            val outputRelativePath = "${dialog.outputPath()}/${dialog.testClassName()}.java"
+                .replace('\\', '/')
+                .trimStart('/')
+            val basePath = project.basePath
+            if (basePath.isNullOrBlank()) {
+                Notifications.warn(project, "Test Generation", "Cannot determine project base path.")
+                return
+            }
+            val outputFile = java.io.File(basePath, outputRelativePath)
+            outputFile.parentFile?.mkdirs()
+            try {
+                WriteCommandAction.runWriteCommandAction(project) {
+                    val vf = VfsUtil.findFileByIoFile(outputFile, true)
+                        ?: VfsUtil.findFileByIoFile(outputFile.parentFile!!, true)
+                            ?.createChildData(this, outputFile.name)
+                    if (vf != null) {
+                        vf.setBinaryContent(dialog.testCode().toByteArray(StandardCharsets.UTF_8))
+                    }
+                }
+                FileEditorManager.getInstance(project).openFile(
+                    VfsUtil.findFileByIoFile(outputFile, true)!!, true
+                )
+                Notifications.info(project, "Test Generation", "Test file created: $outputRelativePath")
+
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    try {
+                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                        if (config.serverUrl.isNotBlank() && config.projectKey.isNotBlank()) {
+                            val updated = runBlocking { SonarCubeToolWindowClient(config).load() }
+                            ApplicationManager.getApplication().invokeLater {
+                                onCoverageUpdated(updated.fileCoverages)
+                                Notifications.info(project, "Coverage Report", "Coverage data refreshed.")
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }
+            } catch (ex: Exception) {
+                Notifications.error(project, "Test Generation", "Failed to write test file: ${ex.message}")
+            }
+        }
     }
 
     private fun extractExplanation(response: String): String {
@@ -417,6 +829,12 @@ object SonarCubeToolWindowPanel {
         val file = java.io.File(basePath, relativePath)
         if (!file.exists() || !file.isFile) return null
         return file.readText(Charsets.UTF_8)
+    }
+
+    private fun sanitizeGeneratedCode(raw: String): String {
+        val trimmed = raw.trim()
+        val withoutStartFence = trimmed.replaceFirst(Regex("^```(?:\\w+)?\\s*\\n?"), "")
+        return withoutStartFence.replaceFirst(Regex("\\n?```\\s*$"), "").trim()
     }
 
     private fun extractCodeBlock(response: String): String? {
@@ -458,8 +876,6 @@ object SonarCubeToolWindowPanel {
         onCoverageClick: (() -> Unit)? = null
     ) {
         container.removeAll()
-        container.background = bgColor
-        container.layout = BorderLayout(0, 0)
 
         if (result is String) {
             val label = JLabel(result).apply {
@@ -467,7 +883,12 @@ object SonarCubeToolWindowPanel {
                 isOpaque = false
                 horizontalAlignment = SwingConstants.CENTER
             }
-            container.add(label, BorderLayout.CENTER)
+            val panel = JPanel(BorderLayout(0, 0)).apply {
+                isOpaque = false
+                add(label, BorderLayout.CENTER)
+            }
+            container.add(panel, "metrics")
+            (container.layout as CardLayout).show(container, "metrics")
             container.revalidate()
             container.repaint()
             return
@@ -490,7 +911,8 @@ object SonarCubeToolWindowPanel {
         cards.add(metricCard("Code Smells", r.codeSmells?.toString() ?: "—", "#FFC107", r.codeSmells != null && r.codeSmells > 0, valueFont, cardFont, borderColor) { onFilterByType?.invoke("CODE_SMELL") })
         cards.add(metricCard("Open Issues", r.issues.size.toString(), "#E0E0E0", r.issues.isNotEmpty(), valueFont, cardFont, borderColor) { onResetFilters?.invoke() })
 
-        container.add(cards, BorderLayout.CENTER)
+        container.add(cards, "metrics")
+        (container.layout as CardLayout).show(container, "metrics")
         container.revalidate()
         container.repaint()
     }
@@ -760,6 +1182,76 @@ object SonarCubeToolWindowPanel {
     }
 }
 
+private class CoverageTestGenerationDialog(
+    project: Project,
+    private val fileCoverage: SonarQubeFileCoverage,
+    private val testClassName: String,
+    private val testDir: String,
+    private val generatedCode: String,
+    private val originalSource: String
+) : DialogWrapper(project) {
+
+    private val outputDirField = JTextField(testDir, 50)
+    private val classNameField = JTextField(testClassName, 30)
+    private val codeArea = JTextArea(generatedCode, 20, 70).apply {
+        isEditable = true
+        lineWrap = false
+        font = java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12)
+        background = Color(0x0D, 0x11, 0x17)
+        foreground = Color(0xCC, 0xCC, 0xCC)
+        caretColor = Color(0xCC, 0xCC, 0xCC)
+    }
+
+    init {
+        title = "Generate Tests — ${fileCoverage.name}"
+        init()
+        myOKAction.putValue(javax.swing.Action.NAME, "Create Test File")
+    }
+
+    override fun createCenterPanel(): JComponent = JPanel(java.awt.BorderLayout(0, 10)).apply {
+        add(JPanel(java.awt.BorderLayout(8, 0)).apply {
+            add(JLabel("<html><b>${fileCoverage.path}</b>&nbsp;&nbsp;|&nbsp;&nbsp;Coverage: ${fileCoverage.coverage?.let { String.format(Locale.US, "%.2f%%", it) } ?: "—"}&nbsp;&nbsp;|&nbsp;&nbsp;Uncovered: ${fileCoverage.uncoveredLines ?: 0} lines</html>"), java.awt.BorderLayout.NORTH)
+        }, java.awt.BorderLayout.NORTH)
+
+        val configPanel = JPanel(java.awt.GridBagLayout()).apply {
+            border = javax.swing.BorderFactory.createTitledBorder("Output Settings")
+            val gbc = java.awt.GridBagConstraints().apply {
+                fill = java.awt.GridBagConstraints.HORIZONTAL
+                insets = java.awt.Insets(4, 4, 4, 4)
+            }
+            gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0.0
+            add(JLabel("Output Directory:"), gbc)
+            gbc.gridx = 1; gbc.weightx = 1.0
+            add(outputDirField, gbc)
+            gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.0
+            add(JLabel("Test Class Name:"), gbc)
+            gbc.gridx = 1; gbc.weightx = 1.0
+            add(classNameField, gbc)
+        }
+
+        val codePanel = JPanel(java.awt.BorderLayout()).apply {
+            border = javax.swing.BorderFactory.createTitledBorder("Generated Test Code (edit if needed)")
+            add(com.intellij.ui.components.JBScrollPane(codeArea).apply {
+                preferredSize = java.awt.Dimension(700, 340)
+                viewport.background = Color(0x0D, 0x11, 0x17)
+            }, java.awt.BorderLayout.CENTER)
+        }
+
+        val centerPanel = JPanel().apply {
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+            add(configPanel)
+            add(javax.swing.Box.createVerticalStrut(8))
+            add(codePanel)
+        }
+        add(centerPanel, java.awt.BorderLayout.CENTER)
+        preferredSize = java.awt.Dimension(750, 520)
+    }
+
+    fun outputPath(): String = outputDirField.text.trim().replace('\\', '/').trimEnd('/')
+    fun testClassName(): String = classNameField.text.trim().removeSuffix(".java")
+    fun testCode(): String = codeArea.text
+}
+
 private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
     private val authHeader = SonarQubeAuth.authorizationHeader(config)
 
@@ -776,12 +1268,29 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
             val measures: SonarCubeMeasuresResponse = client.get(measuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
+            val fileMeasuresUrl = "$baseUrl/api/measures/component_tree?component=$projectKey&metricKeys=coverage,uncovered_lines&qualifiers=FIL&ps=500"
+            HttpClients.logCurl("GET", fileMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
+            val fileTree = runCatching {
+                val resp: SonarCubeComponentTreeResponse = client.get(fileMeasuresUrl) {
+                    authHeader?.let { header(HttpHeaders.Authorization, it) }
+                }.body()
+                resp
+            }.getOrDefault(SonarCubeComponentTreeResponse())
             val issuesUrl = "$baseUrl/api/issues/search?componentKeys=$projectKey&resolved=false&ps=100&s=SEVERITY&asc=false"
             HttpClients.logCurl("GET", issuesUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
             val issues: SonarCubeIssuesResponse = client.get(issuesUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }.body()
             val now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            val fileCoverages = fileTree.components.map { component ->
+                SonarQubeFileCoverage(
+                    key = component.key,
+                    path = component.path ?: component.key.substringAfter("$projectKey:"),
+                    name = component.name,
+                    coverage = component.measureValue("coverage")?.toDoubleOrNull(),
+                    uncoveredLines = component.measureValue("uncovered_lines")?.toIntOrNull()
+                )
+            }.sortedBy { it.coverage ?: 100.0 }
             return SonarCubeResult(
                 projectKey = config.projectKey,
                 serverUrl = config.serverUrl,
@@ -793,7 +1302,8 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
                 vulnerabilities = measures.component.measureValue("vulnerabilities")?.toIntOrNull(),
                 codeSmells = measures.component.measureValue("code_smells")?.toIntOrNull(),
                 issues = issues.issues.map { it.toDomain(config.projectKey) },
-                reportTimestamp = now
+                reportTimestamp = now,
+                fileCoverages = fileCoverages
             )
         } finally {
             client.close()
@@ -814,7 +1324,8 @@ internal data class SonarCubeResult(
     val vulnerabilities: Int?,
     val codeSmells: Int?,
     val issues: List<SonarCubeIssue>,
-    val reportTimestamp: String? = null
+    val reportTimestamp: String? = null,
+    val fileCoverages: List<SonarQubeFileCoverage> = emptyList()
 )
 
 internal data class SonarCubeIssue(
@@ -837,6 +1348,7 @@ private data class SonarCubeMeasuresResponse(val component: SonarCubeComponent)
 private data class SonarCubeComponent(
     val key: String,
     val name: String = key,
+    val path: String? = null,
     val measures: List<SonarCubeMeasure> = emptyList()
 ) {
     fun measureValue(metric: String): String? = measures.firstOrNull { it.metric == metric }?.value
@@ -844,6 +1356,9 @@ private data class SonarCubeComponent(
 
 @Serializable
 private data class SonarCubeMeasure(val metric: String, val value: String? = null)
+
+@Serializable
+private data class SonarCubeComponentTreeResponse(val components: List<SonarCubeComponent> = emptyList())
 
 @Serializable
 private data class SonarCubeIssuesResponse(val issues: List<SonarCubeIssueDto> = emptyList())

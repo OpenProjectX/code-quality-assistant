@@ -95,6 +95,35 @@ object PromptBuilder {
         ))
     }
 
+    fun buildTestForUncoveredFile(
+        filePath: String,
+        fileName: String,
+        sourceCode: String,
+        uncoveredLines: Int,
+        coverage: Double?,
+        generationTemplate: GenerationPromptTemplate
+    ): String {
+        val coverageText = coverage?.let { String.format("%.2f%%", it) } ?: "unknown"
+        val packageHint = sourceCode.lines()
+            .firstOrNull { it.trimStart().startsWith("package ") }
+            ?.trim()?.removeSuffix(";")?.removePrefix("package ")
+        val qualifiedClassName = buildString {
+            if (packageHint != null) append(packageHint).append('.')
+            append(fileName.removeSuffix(".java").removeSuffix(".kt"))
+        }
+
+        val rules = generationTemplate.restAssuredRules.ifBlank { DEFAULT_JAVA_METHOD_RULES }
+        val populatedRules = render(rules, mapOf("qualifiedClassName" to qualifiedClassName))
+
+        return render(generationTemplate.wrapper.ifBlank { DEFAULT_WRAPPER_TEMPLATE }, mapOf(
+            "contractType" to "Java Source Methods",
+            "baseUrlHint" to "not applicable",
+            "outputNotes" to "File: $filePath\nCurrent coverage: $coverageText\nUncovered lines: $uncoveredLines\nGenerate tests to improve coverage of uncovered code paths.",
+            "frameworkRules" to populatedRules,
+            "contractText" to sourceCode
+        ))
+    }
+
     private fun render(template: String, variables: Map<String, String>): String {
         var result = template.trimIndent()
         variables.forEach { (key, value) ->

@@ -452,6 +452,8 @@ object LlmSettingsLoader {
         val remoteRepo = prompts.map("remoteRepo")
         val suppressedGlobalPrompts = parseSuppressedGlobalPrompts(prompts)
         val promptGeneration = prompts["generation"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val remoteRepoConfig = parseBitbucketPromptRepoConfig(remoteRepo)
+        val globalPromptsByCategory = loadGlobalPrompts(project, remoteRepoConfig)
 
         return AiTestSettingsModel(
             llmProvider = llm.string("provider").ifBlank { "openai-compatible" },
@@ -482,10 +484,7 @@ object LlmSettingsLoader {
             branchDiffPrompt = prompts.string("branchDiffSummary").ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY },
             generationPromptProfileDefault = prompts.map("generationProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             generationPromptProfilesYaml = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "test",
-                    parseBitbucketPromptRepoConfig(remoteRepo),
+                applyGlobalProfilesPreloaded("test", globalPromptsByCategory,
                     parsePromptProfileItems(
                         prompts.map("generationProfiles").map("items"),
                         AiPromptDefaults.GENERATION_WRAPPER,
@@ -496,10 +495,7 @@ object LlmSettingsLoader {
             ),
             commitPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             commitPromptProfilesYaml = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "commit",
-                    parseBitbucketPromptRepoConfig(remoteRepo),
+                applyGlobalProfilesPreloaded("commit", globalPromptsByCategory,
                     parsePromptProfileItems(
                     prompts.map("commitMessageProfiles").map("items"),
                     AiPromptDefaults.COMMIT_MESSAGE,
@@ -510,10 +506,7 @@ object LlmSettingsLoader {
             ),
             branchDiffPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
             branchDiffPromptProfilesYaml = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "branchDiff",
-                    parseBitbucketPromptRepoConfig(remoteRepo),
+                applyGlobalProfilesPreloaded("branchDiff", globalPromptsByCategory,
                     parsePromptProfileItems(
                     prompts.map("branchDiffSummaryProfiles").map("items"),
                     AiPromptDefaults.BRANCH_DIFF_SUMMARY,
@@ -524,10 +517,7 @@ object LlmSettingsLoader {
             ),
             codeGeneratePromptProfileDefault = prompts.map("codeGenerateProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeGeneratePromptProfilesYaml = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "codeGenerate",
-                    parseBitbucketPromptRepoConfig(remoteRepo),
+                applyGlobalProfilesPreloaded("codeGenerate", globalPromptsByCategory,
                     parsePromptProfileItems(
                         prompts.map("codeGenerateProfiles").map("items"),
                         AiPromptDefaults.CODE_GENERATE,
@@ -538,10 +528,7 @@ object LlmSettingsLoader {
             ),
             codeReviewPromptProfileDefault = prompts.map("codeReviewProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeReviewPromptProfilesYaml = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "codeReview",
-                    parseBitbucketPromptRepoConfig(remoteRepo),
+                applyGlobalProfilesPreloaded("codeReview", globalPromptsByCategory,
                     parsePromptProfileItems(
                         prompts.map("codeReviewProfiles").map("items"),
                         AiPromptDefaults.CODE_REVIEW,
@@ -567,6 +554,7 @@ object LlmSettingsLoader {
             sonarQubeTargetCoverage = sonarQube.string("targetCoverage").ifBlank { "80" },
             sonarQubeMaxFiles = sonarQube.string("maxFiles").ifBlank { "5" },
             sonarQubeMockEnabled = sonarQube["mockEnabled"] as? Boolean ?: false,
+            sonarQubeLocalScanEnabled = sonarQube["localScanEnabled"] as? Boolean ?: false,
             suppressedGlobalPrompts = suppressedGlobalPrompts,
             skillProfilesYaml = dumpPromptProfilesYaml(
                 parsePromptProfileItems(
@@ -694,7 +682,8 @@ object LlmSettingsLoader {
             passwordEnv = sonar.string("passwordEnv"),
             targetCoverage = sonar.double("targetCoverage") ?: 80.0,
             maxFiles = sonar.int("maxFiles") ?: 5,
-            mockEnabled = sonar["mockEnabled"] as? Boolean ?: false
+            mockEnabled = sonar["mockEnabled"] as? Boolean ?: false,
+            localScanEnabled = sonar["localScanEnabled"] as? Boolean ?: false
         )
     }
 
@@ -882,6 +871,7 @@ object LlmSettingsLoader {
         put("targetCoverage", model.sonarQubeTargetCoverage.toDoubleOrNull() ?: 80.0)
         put("maxFiles", model.sonarQubeMaxFiles.toIntOrNull() ?: 5)
         put("mockEnabled", model.sonarQubeMockEnabled)
+        put("localScanEnabled", model.sonarQubeLocalScanEnabled)
     }
 
     private fun buildPromptsMap(project: Project, existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
@@ -894,6 +884,7 @@ object LlmSettingsLoader {
             username = model.bitbucketPromptRepoUsername,
             password = model.bitbucketPromptRepoPassword
         )
+        val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)
         prompts["generation"] = linkedMapOf<String, Any>(
             "wrapper" to model.generationPromptWrapper,
             "restAssuredRules" to model.generationPromptRestAssured,
@@ -905,10 +896,7 @@ object LlmSettingsLoader {
         prompts["generationProfiles"] = buildPromptProfileMap(
             selected = model.generationPromptProfileDefault,
             yamlText = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "test",
-                    remoteRepoConfig,
+                applyGlobalProfilesPreloaded("test", globalPrompts,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.generationPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.generationPromptWrapper,
@@ -922,10 +910,7 @@ object LlmSettingsLoader {
         prompts["commitMessageProfiles"] = buildPromptProfileMap(
             selected = GLOBAL_DIFF_REVIEW_PROFILE,
             yamlText = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "commit",
-                    remoteRepoConfig,
+                applyGlobalProfilesPreloaded("commit", globalPrompts,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.commitPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.commitPrompt,
@@ -939,10 +924,7 @@ object LlmSettingsLoader {
         prompts["branchDiffSummaryProfiles"] = buildPromptProfileMap(
             selected = GLOBAL_DIFF_REVIEW_PROFILE,
             yamlText = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "branchDiff",
-                    remoteRepoConfig,
+                applyGlobalProfilesPreloaded("branchDiff", globalPrompts,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.branchDiffPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         model.branchDiffPrompt,
@@ -956,10 +938,7 @@ object LlmSettingsLoader {
         prompts["codeGenerateProfiles"] = buildPromptProfileMap(
             selected = model.codeGeneratePromptProfileDefault,
             yamlText = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "codeGenerate",
-                    remoteRepoConfig,
+                applyGlobalProfilesPreloaded("codeGenerate", globalPrompts,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeGeneratePromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         AiPromptDefaults.CODE_GENERATE,
@@ -973,10 +952,7 @@ object LlmSettingsLoader {
         prompts["codeReviewProfiles"] = buildPromptProfileMap(
             selected = model.codeReviewPromptProfileDefault,
             yamlText = dumpPromptProfilesYaml(
-                applyGlobalProfiles(
-                    project,
-                    "codeReview",
-                    remoteRepoConfig,
+                applyGlobalProfilesPreloaded("codeReview", globalPrompts,
                     parsePromptProfileItems(
                         Yaml().load<Any?>(model.codeReviewPromptProfilesYaml) as? Map<*, *> ?: emptyMap<Any?, Any?>(),
                         AiPromptDefaults.CODE_REVIEW,
@@ -1152,6 +1128,21 @@ object LlmSettingsLoader {
     ): Map<String, String> {
         val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)[category].orEmpty()
             .filterKeys { !isPromptGloballySuppressed(category, it, suppressedGlobalPrompts) }
+        return mergeGlobalProfiles(items, globalPrompts)
+    }
+
+    private fun applyGlobalProfilesPreloaded(
+        category: String,
+        globalPromptsByCategory: Map<String, Map<String, String>>,
+        items: Map<String, String>,
+        suppressedGlobalPrompts: Collection<String> = emptyList()
+    ): Map<String, String> {
+        val globalPrompts = globalPromptsByCategory[category].orEmpty()
+            .filterKeys { !isPromptGloballySuppressed(category, it, suppressedGlobalPrompts) }
+        return mergeGlobalProfiles(items, globalPrompts)
+    }
+
+    private fun mergeGlobalProfiles(items: Map<String, String>, globalPrompts: Map<String, String>): Map<String, String> {
         if (globalPrompts.isEmpty()) return items
         val normalized = linkedMapOf<String, String>()
         globalPrompts.forEach { (name, content) ->
