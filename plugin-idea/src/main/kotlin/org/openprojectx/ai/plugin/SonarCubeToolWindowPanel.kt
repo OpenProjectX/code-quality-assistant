@@ -527,7 +527,7 @@ object SonarCubeToolWindowPanel {
             } else {
                 ApplicationManager.getApplication().executeOnPooledThread {
                     try {
-                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                        val config = SonarQubeProjectSettings.getInstance(project).resolveConfig()
                         isMockMode = config.mockEnabled
                         if (config.serverUrl.isBlank() || config.projectKey.isBlank()) {
                             ApplicationManager.getApplication().invokeLater {
@@ -613,6 +613,27 @@ object SonarCubeToolWindowPanel {
             background = bgColor
             foreground = fgColor
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            val projectKeyField = JTextField(28).apply {
+                val initialKey = SonarQubeProjectSettings.getInstance(project).resolveConfig().projectKey
+                text = initialKey
+                foreground = fgColor
+                background = Color(0x11, 0x1C, 0x2F)
+                font = commonFont.deriveFont(Font.PLAIN, 11f)
+                toolTipText = "SonarQube project key"
+                addActionListener { // Enter key
+                    SonarQubeProjectSettings.getInstance(project).projectKey = text.trim()
+                    if (scanMode == ScanMode.ONLINE) load()
+                }
+                addFocusListener(object : java.awt.event.FocusAdapter() {
+                    override fun focusLost(e: java.awt.event.FocusEvent?) {
+                        val saved = SonarQubeProjectSettings.getInstance(project).projectKey
+                        if (text.trim() != saved) {
+                            SonarQubeProjectSettings.getInstance(project).projectKey = text.trim()
+                            if (scanMode == ScanMode.ONLINE) load()
+                        }
+                    }
+                })
+            }
             val modeCombo = JComboBox(arrayOf("Online", "Local")).apply {
                 foreground = fgColor
                 background = Color(0x11, 0x1C, 0x2F)
@@ -620,6 +641,7 @@ object SonarCubeToolWindowPanel {
                 toolTipText = "Online: fetch from SonarQube server / Local: run IntelliJ inspections"
                 addActionListener {
                     scanMode = if (selectedItem == "Local") ScanMode.LOCAL else ScanMode.ONLINE
+                    projectKeyField.isEnabled = scanMode == ScanMode.ONLINE
                     allIssues.clear()
                     fixedKeys.clear()
                     issueListModel.clear()
@@ -645,6 +667,14 @@ object SonarCubeToolWindowPanel {
                     add(reportDate)
                     add(refreshButton)
                 }, BorderLayout.EAST)
+                add(JPanel(FlowLayout(FlowLayout.CENTER, 6, 0)).apply {
+                    isOpaque = false
+                    add(JLabel("Project Key:").apply {
+                        foreground = Color(0x94, 0xA3, 0xB8)
+                        font = commonFont.deriveFont(Font.PLAIN, 11f)
+                    })
+                    add(projectKeyField)
+                }, BorderLayout.CENTER)
             }, BorderLayout.NORTH)
             add(filterPanel, BorderLayout.CENTER)
         }
@@ -803,7 +833,7 @@ object SonarCubeToolWindowPanel {
 
                 ApplicationManager.getApplication().executeOnPooledThread {
                     try {
-                        val config = LlmSettingsLoader.loadSonarQubeConfig(project)
+                        val config = SonarQubeProjectSettings.getInstance(project).resolveConfig()
                         if (config.serverUrl.isNotBlank() && config.projectKey.isNotBlank()) {
                             val updated = runBlocking { SonarCubeToolWindowClient(config).load() }
                             ApplicationManager.getApplication().invokeLater {

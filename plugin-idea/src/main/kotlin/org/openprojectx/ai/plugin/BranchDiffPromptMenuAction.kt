@@ -9,6 +9,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.vcs.log.VcsLogDataKeys
 import git4idea.repo.GitRepositoryManager
 
@@ -78,6 +79,7 @@ private class BranchDiffByPromptAction(
                             sourceBranch = sourceBranch,
                             summary = summary
                         )
+                        ToolWindowManager.getInstance(project).getToolWindow("AI Context Box")?.show(null)
                         Notifications.info(project, "Branch Diff Summary", "Summary updated in AI Context Box > Branch Analysis.")
                     }
                 } catch (ex: Exception) {
