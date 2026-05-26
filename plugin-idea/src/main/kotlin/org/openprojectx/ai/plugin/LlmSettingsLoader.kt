@@ -163,7 +163,8 @@ object LlmSettingsLoader {
                             repoSlug = repo.repoSlug,
                             path = configPath,
                             branch = remoteRepo.branch,
-                            config = remoteRepo
+                            config = remoteRepo,
+                            apiBaseUrl = repo.apiBaseUrl
                         )
                     }
                     GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(
@@ -1359,7 +1360,7 @@ object LlmSettingsLoader {
                 GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
                     loadBitbucketPromptFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
                 } else {
-                    loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                    loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config, repo.apiBaseUrl)
                 }
                 GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
                 else -> emptyList()
@@ -1369,7 +1370,7 @@ object LlmSettingsLoader {
                     GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
                         loadBitbucketPromptRawFromBaseUrl(project, directBitbucketRawBaseUrl, path, config.branch, config)
                     } else {
-                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config, repo.apiBaseUrl)
                     }
                     GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
                     else -> return@mapNotNull null
@@ -1395,7 +1396,7 @@ object LlmSettingsLoader {
             GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
                 loadBitbucketPromptFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
             } else {
-                loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                loadBitbucketPromptFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config, repo.apiBaseUrl)
             }
             GitHostingProviderType.GITHUB -> loadGitHubPromptFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
             else -> emptyList()
@@ -1494,10 +1495,11 @@ object LlmSettingsLoader {
         projectKey: String,
         repoSlug: String,
         branch: String,
-        config: BitbucketPromptRepoConfig
+        config: BitbucketPromptRepoConfig,
+        apiBaseUrl: String = "https://$host"
     ): List<String> {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
-        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
+        val url = "${apiBaseUrl.trimEnd('/')}/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
         val body = bitbucketGet(project, url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
         return values.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -1511,11 +1513,12 @@ object LlmSettingsLoader {
         repoSlug: String,
         path: String,
         branch: String,
-        config: BitbucketPromptRepoConfig
+        config: BitbucketPromptRepoConfig,
+        apiBaseUrl: String = "https://$host"
     ): String {
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, StandardCharsets.UTF_8) }
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
-        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
+        val url = "${apiBaseUrl.trimEnd('/')}/rest/api/1.0/projects/$projectKey/repos/$repoSlug/raw/$encodedPath?at=$encodedBranch"
         return bitbucketGet(project, url, config)
     }
 
@@ -1550,7 +1553,37 @@ object LlmSettingsLoader {
     }
 
     private fun parseDirectBitbucketRawBaseUrl(repoUrl: String): String? {
-        return null
+        val uri = runCatching { URI(repoUrl) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val host = uri.host ?: return null
+
+        val segments = uri.path.trim('/').split('/').filter { it.isNotBlank() }
+        val projectsIndex = segments.indexOfFirst { it.equals("projects", ignoreCase = true) }
+        if (projectsIndex < 0 || segments.size <= projectsIndex + 1) return null
+
+        val reposIndex = segments.indexOfFirst { it.equals("repos", ignoreCase = true) }
+        if (reposIndex <= projectsIndex + 1 || segments.size <= reposIndex + 1) return null
+
+        val projectKey = segments[projectsIndex + 1]
+        val repoSlug = segments[reposIndex + 1]
+        val beforeProjects = segments.take(projectsIndex)
+
+        val hostPort = if (uri.port > 0) "${uri.host}:${uri.port}" else host
+        val base = "$scheme://$hostPort"
+
+        val prefix = if (beforeProjects.size >= 3 &&
+            beforeProjects[beforeProjects.size - 3].equals("rest", ignoreCase = true) &&
+            beforeProjects[beforeProjects.size - 2].equals("api", ignoreCase = true) &&
+            beforeProjects.last().matches(Regex("""\d+\.\d+"""))
+        ) {
+            beforeProjects.joinToString("/")
+        } else {
+            val joined = beforeProjects.joinToString("/")
+            if (joined.isEmpty()) "rest/api/1.0" else "$joined/rest/api/1.0"
+        }
+
+        return "$base/$prefix/projects/$projectKey/repos/$repoSlug/raw"
     }
 
     private fun loadGitHubPromptRaw(
@@ -1801,7 +1834,7 @@ object LlmSettingsLoader {
                 GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
                     loadBitbucketSkillFilePathsFromRawBaseUrl(project, directBitbucketRawBaseUrl, config.branch, config)
                 } else {
-                    loadBitbucketSkillFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config)
+                    loadBitbucketSkillFilePaths(project, repo.host, repo.projectKey, repo.repoSlug, config.branch, config, repo.apiBaseUrl)
                 }
                 GitHostingProviderType.GITHUB -> loadGitHubSkillFilePaths(repo.host, repo.projectKey, repo.repoSlug, config.branch, config.token)
                 else -> emptyList()
@@ -1811,7 +1844,7 @@ object LlmSettingsLoader {
                     GitHostingProviderType.BITBUCKET -> if (directBitbucketRawBaseUrl != null) {
                         loadBitbucketPromptRawFromBaseUrl(project, directBitbucketRawBaseUrl, path, config.branch, config)
                     } else {
-                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config)
+                        loadBitbucketPromptRaw(project, repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config, repo.apiBaseUrl)
                     }
                     GitHostingProviderType.GITHUB -> loadGitHubPromptRaw(repo.host, repo.projectKey, repo.repoSlug, path, config.branch, config.token)
                     else -> return@mapNotNull null
@@ -1843,10 +1876,11 @@ object LlmSettingsLoader {
 
     private fun loadBitbucketSkillFilePaths(
         project: Project, host: String, projectKey: String, repoSlug: String,
-        branch: String, config: BitbucketPromptRepoConfig
+        branch: String, config: BitbucketPromptRepoConfig,
+        apiBaseUrl: String = "https://$host"
     ): List<String> {
         val encodedBranch = URLEncoder.encode("refs/heads/$branch", StandardCharsets.UTF_8)
-        val url = "https://$host/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
+        val url = "${apiBaseUrl.trimEnd('/')}/rest/api/1.0/projects/$projectKey/repos/$repoSlug/files?at=$encodedBranch&limit=1000"
         val body = bitbucketGet(project, url, config)
         val values = json.parseToJsonElement(body).jsonObject["values"]?.jsonArray ?: return emptyList()
         return values.mapNotNull { it.jsonPrimitive.contentOrNull }

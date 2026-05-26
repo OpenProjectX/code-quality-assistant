@@ -41,7 +41,7 @@ class SonarQubeCoverageAction : AnAction("SonarQube Coverage"), DumbAware {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val config = runCatching { LlmSettingsLoader.loadConfig(project).sonarQube }
+        val config = runCatching { SonarQubeProjectSettings.getInstance(project).resolveConfig() }
             .getOrElse { SonarQubeConfig() }
         val dialog = SonarQubeCoverageDialog(project, config)
         if (!dialog.showAndGet()) return

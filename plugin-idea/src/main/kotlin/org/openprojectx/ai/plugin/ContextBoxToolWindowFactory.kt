@@ -25,6 +25,8 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
@@ -37,7 +39,10 @@ import javax.swing.JTextField
 import javax.swing.JTextArea
 import javax.swing.JSplitPane
 import javax.swing.ListSelectionModel
+import javax.swing.SwingConstants
 import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.UIManager
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
@@ -52,111 +57,250 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val commonFont = UIManager.getFont("Label.font")
             ?.deriveFont(Font.PLAIN, 13f)
             ?: Font("SansSerif", Font.PLAIN, 13)
-        val bgColor = Color(0x0F, 0x17, 0x2A)
-        val fgColor = Color(0xE5, 0xED, 0xF7)
-        val borderColor = Color(0x2A, 0x3A, 0x52)
+        val bgColor = Color(0x0B, 0x14, 0x19)
+        val fgColor = Color(0xE9, 0xED, 0xEF)
+        val borderColor = Color(0x2A, 0x37, 0x42)
 
-        val resultArea = JTextArea().apply {
-            isEditable = false
-            lineWrap = true
-            wrapStyleWord = true
-            font = commonFont
+        val inputColor = Color(0x1A, 0x25, 0x2F)
+        val userBubbleColor = Color(0xD9, 0xFD, 0xD3)
+        val userTextColor = Color(0x11, 0x1B, 0x21)
+        val assistantBubbleColor = Color(0xFF, 0xFF, 0xFF)
+        val assistantTextColor = Color(0x11, 0x1B, 0x21)
+        val systemBubbleColor = Color(0x1A, 0x25, 0x2F)
+        val systemAccentColor = Color(0x00, 0xA8, 0x84)
+
+        val chatFont = Font("Segoe UI", Font.PLAIN, 14)
+        val bubbleColumns = 36
+
+        val messageListPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
             background = bgColor
+        }
+        val messageScrollPane = JBScrollPane(messageListPanel).apply {
+            viewport.background = bgColor
+            background = bgColor
+            border = BorderFactory.createLineBorder(borderColor)
+            verticalScrollBar.unitIncrement = 16
+        }
+        val chatInputField = JTextField().apply {
+            background = inputColor
             foreground = fgColor
             caretColor = fgColor
-            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
-        }
-        val extraRequirementField = JTextField().apply {
-            background = Color.WHITE
-            foreground = Color.BLACK
-            border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
-            toolTipText = "Enter extra requirement and click Send"
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(borderColor),
+                BorderFactory.createEmptyBorder(8, 10, 8, 10)
+            )
+            toolTipText = "Type a message and press Enter"
         }
         val sendButton = JButton("Send")
         val clearButton = JButton("Clear")
 
-        fun styledScrollPane(component: java.awt.Component): JBScrollPane =
-            JBScrollPane(component).apply {
-                viewport.background = bgColor
-                background = bgColor
-                border = BorderFactory.createLineBorder(borderColor)
+        fun buildFollowUpPrompt(snapshot: ContextBoxStateService.Snapshot, userInput: String): String {
+            val recent = snapshot.history.takeLast(6)
+            val contextLines = recent.joinToString("\n") { msg ->
+                val roleTag = when (msg.role) {
+                    ContextBoxStateService.ChatMessage.Role.USER -> "User"
+                    ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "Assistant"
+                    ContextBoxStateService.ChatMessage.Role.SYSTEM -> "System"
+                }
+                "[$roleTag]: ${msg.content.take(500)}"
             }
-
-        fun buildFollowUpPrompt(snapshot: ContextBoxStateService.Snapshot, extraRequirement: String): String {
             return """
-                You are continuing from previous AI Context Box output.
+                You are a helpful AI assistant in an IDE context box.
 
-                Previous latest result:
-                ${snapshot.latestResult}
+                Recent conversation:
+                $contextLines
 
-                Extra requirement:
-                $extraRequirement
+                User: $userInput
 
-                Provide an updated response only.
-            """.trimIndent()
+                Assistant:""".trimIndent()
         }
 
-        val panel = JPanel(BorderLayout()).apply {
-            add(JPanel(BorderLayout()).apply {
-                isOpaque = false
-                add(JLabel("Context History"), BorderLayout.WEST)
-                add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
-                    isOpaque = false
-                    add(clearButton)
-                }, BorderLayout.EAST)
+        fun calculateRows(text: String, cols: Int): Int {
+            return text.lines().sumOf { line ->
+                if (line.isEmpty()) 1 else (line.length + cols - 1) / cols
+            }.coerceIn(1, 24) + 1
+        }
+
+        fun createBubble(msg: ContextBoxStateService.ChatMessage): JPanel {
+            val isUser = msg.role == ContextBoxStateService.ChatMessage.Role.USER
+            val isAssistant = msg.role == ContextBoxStateService.ChatMessage.Role.ASSISTANT
+            val bubbleBg = when (msg.role) {
+                ContextBoxStateService.ChatMessage.Role.USER -> userBubbleColor
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> assistantBubbleColor
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> systemBubbleColor
+            }
+            val bubbleFg = when (msg.role) {
+                ContextBoxStateService.ChatMessage.Role.USER -> userTextColor
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> assistantTextColor
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> fgColor
+            }
+            val roleLabel = when (msg.role) {
+                ContextBoxStateService.ChatMessage.Role.USER -> "You"
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "AI"
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> msg.typeLabel.ifBlank { "System" }
+            }
+            val roleColor = when (msg.role) {
+                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x00, 0xA8, 0x84)
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0x54, 0x65, 0x6F)
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> systemAccentColor
+            }
+            val timestampColor = when (msg.role) {
+                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x86, 0xBE, 0x9E)
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0xA0, 0xA8, 0xAF)
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> Color(0x66, 0x77, 0x81)
+            }
+
+            val contentArea = JTextArea().apply {
+                text = msg.content
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                columns = bubbleColumns
+                rows = calculateRows(msg.content, bubbleColumns)
+                font = chatFont
+                background = bubbleBg
+                foreground = bubbleFg
+                caretColor = bubbleFg
                 border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
-            }, BorderLayout.NORTH)
-            add(styledScrollPane(resultArea), BorderLayout.CENTER)
-            add(JPanel(BorderLayout(8, 0)).apply {
-                border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
-                add(extraRequirementField, BorderLayout.CENTER)
-                add(sendButton, BorderLayout.EAST)
-                isOpaque = false
-            }, BorderLayout.SOUTH)
-            background = bgColor
-            foreground = fgColor
+            }
+
+            val inner = JPanel(BorderLayout(0, 3)).apply {
+                background = bubbleBg
+                isOpaque = true
+                val header = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false
+                    add(JLabel(roleLabel).apply {
+                        foreground = roleColor
+                        font = chatFont.deriveFont(Font.BOLD, 11f)
+                    })
+                    add(JLabel("  ${msg.formattedTime}").apply {
+                        foreground = timestampColor
+                        font = chatFont.deriveFont(Font.PLAIN, 10f)
+                    })
+                }
+                add(header, BorderLayout.NORTH)
+                add(contentArea, BorderLayout.CENTER)
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createEmptyBorder(6, 10, 6, 10),
+                    BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(
+                            when {
+                                isAssistant -> Color(0xE0, 0xE0, 0xE0)
+                                isUser -> Color(0xC7, 0xEB, 0xC1)
+                                else -> bubbleBg.brighter()
+                            },
+                            1
+                        ),
+                        BorderFactory.createEmptyBorder(0, 0, 0, 0)
+                    )
+                )
+            }
+
+            val maxBubbleWidth = bubbleColumns * chatFont.size + 40
+            val outer = JPanel(BorderLayout()).apply {
+                background = bgColor
+                isOpaque = true
+                val spacerWest = if (isUser) JPanel().apply {
+                    isOpaque = false; minimumSize = Dimension(40, 0)
+                } else null
+                val spacerEast = if (isUser) null else JPanel().apply {
+                    isOpaque = false; minimumSize = Dimension(40, 0)
+                }
+                if (spacerWest != null) add(spacerWest, BorderLayout.WEST)
+                if (spacerEast != null) add(spacerEast, BorderLayout.EAST)
+                val aligned = JPanel(FlowLayout(if (isUser) FlowLayout.RIGHT else FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false
+                    add(inner)
+                }
+                add(aligned, BorderLayout.CENTER)
+            }
+            return outer
         }
 
         fun render(snapshot: ContextBoxStateService.Snapshot) {
-            resultArea.text = if (snapshot.history.isEmpty()) {
-                "No result yet."
+            messageListPanel.removeAll()
+            if (snapshot.history.isEmpty()) {
+                messageListPanel.add(JLabel("No messages yet.").apply {
+                    foreground = Color(0x66, 0x66, 0x66)
+                    font = chatFont.deriveFont(Font.ITALIC, 13f)
+                    border = BorderFactory.createEmptyBorder(20, 20, 20, 20)
+                    horizontalAlignment = SwingConstants.CENTER
+                })
             } else {
-                snapshot.history.joinToString("\n\n────────────\n\n")
+                snapshot.history.forEach { msg ->
+                    messageListPanel.add(createBubble(msg))
+                    messageListPanel.add(Box.createVerticalStrut(6))
+                }
             }
-            resultArea.caretPosition = resultArea.document.length
+            messageListPanel.revalidate()
+            messageListPanel.repaint()
+            javax.swing.SwingUtilities.invokeLater {
+                val bar = messageScrollPane.verticalScrollBar
+                bar.value = bar.maximum
+            }
         }
 
         clearButton.addActionListener {
             stateService.clearHistory()
         }
         sendButton.addActionListener {
-            val extraRequirement = extraRequirementField.text.trim()
-            if (extraRequirement.isBlank()) return@addActionListener
+            val userInput = chatInputField.text.trim()
+            if (userInput.isBlank()) return@addActionListener
             val snapshot = stateService.snapshot()
-            val prompt = buildFollowUpPrompt(snapshot, extraRequirement)
+            val prompt = buildFollowUpPrompt(snapshot, userInput)
             sendButton.isEnabled = false
+            chatInputField.isEnabled = false
 
-            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Context Box Follow-up", false) {
+            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Chat", false) {
                 override fun run(indicator: ProgressIndicator) {
                     try {
-                        indicator.text = "Calling LLM..."
+                        indicator.text = "Thinking..."
                         val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
                             val provider = LlmProviderFactory.create(settings)
                             runBlocking { provider.generateCode(prompt) }
                         }
                         ApplicationManager.getApplication().invokeLater {
-                            stateService.recordFollowUp(extraRequirement, response)
-                            extraRequirementField.text = ""
+                            stateService.recordChat(userInput, response)
+                            chatInputField.text = ""
                             sendButton.isEnabled = true
+                            chatInputField.isEnabled = true
+                            chatInputField.requestFocusInWindow()
                         }
                     } catch (ex: Exception) {
                         ApplicationManager.getApplication().invokeLater {
                             sendButton.isEnabled = true
-                            Notifications.error(project, "Context Box Follow-up failed", ex.message ?: ex.toString())
+                            chatInputField.isEnabled = true
+                            Notifications.error(project, "Chat failed", ex.message ?: ex.toString())
                         }
                     }
                 }
             })
+        }
+        chatInputField.addActionListener { sendButton.doClick() }
+
+        val chatPanel = JPanel(BorderLayout()).apply {
+            add(JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(JLabel("Chat").apply {
+                    foreground = fgColor
+                    font = commonFont.deriveFont(Font.BOLD, 14f)
+                }, BorderLayout.WEST)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    isOpaque = false
+                    add(clearButton)
+                }, BorderLayout.EAST)
+                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            }, BorderLayout.NORTH)
+            add(messageScrollPane, BorderLayout.CENTER)
+            add(JPanel(BorderLayout(8, 0)).apply {
+                border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+                add(chatInputField, BorderLayout.CENTER)
+                add(sendButton, BorderLayout.EAST)
+                isOpaque = false
+            }, BorderLayout.SOUTH)
+            background = bgColor
+            foreground = fgColor
         }
 
         render(stateService.snapshot())
@@ -169,7 +313,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         )
 
         val tabs = JTabbedPane().apply {
-            addTab("Context", panel)
+            addTab("Context", chatPanel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
             addTab("Skill Manager", createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
             addTab("Sonar Cube", SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))

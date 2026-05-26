@@ -4,15 +4,30 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.util.messages.Topic
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Service(Service.Level.PROJECT)
 class ContextBoxStateService(private val project: Project) {
 
+    data class ChatMessage(
+        val role: Role,
+        val content: String,
+        val typeLabel: String = "",
+        val timestamp: Instant = Instant.now()
+    ) {
+        enum class Role { USER, ASSISTANT, SYSTEM }
+
+        val formattedTime: String
+            get() = LocalDateTime.ofInstant(timestamp, ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("HH:mm"))
+    }
+
     data class Snapshot(
         val latestResult: String,
-        val history: List<String>
+        val history: List<ChatMessage>
     )
 
     companion object {
@@ -21,79 +36,66 @@ class ContextBoxStateService(private val project: Project) {
         fun getInstance(project: Project): ContextBoxStateService = project.service()
     }
 
-    private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    private val history = mutableListOf<String>()
+    private val history = mutableListOf<ChatMessage>()
 
     fun snapshot(): Snapshot {
-        val latest = history.lastOrNull() ?: "No result yet."
-        return Snapshot(latestResult = latest, history = history.toList())
+        val latest = history.lastOrNull()
+        val preview = latest?.content?.lines()?.firstOrNull()?.take(80) ?: "No result yet."
+        return Snapshot(latestResult = preview, history = history.toList())
     }
 
     fun recordGeneration(className: String, targetPath: String, diff: String) {
-        val now = LocalDateTime.now().format(formatter)
-        appendResult(buildString {
-            appendLine("Type: Generated Code")
-            appendLine("Time: $now")
-            appendLine("Class: $className")
-            appendLine("Target: $targetPath")
-            appendLine()
-            appendLine("Code Diff:")
-            append(diff.ifBlank { "No diff generated." })
-        }.trimEnd())
+        append(ChatMessage(
+            role = ChatMessage.Role.SYSTEM,
+            typeLabel = "Generated Code",
+            content = "Class: $className\nTarget: $targetPath\n\n$diff"
+        ))
     }
 
     fun recordBranchSummary(targetBranch: String, sourceBranch: String, summary: String) {
-        val now = LocalDateTime.now().format(formatter)
-        appendResult(buildString {
-            appendLine("Type: Branch Analysis")
-            appendLine("Time: $now")
-            appendLine("Target Branch: $targetBranch")
-            appendLine("Source Branch: $sourceBranch")
-            appendLine()
-            appendLine("Analysis:")
-            append(summary.trim())
-        }.trimEnd())
+        append(ChatMessage(
+            role = ChatMessage.Role.SYSTEM,
+            typeLabel = "Branch Analysis",
+            content = "$sourceBranch → $targetBranch\n\n$summary"
+        ))
     }
 
     fun recordCodePromptResult(promptType: String, promptName: String, result: String) {
-        val now = LocalDateTime.now().format(formatter)
-        appendResult(buildString {
-            appendLine("Type: $promptType")
-            appendLine("Prompt: $promptName")
-            appendLine("Time: $now")
-            appendLine()
-            appendLine("LLM Result:")
-            append(result.trim().ifBlank { "(empty response)" })
-        }.trimEnd())
+        append(ChatMessage(
+            role = ChatMessage.Role.SYSTEM,
+            typeLabel = promptType,
+            content = "Prompt: $promptName\n\n${result.ifBlank { "(empty response)" }}"
+        ))
     }
 
     fun recordSonarQubeCoverage(projectKey: String, coverageSummary: String, generation: String) {
-        val now = LocalDateTime.now().format(formatter)
-        appendResult(buildString {
-            appendLine("Type: SonarQube Coverage")
-            appendLine("Time: $now")
-            appendLine("Project Key: $projectKey")
+        val content = buildString {
+            appendLine("Project: $projectKey")
             appendLine()
-            appendLine("Coverage Summary:")
-            appendLine(coverageSummary.trim().ifBlank { "(empty coverage summary)" })
+            appendLine(coverageSummary.ifBlank { "(empty coverage summary)" })
             if (generation.isNotBlank()) {
                 appendLine()
-                appendLine("Generated Missing Tests:")
-                append(generation.trim())
+                appendLine("--- Generated Missing Tests ---")
+                append(generation)
             }
-        }.trimEnd())
+        }.trimEnd()
+        append(ChatMessage(
+            role = ChatMessage.Role.SYSTEM,
+            typeLabel = "SonarQube Coverage",
+            content = content
+        ))
     }
 
     fun recordFollowUp(extraRequirement: String, result: String) {
-        val now = LocalDateTime.now().format(formatter)
-        appendResult(buildString {
-            appendLine("Type: Follow-up")
-            appendLine("Time: $now")
-            appendLine("Extra Requirement: ${extraRequirement.trim().ifBlank { "(none)" }}")
-            appendLine()
-            appendLine("LLM Result:")
-            append(result.trim().ifBlank { "(empty response)" })
-        }.trimEnd())
+        val userText = extraRequirement.trim().ifBlank { "(none)" }
+        val aiText = result.trim().ifBlank { "(empty response)" }
+        append(ChatMessage(role = ChatMessage.Role.USER, content = userText))
+        append(ChatMessage(role = ChatMessage.Role.ASSISTANT, content = aiText))
+    }
+
+    fun recordChat(userMessage: String, aiResponse: String) {
+        append(ChatMessage(role = ChatMessage.Role.USER, content = userMessage.trim()))
+        append(ChatMessage(role = ChatMessage.Role.ASSISTANT, content = aiResponse.trim()))
     }
 
     fun clearHistory() {
@@ -101,8 +103,8 @@ class ContextBoxStateService(private val project: Project) {
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
     }
 
-    private fun appendResult(result: String) {
-        history += result
+    private fun append(message: ChatMessage) {
+        history += message
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
     }
 }
