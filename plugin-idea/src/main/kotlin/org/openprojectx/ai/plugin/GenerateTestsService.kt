@@ -248,6 +248,10 @@ class GenerateTestsService(private val project: Project) {
     private fun sanitizeGeneratedCode(raw: String): String {
         val trimmed = raw.trim()
         val withoutStartFence = trimmed.replaceFirst(Regex("^```(?:\\w+)?\\s*\\n?"), "")
-        return withoutStartFence.replaceFirst(Regex("\\n?```\\s*$"), "").trim()
+        val withoutEndFence = withoutStartFence.replaceFirst(Regex("\\n?```\\s*$"), "")
+        return withoutEndFence
+            .replace(Regex("\\.{3,}\\s*$"), "")
+            .lines().dropLastWhile { it.isBlank() }.joinToString("\n")
+            .trim()
     }
 }
