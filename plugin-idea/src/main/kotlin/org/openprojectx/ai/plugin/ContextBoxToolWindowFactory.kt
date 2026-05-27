@@ -368,7 +368,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         data class All(val count: Int) : PromptListRow()
         data class CategoryHeader(val category: PromptCategory, val count: Int, val collapsed: Boolean) : PromptListRow()
         data class PromptRow(val prompt: PromptDefinition) : PromptListRow()
-        data class AddPrompt(val category: PromptCategory) : PromptListRow()
         object CustomHeader : PromptListRow()
     }
 
@@ -444,6 +443,22 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val categoryField = JComboBox(PromptCategory.entries.toTypedArray()).apply {
             background = inputColor
             foreground = fgColor
+            setRenderer(object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(
+                    list: JList<*>?,
+                    value: Any?,
+                    index: Int,
+                    isSelected: Boolean,
+                    cellHasFocus: Boolean
+                ): Component {
+                    val label = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
+                    if (value is PromptCategory) {
+                        label.text = "${categoryIcon(value)}  ${value.label}"
+                        if (!isSelected) label.foreground = categoryColor(value)
+                    }
+                    return label
+                }
+            })
         }
         val nameField = JTextField().apply {
             background = inputColor
@@ -662,7 +677,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 listModel.addElement(PromptListRow.CategoryHeader(category, categoryPrompts.size, category in collapsedCategories))
                 if (category !in collapsedCategories) {
                     categoryPrompts.forEach { listModel.addElement(PromptListRow.PromptRow(it)) }
-                    listModel.addElement(PromptListRow.AddPrompt(category))
                 }
             }
             listModel.addElement(PromptListRow.CustomHeader)
@@ -694,15 +708,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 is PromptListRow.PromptRow -> {
                     applyPromptToDetails(row.prompt)
                     (viewCards.layout as CardLayout).show(viewCards, "view")
-                }
-                is PromptListRow.AddPrompt -> {
-                    selectedPrompt = null
-                    categoryField.isEnabled = true
-                    nameField.isEditable = true
-                    categoryField.selectedItem = row.category
-                    nameField.text = ""
-                    contentField.text = ""
-                    (viewCards.layout as CardLayout).show(viewCards, "edit")
                 }
                 PromptListRow.CustomHeader, null -> Unit
             }
@@ -1071,7 +1076,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     private sealed class SkillListRow {
         data class All(val count: Int) : SkillListRow()
         data class SkillRow(val skill: SkillDefinition) : SkillListRow()
-        object AddSkill : SkillListRow()
     }
 
     private fun createSkillManagerPanel(
@@ -1219,7 +1223,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             listModel.addElement(SkillListRow.All(skills.size))
             skills.forEach { listModel.addElement(SkillListRow.SkillRow(it)) }
-            listModel.addElement(SkillListRow.AddSkill)
             if (select != null) {
                 for (i in 0 until listModel.size()) {
                     val row = listModel[i]
@@ -1238,10 +1241,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             when (row) {
                 is SkillListRow.All -> applySkillToDetails(null)
                 is SkillListRow.SkillRow -> applySkillToDetails(row.skill)
-                is SkillListRow.AddSkill -> {
-                    selectedSkill = null
-                    showSkillEditor(null)
-                }
             }
         }
 
@@ -1621,12 +1620,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     }
                     panel.add(leftPanel, BorderLayout.CENTER)
                 }
-                is SkillListRow.AddSkill -> {
-                    panel.add(JLabel("+ Add Skill").apply {
-                        foreground = mutedColor
-                        font = commonFont.deriveFont(Font.ITALIC, 13f)
-                    }, BorderLayout.CENTER)
-                }
                 null -> {}
             }
             return panel
@@ -1700,10 +1693,6 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                             add(label(prompt.updatedText, mutedColor, 12f))
                         }
                     }, BorderLayout.EAST)
-                }
-                is PromptListRow.AddPrompt -> {
-                    panel.border = BorderFactory.createEmptyBorder(6, 28, 6, 8)
-                    panel.add(label("＋  Add Prompt", mutedColor), BorderLayout.WEST)
                 }
                 PromptListRow.CustomHeader -> {
                     panel.add(label("⚙  Custom", fgColor, 15f), BorderLayout.WEST)

@@ -58,6 +58,10 @@ import javax.swing.JPopupMenu
 import javax.swing.JTable
 import javax.swing.JTextArea
 import javax.swing.JTextField
+import javax.swing.JTextPane
+import javax.swing.text.SimpleAttributeSet
+import javax.swing.text.StyleConstants
+import javax.swing.text.StyledDocument
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.UIManager
@@ -864,7 +868,8 @@ object SonarCubeToolWindowPanel {
     private fun sanitizeGeneratedCode(raw: String): String {
         val trimmed = raw.trim()
         val withoutStartFence = trimmed.replaceFirst(Regex("^```(?:\\w+)?\\s*\\n?"), "")
-        return withoutStartFence.replaceFirst(Regex("\\n?```\\s*$"), "").trim()
+        val withoutEndFence = withoutStartFence.replaceFirst(Regex("\\n?```\\s*$"), "")
+        return cleanupTruncation(withoutEndFence).trim()
     }
 
     private fun extractCodeBlock(response: String): String? {
@@ -874,8 +879,25 @@ object SonarCubeToolWindowPanel {
         val contentStart = response.indexOf('\n', start)
         if (contentStart < 0) return null
         val end = response.indexOf(fence, contentStart + 1)
-        if (end < 0) return null
+        if (end < 0) {
+            // Truncated response — best-effort extraction from opening fence to end
+            val raw = response.substring(contentStart + 1).trimEnd()
+            return cleanupTruncation(raw).ifBlank { null }
+        }
         return response.substring(contentStart + 1, end).trimEnd()
+    }
+
+    /**
+     * Removes trailing truncation artifacts from LLM responses.
+     * When the model hits its output limit, responses often end with "..."
+     * or have an incomplete final line.
+     */
+    private fun cleanupTruncation(text: String): String {
+        return text
+            .replace(Regex("\\.{3,}\\s*$"), "")   // trailing "..." at end
+            .lines()
+            .dropLastWhile { it.isBlank() }
+            .joinToString("\n")
     }
 
     private fun tryParseOptions(response: String): List<FixOption> {
@@ -1026,20 +1048,25 @@ object SonarCubeToolWindowPanel {
         }
 
         private val codeFont = Font("Monospaced", Font.PLAIN, 12)
-        private val bgCode = Color(0x0D, 0x11, 0x17)
-        private val fgCode = Color(0xCC, 0xCC, 0xCC)
 
         init {
             title = "AI Fix — ${issue.rule}"
             init()
             myOKAction.putValue(javax.swing.Action.NAME, "Apply Fix")
+            setOKButtonText("Apply Fix")
         }
+
+        override fun getPreferredSize(): Dimension? = Dimension(900, 960)
 
         override fun createCenterPanel(): JComponent = JPanel(BorderLayout(0, 8)).apply {
             add(createIssueHeader(), BorderLayout.NORTH)
-            add(createSideBySideDiff(), BorderLayout.CENTER)
-            add(createExplanation(), BorderLayout.SOUTH)
-            preferredSize = Dimension(800, 460)
+            add(JPanel(BorderLayout(0, 8)).apply {
+                isOpaque = false
+                add(createExplanation(), BorderLayout.NORTH)
+                add(createUnifiedDiff(), BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+            preferredSize = Dimension(900, 900)
+            minimumSize = Dimension(700, 400)
         }
 
         private fun createIssueHeader(): JComponent = JPanel(BorderLayout(8, 0)).apply {
@@ -1079,69 +1106,160 @@ object SonarCubeToolWindowPanel {
             add(messageLabel, BorderLayout.CENTER)
         }
 
-        private fun createSideBySideDiff(): JComponent {
-            val beforeText = extractChangedRegion(originalCode, fixedCode, side = "before")
-            val afterText = extractChangedRegion(originalCode, fixedCode, side = "after")
+        private fun createUnifiedDiff(): JComponent {
+            val bgDiff = Color(0x0D, 0x11, 0x17)
+            val bgAdded = Color(0x14, 0x46, 0x1A)
+            val bgRemoved = Color(0x46, 0x14, 0x14)
+            val fgAdded = Color(0xA0, 0xD0, 0xA0)
+            val fgRemoved = Color(0xD0, 0x99, 0x99)
+            val fgNormal = Color(0xCC, 0xCC, 0xCC)
+            val fgLineNum = Color(0x5A, 0x6A, 0x80)
+            val gutterBg = Color(0x12, 0x17, 0x1F)
 
-            val beforeArea = JTextArea(beforeText).apply {
+            val pane = JTextPane().apply {
                 isEditable = false
-                foreground = fgCode
-                background = bgCode
+                background = bgDiff
                 font = codeFont
-                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
-            }
-            val afterArea = JTextArea(afterText).apply {
-                isEditable = false
-                foreground = fgCode
-                background = bgCode
-                font = codeFont
-                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+                val doc = styledDocument
+                val diffLines = computeDiff(originalCode, fixedCode)
+
+                // File header
+                val headerAttrs = SimpleAttributeSet().apply {
+                    addAttribute(StyleConstants.Background, Color(0x16, 0x1B, 0x22))
+                    addAttribute(StyleConstants.Foreground, fgLineNum)
+                    addAttribute(StyleConstants.FontFamily, codeFont.family)
+                    addAttribute(StyleConstants.FontSize, codeFont.size)
+                }
+                doc.insertString(doc.length, "  ${issue.path}\n", headerAttrs)
+
+                // Diff lines
+                val lineNumAttrs = SimpleAttributeSet().apply {
+                    addAttribute(StyleConstants.Foreground, fgLineNum)
+                    addAttribute(StyleConstants.Background, gutterBg)
+                    addAttribute(StyleConstants.FontFamily, codeFont.family)
+                    addAttribute(StyleConstants.FontSize, codeFont.size - 1)
+                }
+                val signAttrs = SimpleAttributeSet().apply {
+                    addAttribute(StyleConstants.Foreground, fgLineNum)
+                    addAttribute(StyleConstants.Background, gutterBg)
+                    addAttribute(StyleConstants.FontFamily, codeFont.family)
+                    addAttribute(StyleConstants.FontSize, codeFont.size)
+                    addAttribute(StyleConstants.Bold, true)
+                }
+                val gutterPlainAttrs = SimpleAttributeSet().apply {
+                    addAttribute(StyleConstants.Background, gutterBg)
+                    addAttribute(StyleConstants.FontFamily, codeFont.family)
+                    addAttribute(StyleConstants.FontSize, codeFont.size)
+                }
+
+                for (line in diffLines) {
+                    val (bg, fg, oldNum, newNum, text) = line
+                    val sign = when {
+                        oldNum == null -> "+"
+                        newNum == null -> "-"
+                        else -> " "
+                    }
+
+                    val signColorAttrs = SimpleAttributeSet(signAttrs).apply {
+                        addAttribute(StyleConstants.Background, bg)
+                        if (oldNum == null) addAttribute(StyleConstants.Foreground, fgAdded)
+                        else if (newNum == null) addAttribute(StyleConstants.Foreground, fgRemoved)
+                    }
+                    val oldNumStr = oldNum?.toString()?.padStart(4) ?: "    "
+                    val newNumStr = newNum?.toString()?.padStart(4) ?: "    "
+
+                    val gutterStartAttrs = SimpleAttributeSet(gutterPlainAttrs).apply {
+                        addAttribute(StyleConstants.Background, bg)
+                    }
+                    val numTextAttrs = SimpleAttributeSet(lineNumAttrs).apply {
+                        addAttribute(StyleConstants.Background, bg)
+                    }
+                    val contentAttrs = SimpleAttributeSet().apply {
+                        addAttribute(StyleConstants.Background, bg)
+                        addAttribute(StyleConstants.Foreground, fg)
+                        addAttribute(StyleConstants.FontFamily, codeFont.family)
+                        addAttribute(StyleConstants.FontSize, codeFont.size)
+                    }
+
+                    doc.insertString(doc.length, " ", gutterStartAttrs)
+                    doc.insertString(doc.length, sign, signColorAttrs)
+                    doc.insertString(doc.length, oldNumStr, numTextAttrs)
+                    doc.insertString(doc.length, " ", gutterPlainAttrs.apply { addAttribute(StyleConstants.Background, bg) })
+                    doc.insertString(doc.length, newNumStr, numTextAttrs)
+                    doc.insertString(doc.length, "  ", gutterPlainAttrs.apply { addAttribute(StyleConstants.Background, bg) })
+                    doc.insertString(doc.length, "$text\n", contentAttrs)
+                }
             }
 
-            val beforeScroll = com.intellij.ui.components.JBScrollPane(beforeArea).apply {
-                border = BorderFactory.createTitledBorder(
-                    BorderFactory.createLineBorder(Color(0x30, 0x40, 0x50)),
-                    "Current code",
-                    javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
-                    javax.swing.border.TitledBorder.DEFAULT_POSITION,
-                    null,
-                    Color(0x94, 0xA3, 0xB8)
-                )
-                preferredSize = Dimension(350, 220)
-                viewport.background = bgCode
+            return com.intellij.ui.components.JBScrollPane(pane).apply {
+                border = BorderFactory.createMatteBorder(1, 0, 0, 0, Color(0x30, 0x40, 0x50))
+                viewport.background = bgDiff
             }
-            val afterScroll = com.intellij.ui.components.JBScrollPane(afterArea).apply {
-                border = BorderFactory.createTitledBorder(
-                    BorderFactory.createLineBorder(Color(0x38, 0x8E, 0x3C)),
-                    "Proposed fix",
-                    javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
-                    javax.swing.border.TitledBorder.DEFAULT_POSITION,
-                    null,
-                    Color(0x94, 0xA3, 0xB8)
-                )
-                preferredSize = Dimension(350, 220)
-                viewport.background = bgCode
+        }
+
+        private data class DiffLine(
+            val bg: Color, val fg: Color,
+            val oldLineNum: Int?, val newLineNum: Int?,
+            val text: String
+        )
+
+        private fun computeDiff(original: String, fixed: String): List<DiffLine> {
+            val oldLines = original.split("\n")
+            val newLines = fixed.split("\n")
+
+            val bgAdded = Color(0x14, 0x46, 0x1A)
+            val bgRemoved = Color(0x46, 0x14, 0x14)
+            val bgNormal = Color(0x0D, 0x11, 0x17)
+            val fgAdded = Color(0xA0, 0xD0, 0xA0)
+            val fgRemoved = Color(0xD0, 0x99, 0x99)
+            val fgNormal = Color(0xCC, 0xCC, 0xCC)
+
+            // Myers-style diff via LCS
+            val m = oldLines.size
+            val n = newLines.size
+            val lcs = Array(m + 1) { IntArray(n + 1) }
+            for (i in 0 until m) {
+                for (j in 0 until n) {
+                    lcs[i + 1][j + 1] = if (oldLines[i] == newLines[j])
+                        lcs[i][j] + 1
+                    else
+                        maxOf(lcs[i + 1][j], lcs[i][j + 1])
+                }
             }
 
-            val arrowLabel = JLabel("<html><div style='font-size:28pt;color:#F9A825;padding:0 12px'>&#10140;</div></html>").apply {
-                isOpaque = false
+            val result = mutableListOf<DiffLine>()
+            var i = m; var j = n
+            val stack = ArrayDeque<DiffLine>()
+            while (i > 0 || j > 0) {
+                when {
+                    i > 0 && j > 0 && oldLines[i - 1] == newLines[j - 1] -> {
+                        stack.addFirst(DiffLine(bgNormal, fgNormal, i, j, oldLines[i - 1]))
+                        i--; j--
+                    }
+                    j > 0 && (i == 0 || lcs[i][j - 1] >= lcs[i - 1][j]) -> {
+                        stack.addFirst(DiffLine(bgAdded, fgAdded, null, j, newLines[j - 1]))
+                        j--
+                    }
+                    else -> {
+                        stack.addFirst(DiffLine(bgRemoved, fgRemoved, i, null, oldLines[i - 1]))
+                        i--
+                    }
+                }
             }
 
-            val diffPanel = JPanel(GridBagLayout()).apply {
-                isOpaque = false
-                val gbc = GridBagConstraints()
-                gbc.fill = GridBagConstraints.BOTH
-                gbc.weightx = 1.0
-                gbc.weighty = 1.0
-                gbc.gridx = 0; gbc.gridy = 0
-                add(beforeScroll, gbc)
-                gbc.gridx = 1; gbc.weightx = 0.0
-                add(arrowLabel, gbc)
-                gbc.gridx = 2; gbc.weightx = 1.0
-                add(afterScroll, gbc)
+            // Only show changed regions with 3 lines of context
+            val context = 3
+            val indicesToKeep = mutableSetOf<Int>()
+            for (idx in stack.indices) {
+                val line = stack[idx]
+                if (line.bg != bgNormal) {
+                    for (c in (idx - context).coerceAtLeast(0)..(idx + context).coerceAtMost(stack.lastIndex)) {
+                        indicesToKeep.add(c)
+                    }
+                }
             }
 
-            return diffPanel
+            return stack.filterIndexed { idx, _ -> idx in indicesToKeep }
         }
 
         private fun createExplanation(): JComponent {
@@ -1157,52 +1275,17 @@ object SonarCubeToolWindowPanel {
             }
             return com.intellij.ui.components.JBScrollPane(area).apply {
                 border = BorderFactory.createTitledBorder(
-                    BorderFactory.createLineBorder(Color(0x30, 0x40, 0x50)),
+                    BorderFactory.createLineBorder(Color(0x38, 0x8E, 0x3C)),
                     "Fix logic — how the issue is resolved",
                     javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
                     javax.swing.border.TitledBorder.DEFAULT_POSITION,
                     null,
-                    Color(0x94, 0xA3, 0xB8)
+                    Color(0x81, 0xC7, 0x84)
                 )
-                preferredSize = Dimension(780, 60)
+                preferredSize = Dimension(880, 120)
+                minimumSize = Dimension(680, 60)
                 viewport.background = Color(0x16, 0x1B, 0x22)
             }
-        }
-
-        private fun extractChangedRegion(original: String, fixed: String, side: String): String {
-            val origLines = original.split("\n")
-            val fixedLines = fixed.split("\n")
-
-            var firstDiff = 0
-            while (firstDiff < origLines.size && firstDiff < fixedLines.size &&
-                origLines[firstDiff] == fixedLines[firstDiff]
-            ) firstDiff++
-
-            var lastOrig = origLines.lastIndex
-            var lastFixed = fixedLines.lastIndex
-            while (lastOrig > firstDiff && lastFixed > firstDiff &&
-                origLines[lastOrig] == fixedLines[lastFixed]
-            ) {
-                lastOrig--
-                lastFixed--
-            }
-
-            val context = 3
-            val showStart = (firstDiff - context).coerceAtLeast(0)
-            val showEndO = (lastOrig + context + 1).coerceAtMost(origLines.size)
-            val showEndF = (lastFixed + context + 1).coerceAtMost(fixedLines.size)
-
-            return buildString {
-                val lines = if (side == "before") origLines else fixedLines
-                val end = if (side == "before") showEndO else showEndF
-                for (i in showStart..<end) {
-                    val line = if (i < lines.size) lines[i] else ""
-                    val num = i + 1
-                    val isTarget = if (side == "before") i == (issue.line ?: 1) - 1 else false
-                    val prefix = if (isTarget && side == "before") "▶" else " "
-                    appendLine("$prefix ${num.toString().padStart(4)}  $line")
-                }
-            }.trimEnd()
         }
 
         private fun escapeHtml(value: String): String = value

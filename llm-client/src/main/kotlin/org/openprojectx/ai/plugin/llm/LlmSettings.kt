@@ -8,7 +8,8 @@ data class LlmSettings(
     val endpoint: String? = null,
     val template: TemplateRequestConfig? = null,
     val auth: LlmAuthConfig? = null,
-    val httpDisableTlsVerification: Boolean = false
+    val httpDisableTlsVerification: Boolean = false,
+    val maxTokens: Int = 4096
 )
 
 data class TemplateRequestConfig(

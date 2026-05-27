@@ -102,11 +102,17 @@ object LlmSettingsLoader {
     fun importConfigFromRepo(project: Project): String {
         val root = readRootMap(project)
         val prompts = root["prompts"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
-        return importConfigFromRepo(project, parseBitbucketPromptRepoConfig(prompts.map("remoteRepo")))
+        val sourcePath = importConfigFromRepo(project, parseBitbucketPromptRepoConfig(prompts.map("remoteRepo")))
+        runCatching {
+            pullBitbucketPromptUpdates(project)
+        }.onFailure { ex ->
+            RuntimeLogStore.append("WARN | Prompt Repo Import | Prompt pull after config import failed: ${ex.message ?: ex}")
+        }
+        return sourcePath
     }
 
     fun importConfigFromRepo(project: Project, model: AiTestSettingsModel): String {
-        return importConfigFromRepo(
+        val sourcePath = importConfigFromRepo(
             project,
             BitbucketPromptRepoConfig(
                 enabled = model.bitbucketPromptRepoEnabled,
@@ -118,6 +124,12 @@ object LlmSettingsLoader {
                 configImportPath = model.bitbucketConfigImportPath
             )
         )
+        runCatching {
+            pullBitbucketPromptUpdates(project)
+        }.onFailure { ex ->
+            RuntimeLogStore.append("WARN | Prompt Repo Import | Prompt pull after config import failed: ${ex.message ?: ex}")
+        }
+        return sourcePath
     }
 
     private fun importConfigFromRepo(project: Project, remoteRepo: BitbucketPromptRepoConfig): String {
@@ -729,6 +741,13 @@ object LlmSettingsLoader {
         val httpMap = llm["http"] as? Map<*, *>
         val disableTlsVerification = httpMap?.get("disableTlsVerification") as? Boolean ?: false
 
+        val maxTokens = when (val v = llm["maxTokens"]) {
+            is Number -> v.toInt()
+            is String -> v.trim().toIntOrNull()
+            null -> 4096
+            else -> error("Invalid YAML: llm.maxTokens must be a number")
+        } ?: 4096
+
         return LlmSettings(
             provider = provider,
             model = model,
@@ -737,7 +756,8 @@ object LlmSettingsLoader {
             endpoint = endpoint,
             template = template,
             auth = auth,
-            httpDisableTlsVerification = disableTlsVerification
+            httpDisableTlsVerification = disableTlsVerification,
+            maxTokens = maxTokens
         )
     }
 
@@ -1486,7 +1506,9 @@ object LlmSettingsLoader {
 
     private fun isPromptMarkdownPath(path: String): Boolean {
         val normalized = path.replace('\\', '/').lowercase()
-        return (normalized.startsWith("prompts/") || normalized.startsWith("prompt/")) && normalized.endsWith(".md")
+        return (normalized.startsWith("prompts/") || normalized.startsWith("prompt/"))
+            && normalized.endsWith(".md")
+            && !normalized.endsWith("readme.md")
     }
 
     private fun loadBitbucketPromptFilePaths(
@@ -1815,7 +1837,9 @@ object LlmSettingsLoader {
 
     private fun isSkillMarkdownPath(path: String): Boolean {
         val normalized = path.replace('\\', '/').lowercase()
-        return (normalized.startsWith("skills/") || normalized.startsWith("skill/")) && normalized.endsWith(".md")
+        return (normalized.startsWith("skills/") || normalized.startsWith("skill/"))
+            && normalized.endsWith(".md")
+            && !normalized.endsWith("readme.md")
     }
 
     private fun fetchBitbucketSkillEntries(project: Project, config: BitbucketPromptRepoConfig, strict: Boolean = false): List<GlobalPromptMeta> {

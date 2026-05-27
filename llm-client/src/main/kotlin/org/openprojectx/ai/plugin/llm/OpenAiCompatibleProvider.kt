@@ -27,7 +27,8 @@ class OpenAiCompatibleProvider(
                     Message("system", "You generate code only."),
                     Message("user", prompt)
                 ),
-                temperature = 0.1
+                temperature = 0.1,
+                max_tokens = settings.maxTokens.takeIf { it > 0 }
             )
 
             val curlCmd = buildCurlCommand(endpoint, apiKey, req)
@@ -63,7 +64,8 @@ class OpenAiCompatibleProvider(
     data class ChatCompletionsRequest(
         val model: String,
         val messages: List<Message>,
-        val temperature: Double? = null
+        val temperature: Double? = null,
+        val max_tokens: Int? = null
     )
 
     @Serializable
