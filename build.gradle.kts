@@ -118,7 +118,7 @@ signing {
     val isCi: Boolean by gradle.extra
     if (isCi) {
         val keyFile = System.getenv("SIGNING_KEY_FILE")
-        if (keyFile != null) {
+        if (keyFile != null && file(keyFile).exists()) {
             val keyText = file(keyFile).readText()
             val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
 

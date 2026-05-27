@@ -166,10 +166,12 @@ publishing {
 signing {
     if (isCi) {
         val keyFile = System.getenv("SIGNING_KEY_FILE")
-        val keyText = file(keyFile).readText()
-        val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+        if (keyFile != null && file(keyFile).exists()) {
+            val keyText = file(keyFile).readText()
+            val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
 
-        useInMemoryPgpKeys(keyText, keyPass)
-        sign(publishing.publications["pluginDistribution"])
+            useInMemoryPgpKeys(keyText, keyPass)
+            sign(publishing.publications["pluginDistribution"])
+        }
     }
 }
