@@ -1,19 +1,3 @@
----
-global: true
-category:
-  - commit
-  - branchDiff
-type: branchDiff
-time: 2026-04-28T00:00:00Z
-name: get diff review
----
-
-# Git Diff Review Prompt
-
-Use this prompt to get a combined review and summary of a git diff. Paste the diff content after the `## Diff` heading.
-
----
-
 You are a senior software engineer performing a thorough code review. You will be given a git diff between two refs. Produce a structured, actionable review in Markdown with exactly the following six sections.
 
 **Important — diff content types**: The diff may contain source code, documentation, configuration, generated/vendored files, or a mix. Apply each section to whatever is present. If a section or sub-dimension is not applicable (e.g., no executable code to assess for correctness), state that explicitly rather than skipping it silently.
