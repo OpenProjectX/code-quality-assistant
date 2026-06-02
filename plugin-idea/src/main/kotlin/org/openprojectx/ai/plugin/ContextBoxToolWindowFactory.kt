@@ -55,6 +55,15 @@ import org.yaml.snakeyaml.Yaml
 
 class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
+    companion object {
+        private const val GUIDE_TAB = "Guide"
+        private const val CONTEXT_TAB = "Context"
+        private const val PROMPT_MANAGER_TAB = "Prompt Manager"
+        private const val SKILL_MANAGER_TAB = "Skill Manager"
+        private const val SONAR_CUBE_TAB = "Sonar Cube"
+        private const val LOG_TAB = "Log"
+    }
+
     override fun shouldBeAvailable(project: Project): Boolean = true
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -431,31 +440,45 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             foreground = fgColor
         }
 
-        render(stateService.snapshot())
+        val initialSnapshot = stateService.snapshot()
+        render(initialSnapshot)
 
-        val tabs = JTabbedPane().apply {
-            insertTab("Guide", OpenProjectXIcons.GenerateTests, createReadmePanel(project, bgColor, fgColor, borderColor, commonFont), "Feature guide and setup progress", 0)
-            addTab("Context", chatPanel)
-            addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
-            addTab("Skill Manager", createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
-            addTab("Sonar Cube", SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))
-            if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
-                addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
+        fun selectTab(tabs: JTabbedPane, title: String) {
+            for (index in 0 until tabs.tabCount) {
+                if (tabs.getTitleAt(index) == title) {
+                    tabs.selectedIndex = index
+                    return
+                }
             }
         }
 
+        val tabs = JTabbedPane().apply {
+            insertTab(GUIDE_TAB, OpenProjectXIcons.GenerateTests, createReadmePanel(project, bgColor, fgColor, borderColor, commonFont), "Feature guide and setup progress", 0)
+            addTab(CONTEXT_TAB, chatPanel)
+            addTab(PROMPT_MANAGER_TAB, createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab(SKILL_MANAGER_TAB, createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab(SONAR_CUBE_TAB, SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))
+            if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
+                addTab(LOG_TAB, createLogPanel(bgColor, fgColor, borderColor, commonFont))
+            }
+        }
+        // Some actions record their result before showing the tool window. In that case,
+        // open Context immediately instead of hiding the existing result behind Guide.
+        if (initialSnapshot.history.isNotEmpty()) {
+            selectTab(tabs, CONTEXT_TAB)
+        }
+
+        // Only newly appended messages should focus Context. Clearing or re-rendering
+        // history must not unexpectedly pull users away from Guide or manager tabs.
+        var previousHistorySize = initialSnapshot.history.size
         project.messageBus.connect(toolWindow.disposable).subscribe(
             ContextBoxStateService.TOPIC,
             ContextBoxListener { snapshot ->
                 render(snapshot)
-                if (snapshot.history.isNotEmpty()) {
-                    for (index in 0 until tabs.tabCount) {
-                        if (tabs.getTitleAt(index) == "Context") {
-                            tabs.selectedIndex = index
-                            break
-                        }
-                    }
+                if (snapshot.history.size > previousHistorySize) {
+                    selectTab(tabs, CONTEXT_TAB)
                 }
+                previousHistorySize = snapshot.history.size
             }
         )
 
@@ -1988,7 +2011,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Consistent commit conventions", "Summarizing multi-file changes", "Reducing repetitive writing"),
                 tip = "If the branch name contains a JIRA-style key such as ABC-123, it is used as a commit-message prefix.",
                 actionLabel = "Open Prompt Manager",
-                action = { selectTab("Prompt Manager") }
+                action = { selectTab(PROMPT_MANAGER_TAB) }
             ),
             GuideFeature(
                 icon = "⑂", title = "Branch Analysis", category = "Branch Compare",
@@ -2004,7 +2027,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Pull-request preparation", "Risk review", "Understanding unfamiliar changes"),
                 tip = "Branch analysis uses the current branch as the source and the Git Log selection as the comparison target.",
                 actionLabel = "Open Context",
-                action = { selectTab("Context") }
+                action = { selectTab(CONTEXT_TAB) }
             ),
             GuideFeature(
                 icon = "⇧", title = "Push & Create PR", category = "Pull Request",
@@ -2036,7 +2059,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Focused code review", "Maintainability feedback", "Security and performance checks"),
                 tip = "Code Review and Code Generate share the same editor context-menu action; choose the appropriate prompt category in the dialog.",
                 actionLabel = "Open Prompt Manager",
-                action = { selectTab("Prompt Manager") }
+                action = { selectTab(PROMPT_MANAGER_TAB) }
             ),
             GuideFeature(
                 icon = "✣", title = "Code Generate", category = "Code Generation",
@@ -2052,7 +2075,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Boilerplate generation", "Small focused enhancements", "Context-aware implementation ideas"),
                 tip = "Provide a focused selection and explicit requirements to keep generated changes relevant.",
                 actionLabel = "Open Prompt Manager",
-                action = { selectTab("Prompt Manager") }
+                action = { selectTab(PROMPT_MANAGER_TAB) }
             ),
             GuideFeature(
                 icon = "♢", title = "SonarQube Coverage", category = "Coverage Analysis",
@@ -2068,7 +2091,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Coverage gap analysis", "Local code-quality inspections", "Generating missing tests"),
                 tip = "Local scan mode detects TODO/FIXME markers, printStackTrace calls, empty catches and hard-coded secrets without a SonarQube server.",
                 actionLabel = "Open Sonar Cube",
-                action = { selectTab("Sonar Cube") }
+                action = { selectTab(SONAR_CUBE_TAB) }
             ),
             GuideFeature(
                 icon = "☵", title = "AI Chat (Context Box)", category = "Context Box",
@@ -2084,7 +2107,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 bestFor = listOf("Follow-up questions", "Refining generated tests", "Explaining branch analysis"),
                 tip = "Context Box retains the most recent messages so follow-up requests can build on earlier generated output.",
                 actionLabel = "Open Context",
-                action = { selectTab("Context") }
+                action = { selectTab(CONTEXT_TAB) }
             )
         )
 
