@@ -2143,13 +2143,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 isOpaque = false
                 add(label(feature.title, commonFont.deriveFont(Font.BOLD, 14f)))
                 add(Box.createVerticalStrut(6))
-                add(html(feature.summary, 190, smallFont, mutedColor))
+                add(html(feature.summary, 176, smallFont, mutedColor))
             }, BorderLayout.CENTER)
             card.add(featureButton("Learn more  →") { showFeature(feature) }, BorderLayout.SOUTH)
             val listener = object : MouseAdapter() {
                 override fun mouseClicked(event: MouseEvent) = showFeature(feature)
             }
             card.addMouseListener(listener)
+            card.preferredSize = Dimension(218, 168)
+            card.minimumSize = Dimension(218, 168)
+            card.maximumSize = Dimension(218, 168)
             cardPanels += card
             return card
         }
@@ -2158,22 +2161,24 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             background = surfaceColor
             border = panelBorder()
             alignmentX = Component.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, 138)
+            maximumSize = Dimension(Int.MAX_VALUE, 184)
             add(JPanel().apply {
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
                 add(label("Welcome to CQA 👋", titleFont))
-                add(Box.createVerticalStrut(8))
-                add(label("AI-powered tools to improve code quality and boost your productivity.", bodyFont, mutedColor))
-                add(Box.createVerticalStrut(12))
-                add(featureButton("Complete the setup to unlock all features  →") {
+                add(Box.createVerticalStrut(6))
+                add(label("Complete this workflow before using AI features:", bodyFont, mutedColor))
+                add(Box.createVerticalStrut(10))
+                add(html("<b><font color='#3B82F6'>1.</font>&nbsp; Configure Bitbucket Prompt Repo</b> in Settings → Login&nbsp;&nbsp; → &nbsp;&nbsp;<b><font color='#3B82F6'>2.</font>&nbsp; Click Import Repo Config</b>&nbsp;&nbsp; → &nbsp;&nbsp;<b><font color='#3B82F6'>3.</font>&nbsp; Configure LLM and log in</b> from Settings → LLM", 600, bodyFont, fgColor))
+                add(Box.createVerticalStrut(10))
+                add(featureButton("Open setup settings  →") {
                     ShowSettingsUtil.getInstance().showSettingsDialog(project, AiTestSettingsConfigurable::class.java)
                 })
             }, BorderLayout.CENTER)
             add(JPanel().apply {
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
-                add(label("$setupCount / 3", commonFont.deriveFont(Font.BOLD, 18f), ThemeColors.systemAccent).apply {
+                add(label("$setupCount / 2", commonFont.deriveFont(Font.BOLD, 18f), ThemeColors.systemAccent).apply {
                     horizontalAlignment = SwingConstants.CENTER
                     alignmentX = Component.CENTER_ALIGNMENT
                 })
@@ -2190,16 +2195,29 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         contentRoot.add(Box.createVerticalStrut(20))
         contentRoot.add(label("What would you like to do?", sectionFont).apply { alignmentX = Component.LEFT_ALIGNMENT })
         contentRoot.add(Box.createVerticalStrut(4))
-        contentRoot.add(label("Select a feature to see how it works.", bodyFont, mutedColor).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        contentRoot.add(label("Select a feature to see how it works. Drag the horizontal scroll bar to browse all eight features.", bodyFont, mutedColor).apply { alignmentX = Component.LEFT_ALIGNMENT })
         contentRoot.add(Box.createVerticalStrut(12))
 
-        val cardsPanel = JPanel(java.awt.GridLayout(0, 4, 12, 12)).apply {
+        val cardsPanel = JPanel(java.awt.GridLayout(1, 0, 12, 0)).apply {
             background = pageColor
-            alignmentX = Component.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, 410)
+            border = BorderFactory.createEmptyBorder(0, 0, 4, 0)
             features.forEach { add(createCard(it)) }
+            preferredSize = Dimension(features.size * 218 + (features.size - 1) * 12, 176)
         }
-        contentRoot.add(cardsPanel)
+        contentRoot.add(JBScrollPane(
+            cardsPanel,
+            javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+            javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS
+        ).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            preferredSize = Dimension(760, 210)
+            maximumSize = Dimension(Int.MAX_VALUE, 210)
+            border = BorderFactory.createLineBorder(borderColor)
+            viewport.background = pageColor
+            horizontalScrollBar.unitIncrement = 24
+            horizontalScrollBar.blockIncrement = 220
+            toolTipText = "Drag the horizontal scroll bar to browse all features"
+        })
         contentRoot.add(Box.createVerticalStrut(20))
         contentRoot.add(detailsContainer)
 
@@ -2216,7 +2234,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 add(label("How it works", commonFont.deriveFont(Font.BOLD, 15f)))
                 add(Box.createVerticalStrut(8))
                 feature.steps.forEachIndexed { index, step ->
-                    add(html("<b><font color='#3B82F6'>${index + 1}.</font>&nbsp;&nbsp;${step.first}</b><br>&nbsp;&nbsp;&nbsp;&nbsp;${step.second}", 560, bodyFont, fgColor))
+                    add(html("<b><font color='#3B82F6'>${index + 1}.</font>&nbsp;&nbsp;${step.first}</b><br>&nbsp;&nbsp;&nbsp;&nbsp;${step.second}", 420, bodyFont, fgColor))
                     add(Box.createVerticalStrut(10))
                 }
             }
@@ -2262,7 +2280,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                         isFocusPainted = false
                         addActionListener { feature.action() }
                     }, BorderLayout.EAST)
-                    add(html(feature.intro, 760, bodyFont, mutedColor), BorderLayout.SOUTH)
+                    add(html(feature.intro, 560, bodyFont, mutedColor), BorderLayout.SOUTH)
                 }, BorderLayout.NORTH)
                 add(JPanel(BorderLayout(20, 0)).apply {
                     isOpaque = false
@@ -2272,7 +2290,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 add(JPanel(BorderLayout()).apply {
                     background = cardColor
                     border = panelBorder()
-                    add(html("<b>💡 Tips</b><br>${feature.tip}", 900, smallFont, mutedColor), BorderLayout.CENTER)
+                    add(html("<b>💡 Tips</b><br>${feature.tip}", 680, smallFont, mutedColor), BorderLayout.CENTER)
                 }, BorderLayout.SOUTH)
             }, BorderLayout.CENTER)
             detailsContainer.revalidate()
@@ -2285,8 +2303,8 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             background = surfaceColor
             border = BorderFactory.createEmptyBorder(8, 10, 8, 10)
             alignmentX = Component.LEFT_ALIGNMENT
-            add(label("⚙  Setup Progress", bodyFont, mutedColor), BorderLayout.WEST)
-            add(label("${if (repoConfigured) "✓" else "○"} Prompt repo configured     ${if (llmConfigured) "✓" else "○"} LLM configured     3  Try a feature", bodyFont, mutedColor), BorderLayout.EAST)
+            add(label("⚙  Setup Workflow", bodyFont, mutedColor), BorderLayout.WEST)
+            add(label("${if (repoConfigured) "✓" else "○"} Repo details     2  Import config     ${if (llmConfigured) "✓" else "○"} LLM login     4  Try a feature", bodyFont, mutedColor), BorderLayout.EAST)
         })
 
         return JPanel(BorderLayout()).apply {
