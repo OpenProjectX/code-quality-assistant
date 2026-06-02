@@ -44,6 +44,14 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Verify snapshot version
+        run: |
+          version="$(sed -n 's/^version=//p' gradle.properties)"
+          if [[ "$version" != *-SNAPSHOT ]]; then
+            echo "::error file=gradle.properties::Expected a SNAPSHOT version before release, found '$version'. A previous release may have stopped after its pre-tag commit; bump to the next SNAPSHOT version before retrying."
+            exit 1
+          fi
+
       - name: Run release
         env:
           JETBRAINS_TOKEN:      ${{ secrets.JETBRAINS_TOKEN }}
