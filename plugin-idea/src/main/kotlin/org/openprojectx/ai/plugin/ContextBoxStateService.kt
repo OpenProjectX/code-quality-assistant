@@ -8,6 +8,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Service(Service.Level.PROJECT)
 class ContextBoxStateService(private val project: Project) {
@@ -16,7 +17,11 @@ class ContextBoxStateService(private val project: Project) {
         val role: Role,
         val content: String,
         val typeLabel: String = "",
-        val timestamp: Instant = Instant.now()
+        val timestamp: Instant = Instant.now(),
+        val sourceBranch: String? = null,
+        val targetBranch: String? = null,
+        val testTargetPath: String? = null,
+        val testClassName: String? = null
     ) {
         enum class Role { USER, ASSISTANT, SYSTEM }
 
@@ -37,6 +42,10 @@ class ContextBoxStateService(private val project: Project) {
     }
 
     private val history = mutableListOf<ChatMessage>()
+    private val branchDiffInProgress = AtomicBoolean(false)
+
+    fun tryStartBranchDiff(): Boolean = branchDiffInProgress.compareAndSet(false, true)
+    fun finishBranchDiff() { branchDiffInProgress.set(false) }
 
     fun snapshot(): Snapshot {
         val latest = history.lastOrNull()
@@ -46,23 +55,27 @@ class ContextBoxStateService(private val project: Project) {
 
     fun recordGeneration(className: String, targetPath: String, diff: String) {
         append(ChatMessage(
-            role = ChatMessage.Role.SYSTEM,
+            role = ChatMessage.Role.ASSISTANT,
             typeLabel = "Generated Code",
-            content = "Class: $className\nTarget: $targetPath\n\n$diff"
+            content = diff,
+            testTargetPath = targetPath,
+            testClassName = className
         ))
     }
 
     fun recordBranchSummary(targetBranch: String, sourceBranch: String, summary: String) {
         append(ChatMessage(
-            role = ChatMessage.Role.SYSTEM,
+            role = ChatMessage.Role.ASSISTANT,
             typeLabel = "Branch Analysis",
-            content = "$sourceBranch → $targetBranch\n\n$summary"
+            content = "$sourceBranch → $targetBranch\n\n$summary",
+            sourceBranch = sourceBranch,
+            targetBranch = targetBranch
         ))
     }
 
     fun recordCodePromptResult(promptType: String, promptName: String, result: String) {
         append(ChatMessage(
-            role = ChatMessage.Role.SYSTEM,
+            role = ChatMessage.Role.ASSISTANT,
             typeLabel = promptType,
             content = "Prompt: $promptName\n\n${result.ifBlank { "(empty response)" }}"
         ))
@@ -96,6 +109,10 @@ class ContextBoxStateService(private val project: Project) {
     fun recordChat(userMessage: String, aiResponse: String) {
         append(ChatMessage(role = ChatMessage.Role.USER, content = userMessage.trim()))
         append(ChatMessage(role = ChatMessage.Role.ASSISTANT, content = aiResponse.trim()))
+    }
+
+    fun addUserMessage(content: String) {
+        append(ChatMessage(role = ChatMessage.Role.USER, content = content))
     }
 
     fun clearHistory() {

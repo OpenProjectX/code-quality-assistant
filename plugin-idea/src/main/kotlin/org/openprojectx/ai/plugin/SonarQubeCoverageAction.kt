@@ -188,14 +188,14 @@ private class SonarQubeCoverageClient(private val request: SonarQubeCoverageRequ
             val component = encoded(request.projectKey)
             val projectMeasuresUrl = "$baseUrl/api/measures/component?component=$component&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines"
             HttpClients.logCurl("GET", projectMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
-            val projectMeasures: SonarComponentMeasuresResponse = jsonClient.get(projectMeasuresUrl) {
+            val projectMeasures: SonarComponentMeasuresResponse = jsonClient.safeGet(projectMeasuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
-            }.body()
+            }
             val fileMeasuresUrl = "$baseUrl/api/measures/component_tree?component=$component&metricKeys=coverage,uncovered_lines&qualifiers=FIL&s=metric&metricSort=uncovered_lines&asc=false&ps=${request.maxFiles.coerceIn(1, 100)}"
             HttpClients.logCurl("GET", fileMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
-            val fileMeasures: SonarComponentTreeResponse = jsonClient.get(fileMeasuresUrl) {
+            val fileMeasures: SonarComponentTreeResponse = jsonClient.safeGet(fileMeasuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
-            }.body()
+            }
 
             val project = projectMeasures.component
             return SonarQubeCoverageReport(

@@ -1378,22 +1378,22 @@ private class SonarCubeToolWindowClient(private val config: SonarQubeConfig) {
             val projectKey = encoded(config.projectKey)
             val measuresUrl = "$baseUrl/api/measures/component?component=$projectKey&metricKeys=coverage,line_coverage,branch_coverage,uncovered_lines,bugs,vulnerabilities,code_smells"
             HttpClients.logCurl("GET", measuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
-            val measures: SonarCubeMeasuresResponse = client.get(measuresUrl) {
+            val measures: SonarCubeMeasuresResponse = client.safeGet(measuresUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
-            }.body()
+            }
             val fileMeasuresUrl = "$baseUrl/api/measures/component_tree?component=$projectKey&metricKeys=coverage,uncovered_lines&qualifiers=FIL&ps=500"
             HttpClients.logCurl("GET", fileMeasuresUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
             val fileTree = runCatching {
-                val resp: SonarCubeComponentTreeResponse = client.get(fileMeasuresUrl) {
+                val resp: SonarCubeComponentTreeResponse = client.safeGet(fileMeasuresUrl) {
                     authHeader?.let { header(HttpHeaders.Authorization, it) }
-                }.body()
+                }
                 resp
             }.getOrDefault(SonarCubeComponentTreeResponse())
             val issuesUrl = "$baseUrl/api/issues/search?componentKeys=$projectKey&resolved=false&ps=100&s=SEVERITY&asc=false"
             HttpClients.logCurl("GET", issuesUrl, authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap())
-            val issues: SonarCubeIssuesResponse = client.get(issuesUrl) {
+            val issues: SonarCubeIssuesResponse = client.safeGet(issuesUrl) {
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
-            }.body()
+            }
             val now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
             val fileCoverages = fileTree.components.map { component ->
                 SonarQubeFileCoverage(

@@ -14,6 +14,15 @@ class OpenAiCompatibleProvider(
 ) : LlmProvider {
 
     override suspend fun generateCode(prompt: String): String {
+        return generateCode(
+            listOf(
+                Message("system", "You are a helpful coding assistant. Respond concisely."),
+                Message("user", prompt)
+            )
+        )
+    }
+
+    override suspend fun generateCode(messages: List<Message>): String {
         try {
             val endpoint = settings.endpoint
                 ?: error("llm.endpoint is required for provider='${settings.provider}'")
@@ -21,17 +30,19 @@ class OpenAiCompatibleProvider(
                 ?: error("llm.apiKey or llm.apiKeyEnv is required for provider='${settings.provider}'")
             LlmRuntimeLogger.info("Request start | provider=${settings.provider} | endpoint=$endpoint")
 
+            // Auto-prepend system message if caller didn't include one
+            val hasSystem = messages.any { it.role == "system" }
+            val finalMessages = if (hasSystem) messages
+                else listOf(Message("system", "You are a helpful coding assistant. Respond concisely.")) + messages
+
             val req = ChatCompletionsRequest(
                 model = settings.model,
-                messages = listOf(
-                    Message("system", "You generate code only."),
-                    Message("user", prompt)
-                ),
+                messages = finalMessages,
                 temperature = 0.1,
                 max_tokens = settings.maxTokens.takeIf { it > 0 }
             )
 
-            val curlCmd = buildCurlCommand(endpoint, apiKey, req)
+            val curlCmd = buildCurlCommand(endpoint, req)
             LlmRuntimeLogger.info("curl | $curlCmd")
 
             val response = http.post(endpoint) {
@@ -47,10 +58,15 @@ class OpenAiCompatibleProvider(
             }
 
             val resp: ChatCompletionsResponse = response.body()
-            val result = resp.choices.firstOrNull()?.message?.content
-                ?: error("Empty LLM response")
+            val choice = resp.choices.firstOrNull() ?: error("Empty LLM response")
+            val result = choice.message.content
+            if (choice.finish_reason == "length") {
+                LlmRuntimeLogger.warn(
+                    "Response truncated by token limit (finish_reason=length) | contentLength=${result.length}"
+                )
+            }
             LlmRuntimeLogger.info(
-                "Response parsed | choices=${resp.choices.size} | contentLength=${result.length} | preview=${result.take(200)}"
+                "Response parsed | choices=${resp.choices.size} | contentLength=${result.length} | finish_reason=${choice.finish_reason} | preview=${result.take(200)}"
             )
 
             return result
@@ -76,16 +92,39 @@ class OpenAiCompatibleProvider(
         val choices: List<Choice>
     ) {
         @Serializable
-        data class Choice(val message: Message)
+        data class Choice(val message: Message, val finish_reason: String? = null)
     }
 
     companion object {
         private val curlJson = Json { prettyPrint = false }
 
-        private fun buildCurlCommand(endpoint: String, apiKey: String, req: ChatCompletionsRequest): String {
-            val body = curlJson.encodeToString(ChatCompletionsRequest.serializer(), req)
-                .replace("'", "'\"'\"'")
-            return "curl -X POST '$endpoint' -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' --data '$body'"
+        private fun buildCurlCommand(endpoint: String, req: ChatCompletionsRequest): String {
+            val rawBody = curlJson.encodeToString(ChatCompletionsRequest.serializer(), req)
+            val safeBody = redactSensitivePayload(rawBody)
+            val body = if (safeBody.length <= MAX_LOG_BODY_CHARS) safeBody
+                else safeBody.take(MAX_LOG_BODY_CHARS) + "...<truncated ${safeBody.length - MAX_LOG_BODY_CHARS} chars>"
+            return "curl -X POST ${shellQuote(redactSensitiveUrl(endpoint))} -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' --data ${shellQuote(body)}"
         }
+
+        private fun redactSensitivePayload(text: String): String {
+            var result = text
+            listOf("password", "token", "access_token", "id_token", "refresh_token", "apiKey", "api_key", "secret").forEach { key ->
+                val pattern = Regex("""("${Regex.escape(key)}"\s*:\s*")[^"]*(")""", RegexOption.IGNORE_CASE)
+                result = result.replace(pattern) { "${it.groupValues[1]}***${it.groupValues[2]}" }
+            }
+            return result
+        }
+
+        private fun redactSensitiveUrl(url: String): String {
+            var result = url
+            listOf("token", "access_token", "apiKey", "api_key", "key", "secret").forEach { key ->
+                result = result.replace(Regex("(?i)([?&]${Regex.escape(key)}=)[^&#]*")) { "${it.groupValues[1]}***" }
+            }
+            return result
+        }
+
+        private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+
+        private const val MAX_LOG_BODY_CHARS = 4_000
     }
 }

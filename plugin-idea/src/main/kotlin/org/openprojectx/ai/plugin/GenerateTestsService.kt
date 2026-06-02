@@ -14,6 +14,7 @@ import org.openprojectx.ai.plugin.core.ContractType
 import org.openprojectx.ai.plugin.core.Framework
 import org.openprojectx.ai.plugin.core.GenerationRequest
 import org.openprojectx.ai.plugin.core.PromptBuilder
+import org.openprojectx.ai.plugin.testgen.DependentMethodCollector
 import org.slf4j.LoggerFactory
 
 
@@ -57,6 +58,10 @@ class GenerateTestsService(private val project: Project) {
             JavaHeuristics.derivePackageNameForJava(file, project.basePath)
         } else null
 
+        val dependentMethodSignatures = if (contractType == ContractType.JAVA) {
+            DependentMethodCollector.collect(project, file)
+        } else ""
+
         val req = GenerationRequest(
             contractText = contractText,
             framework = effectiveFramework,
@@ -65,7 +70,8 @@ class GenerateTestsService(private val project: Project) {
             location = effectiveLocation,
             packageName = packageName,
             className = ui.className,
-            outputNotes = ui.notes
+            outputNotes = ui.notes,
+            dependentMethodSignatures = dependentMethodSignatures
         )
 
         val generationTemplate = config.prompts.generation.copy(
@@ -78,25 +84,34 @@ class GenerateTestsService(private val project: Project) {
         val prompt = PromptBuilder.build(req, generationTemplate)
         usage.recordPromptUsage("test.generate", ui.generationPromptProfileName.ifBlank { "default" })
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating tests by AI", true) {
+        // Show user request in Context Box
+        val userMessage = buildString {
+            appendLine("Generate tests for ${ui.className}")
+            appendLine("Framework: ${effectiveFramework.name}")
+            if (!ui.notes.isNullOrBlank()) appendLine("Notes: ${ui.notes}")
+        }
+        ContextBoxStateService.getInstance(project).addUserMessage(userMessage)
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating tests for ${ui.className}", true) {
             override fun run(indicator: ProgressIndicator) {
                 try {
-                    indicator.text = "Preparing generation request..."
-                    indicator.fraction = 0.15
+                    indicator.text = "Preparing request for ${ui.className}..."
+                    indicator.fraction = 0.1
 
-                    indicator.text = "Calling LLM provider..."
-                    indicator.fraction = 0.45
+                    indicator.text = "Calling LLM..."
+                    indicator.isIndeterminate = true
                     val code = authSession.withReloginOnUnauthorized { settings ->
                         val provider = LlmProviderFactory.create(settings)
                         kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
                     }
+                    indicator.isIndeterminate = false
 
-                    indicator.text = "Post-processing generated code..."
-                    indicator.fraction = 0.7
+                    indicator.text = "Processing result..."
+                    indicator.fraction = 0.8
                     val sanitizedCode = sanitizeGeneratedCode(code)
 
-                    indicator.text = "Writing test file to project..."
-                    indicator.fraction = 0.9
+                    indicator.text = "Writing ${ui.className}.java..."
+                    indicator.fraction = 0.95
                     writeGenerated(
                         project = project,
                         framework = effectiveFramework,
@@ -105,9 +120,6 @@ class GenerateTestsService(private val project: Project) {
                         cls = ui.className,
                         code = sanitizedCode
                     )
-
-                    indicator.text = "Finalizing..."
-                    indicator.fraction = 1.0
 
                     notificationState.setState(file.path, GenerationUiState.Done)
                     EditorNotifications.getInstance(project).updateNotifications(file)

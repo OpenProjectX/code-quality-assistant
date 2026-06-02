@@ -6,6 +6,7 @@
 
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.vcs</depends>
     <depends>Git4Idea</depends>
@@ -49,9 +50,9 @@
         <group
                 id="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
                 class="org.openprojectx.ai.plugin.BranchDiffPromptMenuAction"
-                text="Analyze Branch Diff (Choose Prompt)"
+                text="Analyze Branch Diff"
                 description="Choose a configured prompt to analyze branch diff">
-            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
+            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="first"/>
         </group>
         <action
                 id="org.openprojectx.ai.plugin.SummarizeProbeVcsLogInternalToolbarAction"

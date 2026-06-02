@@ -8,6 +8,10 @@ object LlmRuntimeLogger {
         sink?.invoke("LLM | INFO | $message")
     }
 
+    fun warn(message: String) {
+        sink?.invoke("LLM | WARN | $message")
+    }
+
     fun error(message: String) {
         sink?.invoke("LLM | ERROR | $message")
     }

@@ -2,10 +2,12 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindow
@@ -13,10 +15,14 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.runBlocking
+import org.openprojectx.ai.plugin.llm.OpenAiCompatibleProvider
+import org.openprojectx.ai.plugin.pr.AiPullRequestService
+import org.openprojectx.ai.plugin.pr.GitRepositoryContextService
 import java.io.File
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Component
@@ -49,6 +55,15 @@ import org.yaml.snakeyaml.Yaml
 
 class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
 
+    companion object {
+        private const val GUIDE_TAB = "Guide"
+        private const val CONTEXT_TAB = "Context"
+        private const val PROMPT_MANAGER_TAB = "Prompt Manager"
+        private const val SKILL_MANAGER_TAB = "Skill Manager"
+        private const val SONAR_CUBE_TAB = "Sonar Cube"
+        private const val LOG_TAB = "Log"
+    }
+
     override fun shouldBeAvailable(project: Project): Boolean = true
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -57,19 +72,19 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val commonFont = UIManager.getFont("Label.font")
             ?.deriveFont(Font.PLAIN, 13f)
             ?: Font("SansSerif", Font.PLAIN, 13)
-        val bgColor = Color(0x0B, 0x14, 0x19)
-        val fgColor = Color(0xE9, 0xED, 0xEF)
-        val borderColor = Color(0x2A, 0x37, 0x42)
+        val bgColor = ThemeColors.mainBg
+        val fgColor = ThemeColors.mainFg
+        val borderColor = ThemeColors.borderColor
 
-        val inputColor = Color(0x1A, 0x25, 0x2F)
-        val userBubbleColor = Color(0xD9, 0xFD, 0xD3)
-        val userTextColor = Color(0x11, 0x1B, 0x21)
-        val assistantBubbleColor = Color(0xFF, 0xFF, 0xFF)
-        val assistantTextColor = Color(0x11, 0x1B, 0x21)
-        val systemBubbleColor = Color(0x1A, 0x25, 0x2F)
-        val systemAccentColor = Color(0x00, 0xA8, 0x84)
+        val inputColor = ThemeColors.inputBg
+        val userBubbleColor = ThemeColors.userBubbleBg
+        val userTextColor = ThemeColors.userBubbleFg
+        val assistantBubbleColor = ThemeColors.assistantBubbleBg
+        val assistantTextColor = ThemeColors.assistantBubbleFg
+        val systemBubbleColor = ThemeColors.systemBubbleBg
+        val systemAccentColor = ThemeColors.systemAccent
 
-        val chatFont = Font("Segoe UI", Font.PLAIN, 14)
+        val chatFont = Font("SansSerif", Font.PLAIN, 14)
         val bubbleColumns = 36
 
         val messageListPanel = JPanel().apply {
@@ -95,31 +110,56 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val sendButton = JButton("Send")
         val clearButton = JButton("Clear")
 
-        fun buildFollowUpPrompt(snapshot: ContextBoxStateService.Snapshot, userInput: String): String {
-            val recent = snapshot.history.takeLast(6)
-            val contextLines = recent.joinToString("\n") { msg ->
-                val roleTag = when (msg.role) {
-                    ContextBoxStateService.ChatMessage.Role.USER -> "User"
-                    ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "Assistant"
-                    ContextBoxStateService.ChatMessage.Role.SYSTEM -> "System"
+        fun buildFollowUpMessages(snapshot: ContextBoxStateService.Snapshot, userInput: String): List<OpenAiCompatibleProvider.Message> {
+            val recent = snapshot.history.takeLast(10)
+            val messages = mutableListOf<OpenAiCompatibleProvider.Message>()
+            messages.add(OpenAiCompatibleProvider.Message("system", "You are a helpful AI assistant in an IDE context box. Answer the user's questions based on the conversation history. When generating test code, output the COMPLETE class including ALL existing tests that are still valid."))
+            for (msg in recent) {
+                val role = when (msg.role) {
+                    ContextBoxStateService.ChatMessage.Role.USER -> "user"
+                    ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "assistant"
+                    ContextBoxStateService.ChatMessage.Role.SYSTEM -> "assistant"
                 }
-                "[$roleTag]: ${msg.content.take(500)}"
+                messages.add(OpenAiCompatibleProvider.Message(role, msg.content.take(2000)))
             }
-            return """
-                You are a helpful AI assistant in an IDE context box.
 
-                Recent conversation:
-                $contextLines
+            // If regenerating tests, include existing test file so LLM preserves valid tests
+            val lastGenerated = recent.lastOrNull { it.testTargetPath != null }
+            val existingTests = lastGenerated?.testTargetPath?.let { path ->
+                try {
+                    val testFile = File(project.basePath, path)
+                    if (testFile.exists()) testFile.readText(Charsets.UTF_8).take(6000) else ""
+                } catch (_: Exception) { "" }
+            } ?: ""
 
-                User: $userInput
+            val enhancedInput = if (existingTests.isNotBlank()) {
+                "$userInput\n\n--- Existing test file — keep these tests, only modify/add as needed ---\n$existingTests"
+            } else userInput
 
-                Assistant:""".trimIndent()
+            messages.add(OpenAiCompatibleProvider.Message("user", enhancedInput))
+            return messages
         }
 
         fun calculateRows(text: String, cols: Int): Int {
             return text.lines().sumOf { line ->
                 if (line.isEmpty()) 1 else (line.length + cols - 1) / cols
             }.coerceIn(1, 24) + 1
+        }
+
+        fun sanitizeTestCode(raw: String): String {
+            val trimmed = raw.trim()
+            val withoutFence = trimmed
+                .replaceFirst(Regex("^```(?:\\w+)?\\s*\\n?"), "")
+                .replaceFirst(Regex("\\n?```\\s*$"), "")
+            return withoutFence.replace(Regex("\\.{3,}\\s*$"), "")
+                .lines().dropLastWhile { it.isBlank() }.joinToString("\n").trim()
+        }
+
+        fun writeTestFile(project: Project, targetPath: String, code: String) {
+            val projectRoot = project.guessProjectDir() ?: error("Cannot resolve project root")
+            val testFile = File(projectRoot.path, targetPath)
+            testFile.parentFile.mkdirs()
+            testFile.writeText(code, Charsets.UTF_8)
         }
 
         fun createBubble(msg: ContextBoxStateService.ChatMessage): JPanel {
@@ -141,14 +181,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 ContextBoxStateService.ChatMessage.Role.SYSTEM -> msg.typeLabel.ifBlank { "System" }
             }
             val roleColor = when (msg.role) {
-                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x00, 0xA8, 0x84)
-                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0x54, 0x65, 0x6F)
+                ContextBoxStateService.ChatMessage.Role.USER -> ThemeColors.userRole
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> ThemeColors.assistantRole
                 ContextBoxStateService.ChatMessage.Role.SYSTEM -> systemAccentColor
             }
             val timestampColor = when (msg.role) {
-                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x86, 0xBE, 0x9E)
-                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0xA0, 0xA8, 0xAF)
-                ContextBoxStateService.ChatMessage.Role.SYSTEM -> Color(0x66, 0x77, 0x81)
+                ContextBoxStateService.ChatMessage.Role.USER -> ThemeColors.userTimestamp
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> ThemeColors.assistantTimestamp
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> ThemeColors.systemTimestamp
             }
 
             val contentArea = JTextArea().apply {
@@ -181,13 +221,110 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
                 add(header, BorderLayout.NORTH)
                 add(contentArea, BorderLayout.CENTER)
+
+                // Show "Create PR" button for branch analysis results
+                if (msg.typeLabel == "Branch Analysis" && msg.sourceBranch != null && msg.targetBranch != null) {
+                    val prButton = JButton("Create PR →").apply {
+                        font = chatFont.deriveFont(Font.BOLD, 12f)
+                        foreground = ThemeColors.systemAccent
+                        background = bubbleBg
+                        isOpaque = true
+                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isContentAreaFilled = false
+                        isFocusPainted = false
+                        addActionListener {
+                            isEnabled = false
+                            text = "Creating PR..."
+                            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Creating Pull Request", false) {
+                                override fun run(indicator: ProgressIndicator) {
+                                    try {
+                                        val src = msg.sourceBranch
+                                        val tgt = msg.targetBranch
+                                        val ctx = GitRepositoryContextService.resolve(project)
+                                        indicator.text = "Collecting diff for $src vs $tgt..."
+                                        val diff = GitDiffProvider.getDiffBetweenBranches(project, src, tgt)
+                                        indicator.text = "Creating PR..."
+                                        val result = AiPullRequestService(project).createAfterPush(
+                                            remoteUrl = ctx.remoteUrl,
+                                            sourceBranch = src,
+                                            targetBranch = tgt,
+                                            diff = diff
+                                        )
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.info(project, "PR Created", result.url)
+                                        }
+                                    } catch (ex: Exception) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.error(project, "PR Creation Failed", ex.message ?: ex.toString())
+                                        }
+                                    } finally {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            isEnabled = true
+                                            text = "Create PR →"
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    add(prButton, BorderLayout.SOUTH)
+                }
+
+                // Show "Generate Tests →" button for ASSISTANT messages with test code
+                val hasTestCode = msg.role == ContextBoxStateService.ChatMessage.Role.ASSISTANT && (
+                    msg.typeLabel == "Generated Code" ||
+                    msg.testClassName != null ||
+                    (msg.content.contains("@Test") && msg.content.contains("class "))
+                )
+                if (hasTestCode) {
+                    val testBtn = JButton("Generate Tests →").apply {
+                        font = chatFont.deriveFont(Font.BOLD, 12f)
+                        foreground = ThemeColors.systemAccent
+                        background = bubbleBg
+                        isOpaque = true
+                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isContentAreaFilled = false
+                        isFocusPainted = false
+                        addActionListener {
+                            isEnabled = false
+                            text = "Writing..."
+                            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Writing test file", true) {
+                                override fun run(indicator: ProgressIndicator) {
+                                    try {
+                                        indicator.text = "Writing test file..."
+                                        indicator.isIndeterminate = true
+                                        val targetPath = msg.testTargetPath
+                                            ?: stateService.snapshot().history.lastOrNull { it.testTargetPath != null }?.testTargetPath
+                                            ?: error("Cannot find test target path")
+                                        val code = sanitizeTestCode(msg.content)
+                                        writeTestFile(project, targetPath, code)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.info(project, "Tests Updated", targetPath)
+                                        }
+                                    } catch (ex: Exception) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.error(project, "Test Generation Failed", ex.message ?: ex.toString())
+                                        }
+                                    } finally {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            isEnabled = true
+                                            text = "Generate Tests →"
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    add(testBtn, BorderLayout.SOUTH)
+                }
+
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createEmptyBorder(6, 10, 6, 10),
                     BorderFactory.createCompoundBorder(
                         BorderFactory.createLineBorder(
                             when {
-                                isAssistant -> Color(0xE0, 0xE0, 0xE0)
-                                isUser -> Color(0xC7, 0xEB, 0xC1)
+                                isAssistant -> ThemeColors.assistantBubbleBorder
+                                isUser -> ThemeColors.userBubbleBorder
                                 else -> bubbleBg.brighter()
                             },
                             1
@@ -222,7 +359,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             messageListPanel.removeAll()
             if (snapshot.history.isEmpty()) {
                 messageListPanel.add(JLabel("No messages yet.").apply {
-                    foreground = Color(0x66, 0x66, 0x66)
+                    foreground = ThemeColors.emptyText
                     font = chatFont.deriveFont(Font.ITALIC, 13f)
                     border = BorderFactory.createEmptyBorder(20, 20, 20, 20)
                     horizontalAlignment = SwingConstants.CENTER
@@ -248,7 +385,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val userInput = chatInputField.text.trim()
             if (userInput.isBlank()) return@addActionListener
             val snapshot = stateService.snapshot()
-            val prompt = buildFollowUpPrompt(snapshot, userInput)
+            val messages = buildFollowUpMessages(snapshot, userInput)
             sendButton.isEnabled = false
             chatInputField.isEnabled = false
 
@@ -258,7 +395,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                         indicator.text = "Thinking..."
                         val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
                             val provider = LlmProviderFactory.create(settings)
-                            runBlocking { provider.generateCode(prompt) }
+                            runBlocking { provider.generateCode(messages) }
                         }
                         ApplicationManager.getApplication().invokeLater {
                             stateService.recordChat(userInput, response)
@@ -303,24 +440,47 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             foreground = fgColor
         }
 
-        render(stateService.snapshot())
+        val initialSnapshot = stateService.snapshot()
+        render(initialSnapshot)
 
+        fun selectTab(tabs: JTabbedPane, title: String) {
+            for (index in 0 until tabs.tabCount) {
+                if (tabs.getTitleAt(index) == title) {
+                    tabs.selectedIndex = index
+                    return
+                }
+            }
+        }
+
+        val tabs = JTabbedPane().apply {
+            insertTab(GUIDE_TAB, OpenProjectXIcons.GenerateTests, createReadmePanel(project, bgColor, fgColor, borderColor, commonFont), "Feature guide and setup progress", 0)
+            addTab(CONTEXT_TAB, chatPanel)
+            addTab(PROMPT_MANAGER_TAB, createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab(SKILL_MANAGER_TAB, createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
+            addTab(SONAR_CUBE_TAB, SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))
+            if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
+                addTab(LOG_TAB, createLogPanel(bgColor, fgColor, borderColor, commonFont))
+            }
+        }
+        // Some actions record their result before showing the tool window. In that case,
+        // open Context immediately instead of hiding the existing result behind Guide.
+        if (initialSnapshot.history.isNotEmpty()) {
+            selectTab(tabs, CONTEXT_TAB)
+        }
+
+        // Only newly appended messages should focus Context. Clearing or re-rendering
+        // history must not unexpectedly pull users away from Guide or manager tabs.
+        var previousHistorySize = initialSnapshot.history.size
         project.messageBus.connect(toolWindow.disposable).subscribe(
             ContextBoxStateService.TOPIC,
             ContextBoxListener { snapshot ->
                 render(snapshot)
+                if (snapshot.history.size > previousHistorySize) {
+                    selectTab(tabs, CONTEXT_TAB)
+                }
+                previousHistorySize = snapshot.history.size
             }
         )
-
-        val tabs = JTabbedPane().apply {
-            addTab("Context", chatPanel)
-            addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
-            addTab("Skill Manager", createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
-            addTab("Sonar Cube", SonarCubeToolWindowPanel.create(project, bgColor, fgColor, borderColor, commonFont))
-            if (LlmSettingsLoader.loadSettingsModel(project).showLogTab) {
-                addTab("Log", createLogPanel(bgColor, fgColor, borderColor, commonFont))
-            }
-        }
 
         val content = ContentFactory.getInstance().createContent(tabs, "", false)
         toolWindow.contentManager.addContent(content)
@@ -380,11 +540,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun categoryColor(category: PromptCategory): Color = when (category) {
-        PromptCategory.TEST -> Color(0xA7, 0x8B, 0xFA)
-        PromptCategory.COMMIT -> Color(0xF5, 0x9E, 0x0B)
-        PromptCategory.BRANCH_DIFF -> Color(0x38, 0xB2, 0xDF)
-        PromptCategory.CODE_GENERATE -> Color(0x22, 0xC5, 0x5E)
-        PromptCategory.CODE_REVIEW -> Color(0xFB, 0x71, 0x85)
+        PromptCategory.TEST -> ThemeColors.categoryTest
+        PromptCategory.COMMIT -> ThemeColors.categoryCommit
+        PromptCategory.BRANCH_DIFF -> ThemeColors.categoryBranchDiff
+        PromptCategory.CODE_GENERATE -> ThemeColors.categoryCodeGen
+        PromptCategory.CODE_REVIEW -> ThemeColors.categoryCodeReview
     }
 
     private fun scopeColor(isGlobal: Boolean): Color =
@@ -398,12 +558,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         commonFont: Font
     ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val pageColor = Color(0x0F, 0x17, 0x2A)
-        val surfaceColor = Color(0x11, 0x1C, 0x2F)
-        val inputColor = Color(0x0B, 0x12, 0x20)
-        val accentColor = Color(0x3B, 0x82, 0xF6)
-        val mutedColor = Color(0x94, 0xA3, 0xB8)
-        val cardColor = Color(0x14, 0x1F, 0x34)
+        val pageColor = ThemeColors.pageBg
+        val surfaceColor = ThemeColors.surfaceBg
+        val inputColor = ThemeColors.inputBg
+        val accentColor = ThemeColors.accentBlue
+        val mutedColor = ThemeColors.mutedFg
+        val cardColor = ThemeColors.cardBg
         val designBorderColor = borderColor
         val promptFont = UIManager.getFont("EditorPane.font")
             ?.deriveFont(Font.PLAIN, 14f)
@@ -1086,12 +1246,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         commonFont: Font
     ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val pageColor = Color(0x0F, 0x17, 0x2A)
-        val surfaceColor = Color(0x11, 0x1C, 0x2F)
-        val inputColor = Color(0x0B, 0x12, 0x20)
-        val accentColor = Color(0x3B, 0x82, 0xF6)
-        val mutedColor = Color(0x94, 0xA3, 0xB8)
-        val cardColor = Color(0x14, 0x1F, 0x34)
+        val pageColor = ThemeColors.pageBg
+        val surfaceColor = ThemeColors.surfaceBg
+        val inputColor = ThemeColors.inputBg
+        val accentColor = ThemeColors.accentBlue
+        val mutedColor = ThemeColors.mutedFg
+        val cardColor = ThemeColors.cardBg
         val designBorderColor = borderColor
         val skillFont = UIManager.getFont("EditorPane.font")?.deriveFont(Font.PLAIN, 14f) ?: Font("JetBrains Mono", Font.PLAIN, 14)
         val listModel = DefaultListModel<SkillListRow>()
@@ -1757,6 +1917,426 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 viewport.background = bgColor
                 background = bgColor
                 border = BorderFactory.createLineBorder(borderColor)
+            }, BorderLayout.CENTER)
+        }
+    }
+
+    private fun createReadmePanel(
+        project: Project,
+        bgColor: Color,
+        fgColor: Color,
+        borderColor: Color,
+        commonFont: Font
+    ): JPanel {
+        val pageColor = ThemeColors.pageBg
+        val surfaceColor = ThemeColors.surfaceBg
+        val cardColor = ThemeColors.cardBg
+        val mutedColor = ThemeColors.mutedFg
+        val accentColor = ThemeColors.accentBlue
+        val bodyFont = commonFont.deriveFont(Font.PLAIN, 13f)
+        val smallFont = commonFont.deriveFont(Font.PLAIN, 12f)
+        val sectionFont = commonFont.deriveFont(Font.BOLD, 17f)
+        val titleFont = commonFont.deriveFont(Font.BOLD, 22f)
+
+        data class GuideFeature(
+            val icon: String,
+            val title: String,
+            val summary: String,
+            val category: String,
+            val intro: String,
+            val steps: List<Pair<String, String>>,
+            val configurable: List<String>,
+            val bestFor: List<String>,
+            val tip: String,
+            val actionLabel: String,
+            val action: () -> Unit
+        )
+
+        lateinit var contentRoot: JPanel
+
+        fun selectTab(tabName: String) {
+            val tabs = javax.swing.SwingUtilities.getAncestorOfClass(JTabbedPane::class.java, contentRoot)
+            if (tabs is JTabbedPane) {
+                for (index in 0 until tabs.tabCount) {
+                    if (tabs.getTitleAt(index) == tabName) {
+                        tabs.selectedIndex = index
+                        return
+                    }
+                }
+            }
+        }
+
+        fun showUsage(title: String, message: String) {
+            Notifications.info(project, title, message)
+        }
+
+        fun featureButton(text: String, action: () -> Unit) = JButton(text).apply {
+            font = bodyFont.deriveFont(Font.BOLD)
+            foreground = accentColor
+            background = cardColor
+            border = BorderFactory.createEmptyBorder(5, 0, 5, 0)
+            isContentAreaFilled = false
+            isFocusPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            addActionListener { action() }
+        }
+
+        val features = listOf(
+            GuideFeature(
+                icon = "⚗", title = "Generate Tests", category = "Test Generation",
+                summary = "Generate unit or API tests from Java code or OpenAPI contracts.",
+                intro = "Generate comprehensive JUnit 5 / Rest Assured or Karate tests from Java source files and OpenAPI contracts.",
+                steps = listOf(
+                    "Open a supported file" to "Open a Java source file or an OpenAPI .yaml/.yml contract in the editor.",
+                    "Click Generate Tests By AI" to "Use the action in the editor notification bar shown above the file.",
+                    "Configure generation options" to "Choose framework, prompt profile, output path, class name, package, base URL and extra notes.",
+                    "Review the generated file" to "The generated test is written to the selected path and its diff is added to Context Box."
+                ),
+                configurable = listOf("Framework: JUnit 5 / Rest Assured or Karate", "Prompt profile", "Output location", "Class and package name", "Base URL and extra notes"),
+                bestFor = listOf("Java unit and API tests", "OpenAPI contract testing", "Boundary and edge-case coverage"),
+                tip = "External method signatures called by the Java target are collected to help the LLM produce more accurate mocks.",
+                actionLabel = "Show me how",
+                action = { showUsage("Generate Tests", "Open a Java source or OpenAPI .yaml/.yml file, then click 'Generate Tests By AI' in the editor notification bar.") }
+            ),
+            GuideFeature(
+                icon = "✎", title = "Commit Message", category = "Commit Generation",
+                summary = "Generate a meaningful commit message from your current changes.",
+                intro = "Use an AI-generated commit message based on your staged and unstaged Git diff.",
+                steps = listOf(
+                    "Open the Commit window" to "Open the IDE VCS Commit tool window.",
+                    "Choose Generate Commit Message" to "Use the commit toolbar action and select a configured prompt profile.",
+                    "Review the generated message" to "The generated text is inserted into the Commit Message field for editing before commit."
+                ),
+                configurable = listOf("Commit prompt profile", "Prompt templates in Prompt Manager", "Optional JIRA-style branch prefix"),
+                bestFor = listOf("Consistent commit conventions", "Summarizing multi-file changes", "Reducing repetitive writing"),
+                tip = "If the branch name contains a JIRA-style key such as ABC-123, it is used as a commit-message prefix.",
+                actionLabel = "Open Prompt Manager",
+                action = { selectTab(PROMPT_MANAGER_TAB) }
+            ),
+            GuideFeature(
+                icon = "⑂", title = "Branch Analysis", category = "Branch Compare",
+                summary = "Analyze differences between branches or commits with AI insights.",
+                intro = "Analyze a Git branch or commit comparison with a selectable branch-diff prompt profile.",
+                steps = listOf(
+                    "Open Git Log" to "Open VCS → Log in the IDE.",
+                    "Select a target" to "Right-click the branch or commit that you want to compare with the current branch.",
+                    "Choose Analyze Branch Diff" to "Select a configured prompt profile from the context menu.",
+                    "Review in Context Box" to "The AI branch summary appears in the Context tab and can be used to create a PR."
+                ),
+                configurable = listOf("Branch-diff prompt profile", "Target branch or selected commit", "Follow-up questions in Context Box"),
+                bestFor = listOf("Pull-request preparation", "Risk review", "Understanding unfamiliar changes"),
+                tip = "Branch analysis uses the current branch as the source and the Git Log selection as the comparison target.",
+                actionLabel = "Open Context",
+                action = { selectTab(CONTEXT_TAB) }
+            ),
+            GuideFeature(
+                icon = "⇧", title = "Push & Create PR", category = "Pull Request",
+                summary = "Push your current branch and create a pull request with an AI summary.",
+                intro = "Push the checked-out Git branch and optionally create a Bitbucket or GitHub pull request with an AI-generated title and description.",
+                steps = listOf(
+                    "Open the Commit window" to "Use the VCS Commit tool window after preparing your branch.",
+                    "Choose Push and Create PR" to "Open the push dialog from the commit toolbar action.",
+                    "Select a target branch" to "Keep or change the target branch and choose whether to create a PR after push.",
+                    "Open the created PR" to "The IDE notification shows the pull-request URL after creation."
+                ),
+                configurable = listOf("Create PR after push", "Target branch", "PR prompt template", "Git remote credentials"),
+                bestFor = listOf("Fast PR creation", "Consistent PR summaries", "Bitbucket and GitHub repositories"),
+                tip = "A supported Bitbucket or GitHub remote and valid credentials are required for automatic pull-request creation.",
+                actionLabel = "Show me how",
+                action = { showUsage("Push & Create PR", "Open the VCS Commit window and choose 'Push and Create PR' from its toolbar.") }
+            ),
+            GuideFeature(
+                icon = "</>", title = "Code Review", category = "Code Review",
+                summary = "Review selected code and get AI suggestions and improvements.",
+                intro = "Review selected editor code using a Code Review prompt from Prompt Manager.",
+                steps = listOf(
+                    "Select code" to "Highlight the code you want to review in the editor.",
+                    "Open Code Generate & Review" to "Right-click the selection and choose the editor context-menu action.",
+                    "Choose a Code Review prompt" to "Select a review profile and optionally add extra requirements.",
+                    "Read the response" to "The LLM review is displayed in the Context tab."
+                ),
+                configurable = listOf("Code Review prompt profile", "Extra requirements", "Reusable prompt templates"),
+                bestFor = listOf("Focused code review", "Maintainability feedback", "Security and performance checks"),
+                tip = "Code Review and Code Generate share the same editor context-menu action; choose the appropriate prompt category in the dialog.",
+                actionLabel = "Open Prompt Manager",
+                action = { selectTab(PROMPT_MANAGER_TAB) }
+            ),
+            GuideFeature(
+                icon = "✣", title = "Code Generate", category = "Code Generation",
+                summary = "Generate code for the selected context and your requirements.",
+                intro = "Generate code from the selected editor context using a Code Generate prompt and optional extra requirements.",
+                steps = listOf(
+                    "Select context code" to "Highlight relevant code in the editor.",
+                    "Open Code Generate & Review" to "Right-click the selection and choose the editor context-menu action.",
+                    "Choose a Code Generate prompt" to "Select a generation profile and describe the desired change.",
+                    "Review the response" to "The generated suggestion is displayed in the Context tab."
+                ),
+                configurable = listOf("Code Generate prompt profile", "Extra requirements", "Reusable prompt templates"),
+                bestFor = listOf("Boilerplate generation", "Small focused enhancements", "Context-aware implementation ideas"),
+                tip = "Provide a focused selection and explicit requirements to keep generated changes relevant.",
+                actionLabel = "Open Prompt Manager",
+                action = { selectTab(PROMPT_MANAGER_TAB) }
+            ),
+            GuideFeature(
+                icon = "♢", title = "SonarQube Coverage", category = "Coverage Analysis",
+                summary = "Inspect coverage, scan issues and generate missing tests.",
+                intro = "Fetch SonarQube coverage or run local inspections, then optionally generate missing tests with AI.",
+                steps = listOf(
+                    "Open SonarQube Coverage" to "Choose Tools → SonarQube Coverage.",
+                    "Configure the scan" to "Enter server credentials for online mode or enable local / mock scan mode.",
+                    "Review metrics and issues" to "Inspect coverage cards, file coverage and local inspection findings in Sonar Cube.",
+                    "Generate missing tests" to "Optionally ask AI to generate tests for files below the target coverage."
+                ),
+                configurable = listOf("Server URL and project key", "Token or username/password", "Target coverage and max files", "Local, mock or online scan mode"),
+                bestFor = listOf("Coverage gap analysis", "Local code-quality inspections", "Generating missing tests"),
+                tip = "Local scan mode detects TODO/FIXME markers, printStackTrace calls, empty catches and hard-coded secrets without a SonarQube server.",
+                actionLabel = "Open Sonar Cube",
+                action = { selectTab(SONAR_CUBE_TAB) }
+            ),
+            GuideFeature(
+                icon = "☵", title = "AI Chat (Context Box)", category = "Context Box",
+                summary = "Chat with AI using recent project-task context and history.",
+                intro = "Ask follow-up questions in a multi-turn chat that includes recent Context Box history.",
+                steps = listOf(
+                    "Open Context" to "Switch to the Context tab in AI Context Box.",
+                    "Type a message" to "Ask a follow-up question, request a translation or refine a generated test.",
+                    "Send with Enter" to "The recent conversation history is sent to the configured LLM.",
+                    "Apply regenerated tests" to "When test code is returned, use Generate Tests → to overwrite the target file."
+                ),
+                configurable = listOf("LLM provider and model", "API key or login flow", "Recent conversation context"),
+                bestFor = listOf("Follow-up questions", "Refining generated tests", "Explaining branch analysis"),
+                tip = "Context Box retains the most recent messages so follow-up requests can build on earlier generated output.",
+                actionLabel = "Open Context",
+                action = { selectTab(CONTEXT_TAB) }
+            )
+        )
+
+        val model = LlmSettingsLoader.loadSettingsModel(project)
+        val repoConfigured = model.bitbucketPromptRepoEnabled && model.bitbucketPromptRepoUrl.isNotBlank()
+        val llmConfigured = model.llmModel.isNotBlank() && (
+            (model.llmProvider == "openai-compatible" && model.llmEndpoint.isNotBlank() &&
+                (model.llmApiKey.isNotBlank() || model.llmApiKeyEnv.isNotBlank() || model.loginEnabled)) ||
+                (model.llmProvider == "template" && model.llmTemplateEnabled && model.llmTemplateUrl.isNotBlank())
+            )
+        val setupCount = listOf(repoConfigured, llmConfigured).count { it }
+
+        fun panelBorder() = BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(borderColor),
+            BorderFactory.createEmptyBorder(14, 16, 14, 16)
+        )
+
+        fun label(text: String, font: Font = bodyFont, color: Color = fgColor) = JLabel(text).apply {
+            this.font = font
+            foreground = color
+        }
+
+        fun html(text: String, width: Int, font: Font = bodyFont, color: Color = fgColor) = JLabel(
+            "<html><body style='width:${width}px'>${text}</body></html>"
+        ).apply {
+            this.font = font
+            foreground = color
+        }
+
+        contentRoot = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = pageColor
+            border = BorderFactory.createEmptyBorder(18, 18, 18, 18)
+        }
+
+        val detailsContainer = JPanel(BorderLayout()).apply {
+            background = pageColor
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
+        lateinit var showFeature: (GuideFeature) -> Unit
+        val cardPanels = mutableListOf<JPanel>()
+
+        fun createCard(feature: GuideFeature): JPanel {
+            val card = JPanel(BorderLayout(0, 8)).apply {
+                background = cardColor
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(borderColor),
+                    BorderFactory.createEmptyBorder(14, 14, 12, 14)
+                )
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            }
+            card.add(label(feature.icon, commonFont.deriveFont(Font.BOLD, 22f), accentColor), BorderLayout.NORTH)
+            card.add(JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(label(feature.title, commonFont.deriveFont(Font.BOLD, 14f)))
+                add(Box.createVerticalStrut(6))
+                add(html(feature.summary, 176, smallFont, mutedColor))
+            }, BorderLayout.CENTER)
+            card.add(featureButton("Learn more  →") { showFeature(feature) }, BorderLayout.SOUTH)
+            val listener = object : MouseAdapter() {
+                override fun mouseClicked(event: MouseEvent) = showFeature(feature)
+            }
+            card.addMouseListener(listener)
+            card.preferredSize = Dimension(218, 168)
+            card.minimumSize = Dimension(218, 168)
+            card.maximumSize = Dimension(218, 168)
+            cardPanels += card
+            return card
+        }
+
+        val welcomePanel = JPanel(BorderLayout(16, 0)).apply {
+            background = surfaceColor
+            border = panelBorder()
+            alignmentX = Component.LEFT_ALIGNMENT
+            maximumSize = Dimension(Int.MAX_VALUE, 184)
+            add(JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(label("Welcome to CQA 👋", titleFont))
+                add(Box.createVerticalStrut(6))
+                add(label("Complete this workflow before using AI features:", bodyFont, mutedColor))
+                add(Box.createVerticalStrut(10))
+                add(html("<b><font color='#3B82F6'>1.</font>&nbsp; Configure Bitbucket Prompt Repo</b> in Settings → Login&nbsp;&nbsp; → &nbsp;&nbsp;<b><font color='#3B82F6'>2.</font>&nbsp; Click Import Repo Config</b>&nbsp;&nbsp; → &nbsp;&nbsp;<b><font color='#3B82F6'>3.</font>&nbsp; Configure LLM and log in</b> from Settings → LLM", 600, bodyFont, fgColor))
+                add(Box.createVerticalStrut(10))
+                add(featureButton("Open setup settings  →") {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, AiTestSettingsConfigurable::class.java)
+                })
+            }, BorderLayout.CENTER)
+            add(JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(label("$setupCount / 2", commonFont.deriveFont(Font.BOLD, 18f), ThemeColors.systemAccent).apply {
+                    horizontalAlignment = SwingConstants.CENTER
+                    alignmentX = Component.CENTER_ALIGNMENT
+                })
+                add(Box.createVerticalStrut(8))
+                add(JButton("Setup Guide").apply {
+                    font = bodyFont
+                    isFocusPainted = false
+                    alignmentX = Component.CENTER_ALIGNMENT
+                    addActionListener { ShowSettingsUtil.getInstance().showSettingsDialog(project, AiTestSettingsConfigurable::class.java) }
+                })
+            }, BorderLayout.EAST)
+        }
+        contentRoot.add(welcomePanel)
+        contentRoot.add(Box.createVerticalStrut(20))
+        contentRoot.add(label("What would you like to do?", sectionFont).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        contentRoot.add(Box.createVerticalStrut(4))
+        contentRoot.add(label("Select a feature to see how it works. Drag the horizontal scroll bar to browse all eight features.", bodyFont, mutedColor).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        contentRoot.add(Box.createVerticalStrut(12))
+
+        val cardsPanel = JPanel(java.awt.GridLayout(1, 0, 12, 0)).apply {
+            background = pageColor
+            border = BorderFactory.createEmptyBorder(0, 0, 4, 0)
+            features.forEach { add(createCard(it)) }
+            preferredSize = Dimension(features.size * 218 + (features.size - 1) * 12, 176)
+        }
+        contentRoot.add(JBScrollPane(
+            cardsPanel,
+            javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+            javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS
+        ).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            preferredSize = Dimension(760, 210)
+            maximumSize = Dimension(Int.MAX_VALUE, 210)
+            border = BorderFactory.createLineBorder(borderColor)
+            viewport.background = pageColor
+            horizontalScrollBar.unitIncrement = 24
+            horizontalScrollBar.blockIncrement = 220
+            toolTipText = "Drag the horizontal scroll bar to browse all features"
+        })
+        contentRoot.add(Box.createVerticalStrut(20))
+        contentRoot.add(detailsContainer)
+
+        showFeature = { feature ->
+            cardPanels.forEachIndexed { index, card ->
+                card.border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(if (features[index] == feature) accentColor else borderColor),
+                    BorderFactory.createEmptyBorder(14, 14, 12, 14)
+                )
+            }
+            val stepsPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(label("How it works", commonFont.deriveFont(Font.BOLD, 15f)))
+                add(Box.createVerticalStrut(8))
+                feature.steps.forEachIndexed { index, step ->
+                    add(html("<b><font color='#3B82F6'>${index + 1}.</font>&nbsp;&nbsp;${step.first}</b><br>&nbsp;&nbsp;&nbsp;&nbsp;${step.second}", 420, bodyFont, fgColor))
+                    add(Box.createVerticalStrut(10))
+                }
+            }
+            val factsPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(JPanel().apply {
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    background = surfaceColor
+                    border = panelBorder()
+                    add(label("You can configure", commonFont.deriveFont(Font.BOLD, 14f)))
+                    add(Box.createVerticalStrut(6))
+                    feature.configurable.forEach { add(label("✓  $it", smallFont, ThemeColors.categoryCodeGen)) }
+                })
+                add(Box.createVerticalStrut(10))
+                add(JPanel().apply {
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    background = surfaceColor
+                    border = panelBorder()
+                    add(label("Best for", commonFont.deriveFont(Font.BOLD, 14f)))
+                    add(Box.createVerticalStrut(6))
+                    feature.bestFor.forEach { add(label("•  $it", smallFont, mutedColor)) }
+                })
+            }
+            detailsContainer.removeAll()
+            detailsContainer.add(JPanel(BorderLayout(12, 12)).apply {
+                background = surfaceColor
+                border = panelBorder()
+                add(JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                        isOpaque = false
+                        add(label("${feature.icon}  ${feature.title}", commonFont.deriveFont(Font.BOLD, 18f)))
+                        add(label(feature.category, smallFont, ThemeColors.categoryTest).apply {
+                            border = BorderFactory.createEmptyBorder(3, 6, 3, 6)
+                            isOpaque = true
+                            background = cardColor
+                        })
+                    }, BorderLayout.WEST)
+                    add(JButton(feature.actionLabel).apply {
+                        font = bodyFont.deriveFont(Font.BOLD)
+                        foreground = accentColor
+                        isFocusPainted = false
+                        addActionListener { feature.action() }
+                    }, BorderLayout.EAST)
+                    add(html(feature.intro, 560, bodyFont, mutedColor), BorderLayout.SOUTH)
+                }, BorderLayout.NORTH)
+                add(JPanel(BorderLayout(20, 0)).apply {
+                    isOpaque = false
+                    add(stepsPanel, BorderLayout.CENTER)
+                    add(factsPanel, BorderLayout.EAST)
+                }, BorderLayout.CENTER)
+                add(JPanel(BorderLayout()).apply {
+                    background = cardColor
+                    border = panelBorder()
+                    add(html("<b>💡 Tips</b><br>${feature.tip}", 680, smallFont, mutedColor), BorderLayout.CENTER)
+                }, BorderLayout.SOUTH)
+            }, BorderLayout.CENTER)
+            detailsContainer.revalidate()
+            detailsContainer.repaint()
+        }
+        showFeature(features.first())
+
+        contentRoot.add(Box.createVerticalStrut(14))
+        contentRoot.add(JPanel(BorderLayout()).apply {
+            background = surfaceColor
+            border = BorderFactory.createEmptyBorder(8, 10, 8, 10)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(label("⚙  Setup Workflow", bodyFont, mutedColor), BorderLayout.WEST)
+            add(label("${if (repoConfigured) "✓" else "○"} Repo details     2  Import config     ${if (llmConfigured) "✓" else "○"} LLM login     4  Try a feature", bodyFont, mutedColor), BorderLayout.EAST)
+        })
+
+        return JPanel(BorderLayout()).apply {
+            background = bgColor
+            add(JBScrollPane(contentRoot).apply {
+                viewport.background = pageColor
+                background = pageColor
+                border = BorderFactory.createEmptyBorder()
+                verticalScrollBar.unitIncrement = 16
             }, BorderLayout.CENTER)
         }
     }
