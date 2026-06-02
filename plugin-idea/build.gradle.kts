@@ -95,7 +95,7 @@ dependencies {
             create(type, version)
         }
         instrumentationTools()
-        bundledPlugins(listOf("org.jetbrains.plugins.yaml","Git4Idea"))
+        bundledPlugins(listOf("org.jetbrains.plugins.yaml","Git4Idea","com.intellij.java"))
     }
 
     implementation(project(":core"))

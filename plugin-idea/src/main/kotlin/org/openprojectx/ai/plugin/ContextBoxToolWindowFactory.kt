@@ -2,6 +2,7 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
@@ -13,6 +14,9 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.runBlocking
+import org.openprojectx.ai.plugin.llm.OpenAiCompatibleProvider
+import org.openprojectx.ai.plugin.pr.AiPullRequestService
+import org.openprojectx.ai.plugin.pr.GitRepositoryContextService
 import java.io.File
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -57,19 +61,19 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val commonFont = UIManager.getFont("Label.font")
             ?.deriveFont(Font.PLAIN, 13f)
             ?: Font("SansSerif", Font.PLAIN, 13)
-        val bgColor = Color(0x0B, 0x14, 0x19)
-        val fgColor = Color(0xE9, 0xED, 0xEF)
-        val borderColor = Color(0x2A, 0x37, 0x42)
+        val bgColor = ThemeColors.mainBg
+        val fgColor = ThemeColors.mainFg
+        val borderColor = ThemeColors.borderColor
 
-        val inputColor = Color(0x1A, 0x25, 0x2F)
-        val userBubbleColor = Color(0xD9, 0xFD, 0xD3)
-        val userTextColor = Color(0x11, 0x1B, 0x21)
-        val assistantBubbleColor = Color(0xFF, 0xFF, 0xFF)
-        val assistantTextColor = Color(0x11, 0x1B, 0x21)
-        val systemBubbleColor = Color(0x1A, 0x25, 0x2F)
-        val systemAccentColor = Color(0x00, 0xA8, 0x84)
+        val inputColor = ThemeColors.inputBg
+        val userBubbleColor = ThemeColors.userBubbleBg
+        val userTextColor = ThemeColors.userBubbleFg
+        val assistantBubbleColor = ThemeColors.assistantBubbleBg
+        val assistantTextColor = ThemeColors.assistantBubbleFg
+        val systemBubbleColor = ThemeColors.systemBubbleBg
+        val systemAccentColor = ThemeColors.systemAccent
 
-        val chatFont = Font("Segoe UI", Font.PLAIN, 14)
+        val chatFont = Font("SansSerif", Font.PLAIN, 14)
         val bubbleColumns = 36
 
         val messageListPanel = JPanel().apply {
@@ -95,31 +99,56 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         val sendButton = JButton("Send")
         val clearButton = JButton("Clear")
 
-        fun buildFollowUpPrompt(snapshot: ContextBoxStateService.Snapshot, userInput: String): String {
-            val recent = snapshot.history.takeLast(6)
-            val contextLines = recent.joinToString("\n") { msg ->
-                val roleTag = when (msg.role) {
-                    ContextBoxStateService.ChatMessage.Role.USER -> "User"
-                    ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "Assistant"
-                    ContextBoxStateService.ChatMessage.Role.SYSTEM -> "System"
+        fun buildFollowUpMessages(snapshot: ContextBoxStateService.Snapshot, userInput: String): List<OpenAiCompatibleProvider.Message> {
+            val recent = snapshot.history.takeLast(10)
+            val messages = mutableListOf<OpenAiCompatibleProvider.Message>()
+            messages.add(OpenAiCompatibleProvider.Message("system", "You are a helpful AI assistant in an IDE context box. Answer the user's questions based on the conversation history. When generating test code, output the COMPLETE class including ALL existing tests that are still valid."))
+            for (msg in recent) {
+                val role = when (msg.role) {
+                    ContextBoxStateService.ChatMessage.Role.USER -> "user"
+                    ContextBoxStateService.ChatMessage.Role.ASSISTANT -> "assistant"
+                    ContextBoxStateService.ChatMessage.Role.SYSTEM -> "assistant"
                 }
-                "[$roleTag]: ${msg.content.take(500)}"
+                messages.add(OpenAiCompatibleProvider.Message(role, msg.content.take(2000)))
             }
-            return """
-                You are a helpful AI assistant in an IDE context box.
 
-                Recent conversation:
-                $contextLines
+            // If regenerating tests, include existing test file so LLM preserves valid tests
+            val lastGenerated = recent.lastOrNull { it.testTargetPath != null }
+            val existingTests = lastGenerated?.testTargetPath?.let { path ->
+                try {
+                    val testFile = File(project.basePath, path)
+                    if (testFile.exists()) testFile.readText(Charsets.UTF_8).take(6000) else ""
+                } catch (_: Exception) { "" }
+            } ?: ""
 
-                User: $userInput
+            val enhancedInput = if (existingTests.isNotBlank()) {
+                "$userInput\n\n--- Existing test file — keep these tests, only modify/add as needed ---\n$existingTests"
+            } else userInput
 
-                Assistant:""".trimIndent()
+            messages.add(OpenAiCompatibleProvider.Message("user", enhancedInput))
+            return messages
         }
 
         fun calculateRows(text: String, cols: Int): Int {
             return text.lines().sumOf { line ->
                 if (line.isEmpty()) 1 else (line.length + cols - 1) / cols
             }.coerceIn(1, 24) + 1
+        }
+
+        fun sanitizeTestCode(raw: String): String {
+            val trimmed = raw.trim()
+            val withoutFence = trimmed
+                .replaceFirst(Regex("^```(?:\\w+)?\\s*\\n?"), "")
+                .replaceFirst(Regex("\\n?```\\s*$"), "")
+            return withoutFence.replace(Regex("\\.{3,}\\s*$"), "")
+                .lines().dropLastWhile { it.isBlank() }.joinToString("\n").trim()
+        }
+
+        fun writeTestFile(project: Project, targetPath: String, code: String) {
+            val projectRoot = project.guessProjectDir() ?: error("Cannot resolve project root")
+            val testFile = File(projectRoot.path, targetPath)
+            testFile.parentFile.mkdirs()
+            testFile.writeText(code, Charsets.UTF_8)
         }
 
         fun createBubble(msg: ContextBoxStateService.ChatMessage): JPanel {
@@ -141,14 +170,14 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 ContextBoxStateService.ChatMessage.Role.SYSTEM -> msg.typeLabel.ifBlank { "System" }
             }
             val roleColor = when (msg.role) {
-                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x00, 0xA8, 0x84)
-                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0x54, 0x65, 0x6F)
+                ContextBoxStateService.ChatMessage.Role.USER -> ThemeColors.userRole
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> ThemeColors.assistantRole
                 ContextBoxStateService.ChatMessage.Role.SYSTEM -> systemAccentColor
             }
             val timestampColor = when (msg.role) {
-                ContextBoxStateService.ChatMessage.Role.USER -> Color(0x86, 0xBE, 0x9E)
-                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> Color(0xA0, 0xA8, 0xAF)
-                ContextBoxStateService.ChatMessage.Role.SYSTEM -> Color(0x66, 0x77, 0x81)
+                ContextBoxStateService.ChatMessage.Role.USER -> ThemeColors.userTimestamp
+                ContextBoxStateService.ChatMessage.Role.ASSISTANT -> ThemeColors.assistantTimestamp
+                ContextBoxStateService.ChatMessage.Role.SYSTEM -> ThemeColors.systemTimestamp
             }
 
             val contentArea = JTextArea().apply {
@@ -181,13 +210,110 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
                 add(header, BorderLayout.NORTH)
                 add(contentArea, BorderLayout.CENTER)
+
+                // Show "Create PR" button for branch analysis results
+                if (msg.typeLabel == "Branch Analysis" && msg.sourceBranch != null && msg.targetBranch != null) {
+                    val prButton = JButton("Create PR →").apply {
+                        font = chatFont.deriveFont(Font.BOLD, 12f)
+                        foreground = ThemeColors.systemAccent
+                        background = bubbleBg
+                        isOpaque = true
+                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isContentAreaFilled = false
+                        isFocusPainted = false
+                        addActionListener {
+                            isEnabled = false
+                            text = "Creating PR..."
+                            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Creating Pull Request", false) {
+                                override fun run(indicator: ProgressIndicator) {
+                                    try {
+                                        val src = msg.sourceBranch
+                                        val tgt = msg.targetBranch
+                                        val ctx = GitRepositoryContextService.resolve(project)
+                                        indicator.text = "Collecting diff for $src vs $tgt..."
+                                        val diff = GitDiffProvider.getDiffBetweenBranches(project, src, tgt)
+                                        indicator.text = "Creating PR..."
+                                        val result = AiPullRequestService(project).createAfterPush(
+                                            remoteUrl = ctx.remoteUrl,
+                                            sourceBranch = src,
+                                            targetBranch = tgt,
+                                            diff = diff
+                                        )
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.info(project, "PR Created", result.url)
+                                        }
+                                    } catch (ex: Exception) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.error(project, "PR Creation Failed", ex.message ?: ex.toString())
+                                        }
+                                    } finally {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            isEnabled = true
+                                            text = "Create PR →"
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    add(prButton, BorderLayout.SOUTH)
+                }
+
+                // Show "Generate Tests →" button for ASSISTANT messages with test code
+                val hasTestCode = msg.role == ContextBoxStateService.ChatMessage.Role.ASSISTANT && (
+                    msg.typeLabel == "Generated Code" ||
+                    msg.testClassName != null ||
+                    (msg.content.contains("@Test") && msg.content.contains("class "))
+                )
+                if (hasTestCode) {
+                    val testBtn = JButton("Generate Tests →").apply {
+                        font = chatFont.deriveFont(Font.BOLD, 12f)
+                        foreground = ThemeColors.systemAccent
+                        background = bubbleBg
+                        isOpaque = true
+                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isContentAreaFilled = false
+                        isFocusPainted = false
+                        addActionListener {
+                            isEnabled = false
+                            text = "Writing..."
+                            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Writing test file", true) {
+                                override fun run(indicator: ProgressIndicator) {
+                                    try {
+                                        indicator.text = "Writing test file..."
+                                        indicator.isIndeterminate = true
+                                        val targetPath = msg.testTargetPath
+                                            ?: stateService.snapshot().history.lastOrNull { it.testTargetPath != null }?.testTargetPath
+                                            ?: error("Cannot find test target path")
+                                        val code = sanitizeTestCode(msg.content)
+                                        writeTestFile(project, targetPath, code)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.info(project, "Tests Updated", targetPath)
+                                        }
+                                    } catch (ex: Exception) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            Notifications.error(project, "Test Generation Failed", ex.message ?: ex.toString())
+                                        }
+                                    } finally {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            isEnabled = true
+                                            text = "Generate Tests →"
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    add(testBtn, BorderLayout.SOUTH)
+                }
+
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createEmptyBorder(6, 10, 6, 10),
                     BorderFactory.createCompoundBorder(
                         BorderFactory.createLineBorder(
                             when {
-                                isAssistant -> Color(0xE0, 0xE0, 0xE0)
-                                isUser -> Color(0xC7, 0xEB, 0xC1)
+                                isAssistant -> ThemeColors.assistantBubbleBorder
+                                isUser -> ThemeColors.userBubbleBorder
                                 else -> bubbleBg.brighter()
                             },
                             1
@@ -222,7 +348,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             messageListPanel.removeAll()
             if (snapshot.history.isEmpty()) {
                 messageListPanel.add(JLabel("No messages yet.").apply {
-                    foreground = Color(0x66, 0x66, 0x66)
+                    foreground = ThemeColors.emptyText
                     font = chatFont.deriveFont(Font.ITALIC, 13f)
                     border = BorderFactory.createEmptyBorder(20, 20, 20, 20)
                     horizontalAlignment = SwingConstants.CENTER
@@ -248,7 +374,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             val userInput = chatInputField.text.trim()
             if (userInput.isBlank()) return@addActionListener
             val snapshot = stateService.snapshot()
-            val prompt = buildFollowUpPrompt(snapshot, userInput)
+            val messages = buildFollowUpMessages(snapshot, userInput)
             sendButton.isEnabled = false
             chatInputField.isEnabled = false
 
@@ -258,7 +384,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                         indicator.text = "Thinking..."
                         val response = LlmAuthSessionService.getInstance(project).withReloginOnUnauthorized { settings ->
                             val provider = LlmProviderFactory.create(settings)
-                            runBlocking { provider.generateCode(prompt) }
+                            runBlocking { provider.generateCode(messages) }
                         }
                         ApplicationManager.getApplication().invokeLater {
                             stateService.recordChat(userInput, response)
@@ -313,6 +439,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         )
 
         val tabs = JTabbedPane().apply {
+            insertTab("Readme", OpenProjectXIcons.GenerateTests, createReadmePanel(bgColor, fgColor, borderColor, commonFont), "Feature overview and quick start", 0)
             addTab("Context", chatPanel)
             addTab("Prompt Manager", createPromptManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
             addTab("Skill Manager", createSkillManagerPanel(project, bgColor, fgColor, borderColor, commonFont))
@@ -380,11 +507,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun categoryColor(category: PromptCategory): Color = when (category) {
-        PromptCategory.TEST -> Color(0xA7, 0x8B, 0xFA)
-        PromptCategory.COMMIT -> Color(0xF5, 0x9E, 0x0B)
-        PromptCategory.BRANCH_DIFF -> Color(0x38, 0xB2, 0xDF)
-        PromptCategory.CODE_GENERATE -> Color(0x22, 0xC5, 0x5E)
-        PromptCategory.CODE_REVIEW -> Color(0xFB, 0x71, 0x85)
+        PromptCategory.TEST -> ThemeColors.categoryTest
+        PromptCategory.COMMIT -> ThemeColors.categoryCommit
+        PromptCategory.BRANCH_DIFF -> ThemeColors.categoryBranchDiff
+        PromptCategory.CODE_GENERATE -> ThemeColors.categoryCodeGen
+        PromptCategory.CODE_REVIEW -> ThemeColors.categoryCodeReview
     }
 
     private fun scopeColor(isGlobal: Boolean): Color =
@@ -398,12 +525,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         commonFont: Font
     ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val pageColor = Color(0x0F, 0x17, 0x2A)
-        val surfaceColor = Color(0x11, 0x1C, 0x2F)
-        val inputColor = Color(0x0B, 0x12, 0x20)
-        val accentColor = Color(0x3B, 0x82, 0xF6)
-        val mutedColor = Color(0x94, 0xA3, 0xB8)
-        val cardColor = Color(0x14, 0x1F, 0x34)
+        val pageColor = ThemeColors.pageBg
+        val surfaceColor = ThemeColors.surfaceBg
+        val inputColor = ThemeColors.inputBg
+        val accentColor = ThemeColors.accentBlue
+        val mutedColor = ThemeColors.mutedFg
+        val cardColor = ThemeColors.cardBg
         val designBorderColor = borderColor
         val promptFont = UIManager.getFont("EditorPane.font")
             ?.deriveFont(Font.PLAIN, 14f)
@@ -1086,12 +1213,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
         commonFont: Font
     ): Component {
         val usage = ButtonUsageReportService.getInstance(project)
-        val pageColor = Color(0x0F, 0x17, 0x2A)
-        val surfaceColor = Color(0x11, 0x1C, 0x2F)
-        val inputColor = Color(0x0B, 0x12, 0x20)
-        val accentColor = Color(0x3B, 0x82, 0xF6)
-        val mutedColor = Color(0x94, 0xA3, 0xB8)
-        val cardColor = Color(0x14, 0x1F, 0x34)
+        val pageColor = ThemeColors.pageBg
+        val surfaceColor = ThemeColors.surfaceBg
+        val inputColor = ThemeColors.inputBg
+        val accentColor = ThemeColors.accentBlue
+        val mutedColor = ThemeColors.mutedFg
+        val cardColor = ThemeColors.cardBg
         val designBorderColor = borderColor
         val skillFont = UIManager.getFont("EditorPane.font")?.deriveFont(Font.PLAIN, 14f) ?: Font("JetBrains Mono", Font.PLAIN, 14)
         val listModel = DefaultListModel<SkillListRow>()
@@ -1757,6 +1884,113 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 viewport.background = bgColor
                 background = bgColor
                 border = BorderFactory.createLineBorder(borderColor)
+            }, BorderLayout.CENTER)
+        }
+    }
+
+    private fun createReadmePanel(
+        bgColor: Color, fgColor: Color, borderColor: Color, commonFont: Font
+    ): JPanel {
+        val titleFont = commonFont.deriveFont(Font.BOLD, 16f)
+        val sectionFont = commonFont.deriveFont(Font.BOLD, 14f)
+        val bodyFont = commonFont.deriveFont(Font.PLAIN, 13f)
+        val accentColor = ThemeColors.systemAccent
+
+        val contentPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = bgColor
+            border = BorderFactory.createEmptyBorder(16, 16, 16, 16)
+        }
+
+        data class Feature(val title: String, val trigger: String, val tabName: String?)
+
+        val features = listOf(
+            Feature("Test Generation", "Open an OpenAPI (.yaml/.yml) or Java source file in the editor, then click \"Generate Tests By AI\" in the banner at the top.", null),
+            Feature("Commit Message Generation", "In the VCS Commit dialog, use the toolbar button \"Generate Commit Message\" and choose a prompt profile.", null),
+            Feature("Branch Diff Analysis", "In the VCS Log (Git Log), right-click a branch or commit and choose \"Analyze Branch Diff\".", "Context"),
+            Feature("Push & Create PR", "In the VCS Commit dialog, use \"Push and Create PR\" to push your branch and create a pull request with an AI-generated summary.", null),
+            Feature("Code Generate & Review", "Select code in the editor, right-click, and choose \"Code Generate & Review\" to send it to the LLM.", null),
+            Feature("SonarQube Coverage", "Go to Tools → SonarQube Coverage to fetch coverage data and generate missing tests.", "Sonar Cube"),
+            Feature("Context Box Chat", "Use the Context tab to chat with the LLM. After a branch diff or test generation, you can ask follow-up questions, request translations, or regenerate tests with improvements.", "Context"),
+            Feature("Prompt Manager", "Manage prompt templates organized by category (Test, Commit, Branch Diff, Code Generate, Code Review). Create, edit, duplicate, or sync prompts from a remote repository.", "Prompt Manager"),
+            Feature("Skill Manager", "Manage skill definitions (YAML templates) with global and local scopes. Sync skills from a remote Bitbucket/GitHub repository.", "Skill Manager"),
+            Feature("Settings", "Configure LLM provider, API key, login template, prompt defaults, and SonarQube settings at File → Settings → Tools → Code Quality Improver.", null)
+        )
+
+        // Title
+        contentPanel.add(JLabel("Code Quality Assistant").apply {
+            font = titleFont
+            foreground = accentColor
+            alignmentX = Component.LEFT_ALIGNMENT
+        })
+        contentPanel.add(Box.createVerticalStrut(4))
+        contentPanel.add(JLabel("AI-powered code quality tools for IntelliJ IDEA").apply {
+            font = bodyFont
+            foreground = fgColor
+            alignmentX = Component.LEFT_ALIGNMENT
+        })
+        contentPanel.add(Box.createVerticalStrut(16))
+
+        for (feature in features) {
+            val sectionPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                background = bgColor
+                alignmentX = Component.LEFT_ALIGNMENT
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, borderColor),
+                    BorderFactory.createEmptyBorder(10, 0, 10, 0)
+                )
+                maximumSize = Dimension(Int.MAX_VALUE, 120)
+            }
+
+            sectionPanel.add(JLabel(feature.title).apply {
+                font = sectionFont
+                foreground = accentColor
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+            sectionPanel.add(Box.createVerticalStrut(4))
+            sectionPanel.add(JLabel("<html><body style='width:100%'>${feature.trigger}</body></html>").apply {
+                font = bodyFont
+                foreground = fgColor
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+            sectionPanel.add(Box.createVerticalStrut(6))
+
+            if (feature.tabName != null) {
+                val jumpBtn = JButton("→ Open ${feature.tabName}").apply {
+                    font = bodyFont.deriveFont(Font.BOLD)
+                    foreground = accentColor
+                    background = bgColor
+                    isOpaque = true
+                    border = BorderFactory.createEmptyBorder(4, 0, 4, 0)
+                    isContentAreaFilled = false
+                    isFocusPainted = false
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    addActionListener {
+                        val parent = javax.swing.SwingUtilities.getAncestorOfClass(JTabbedPane::class.java, this)
+                        if (parent is JTabbedPane) {
+                            for (i in 0 until parent.tabCount) {
+                                if (parent.getTitleAt(i) == feature.tabName) {
+                                    parent.selectedIndex = i
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+                sectionPanel.add(jumpBtn)
+            }
+
+            contentPanel.add(sectionPanel)
+        }
+
+        return JPanel(BorderLayout()).apply {
+            background = bgColor
+            add(JBScrollPane(contentPanel).apply {
+                viewport.background = bgColor
+                background = bgColor
+                border = BorderFactory.createEmptyBorder()
+                verticalScrollBar.unitIncrement = 16
             }, BorderLayout.CENTER)
         }
     }

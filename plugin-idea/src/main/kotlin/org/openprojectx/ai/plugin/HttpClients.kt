@@ -1,9 +1,14 @@
 package org.openprojectx.ai.plugin
 
 import io.ktor.client.HttpClient
+import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import java.security.SecureRandom
@@ -12,6 +17,18 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+suspend inline fun <reified T> HttpClient.safeGet(
+    url: String,
+    crossinline block: HttpRequestBuilder.() -> Unit = {}
+): T {
+    val response = get(url, block)
+    if (!response.status.isSuccess()) {
+        val errorBody = runCatching { response.bodyAsText() }.getOrDefault("(unable to read error body)")
+        throw RuntimeException("SonarQube API returned HTTP ${response.status.value} for $url: $errorBody")
+    }
+    return response.body()
+}
 
 object HttpClients {
     fun shared(disableTlsVerification: Boolean = false, timeoutSeconds: Long = 60): HttpClient {
@@ -34,6 +51,7 @@ object HttpClients {
             install(HttpTimeout) {
                 connectTimeoutMillis = TimeUnit.SECONDS.toMillis(timeoutSeconds)
                 socketTimeoutMillis = TimeUnit.SECONDS.toMillis(timeoutSeconds)
+                requestTimeoutMillis = TimeUnit.SECONDS.toMillis(timeoutSeconds)
             }
         }
     }

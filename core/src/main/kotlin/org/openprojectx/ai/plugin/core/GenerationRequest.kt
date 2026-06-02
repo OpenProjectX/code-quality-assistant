@@ -14,5 +14,6 @@ data class GenerationRequest(
     val location: String? = null,
     val packageName: String? = null,
     val className: String,
-    val outputNotes: String?
+    val outputNotes: String?,
+    val dependentMethodSignatures: String = ""
 )

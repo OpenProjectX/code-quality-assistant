@@ -5,6 +5,7 @@ import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vcs.changes.Change
 import git4idea.repo.GitRepositoryManager
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 object GitDiffProvider {
 
@@ -105,10 +106,15 @@ object GitDiffProvider {
             .start()
 
         val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
+        val finished = process.waitFor(30, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            error("Timed out collecting branch diff after 30s")
+        }
+        val exitCode = process.exitValue()
 
-        if (exitCode != 0) {
-            error("Failed to compare branches: $output")
+        if (exitCode > 1) {
+            error("Failed to compare branches (exit $exitCode): ${output.take(500)}")
         }
 
         return output
@@ -127,10 +133,15 @@ object GitDiffProvider {
             .start()
 
         val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
+        val finished = process.waitFor(30, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            error("Timed out collecting file diff after 30s")
+        }
+        val exitCode = process.exitValue()
 
-        if (exitCode != 0) {
-            error("Failed to collect file diff: $output")
+        if (exitCode > 1) {
+            error("Failed to collect file diff (exit $exitCode): ${output.take(500)}")
         }
 
         return output

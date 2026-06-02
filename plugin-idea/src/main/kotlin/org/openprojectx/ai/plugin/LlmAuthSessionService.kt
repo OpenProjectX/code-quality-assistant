@@ -48,16 +48,16 @@ class LlmAuthSessionService(
         val credentials = promptCredentials(settings, prefill = saved)
         val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
         if (apiKey.isNullOrBlank()) {
-            error("LLM login returned an empty API key")
+            val hint = lastLoginError?.let { " | last error: $it" }.orEmpty()
+            error("LLM login returned an empty API key for ${auth.login.url}$hint. Check logs in Context Box for details.")
         }
         sessionApiKey = apiKey
         return settings.copy(apiKey = apiKey)
     }
 
     fun relogin(settings: LlmSettings): LlmSettings {
-        if (settings.auth == null) {
-            return settings
-        }
+        installRuntimeLogSink()
+        val auth = settings.auth ?: return settings
         sessionApiKey = null
 
         // Try saved credentials silently
@@ -76,7 +76,8 @@ class LlmAuthSessionService(
         val credentials = promptCredentials(settings, prefill = saved)
         val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
         if (apiKey.isNullOrBlank()) {
-            error("LLM relogin returned an empty API key")
+            val hint = lastLoginError?.let { " | last error: $it" }.orEmpty()
+            error("LLM relogin returned an empty API key for ${auth.login.url}$hint. Check logs in Context Box for details.")
         }
         sessionApiKey = apiKey
         return settings.copy(apiKey = apiKey)
@@ -123,7 +124,6 @@ class LlmAuthSessionService(
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
         val baseSettings = LlmSettingsLoader.load(project)
         val resolved = resolve(baseSettings)
-        val loginAlreadyAttempted = baseSettings.auth != null && baseSettings.apiKey.isNullOrBlank()
 
         return try {
             block(resolved)
@@ -134,13 +134,12 @@ class LlmAuthSessionService(
                 }
                 throw LlmUnauthorizedException("Unauthorized LLM request — your API key may be invalid or expired. Update the key in .ai-test.yaml or configure a login template for automatic renewal.")
             }
-            if (loginAlreadyAttempted) {
-                throw LlmUnauthorizedException("Unauthorized LLM request after login attempt; please verify login endpoint/credentials")
-            }
             val refreshed = relogin(baseSettings)
             block(refreshed)
         }
     }
+
+    private var lastLoginError: String? = null
 
     private fun runLoginTemplate(settings: LlmSettings, username: String, password: String): String? {
         val auth = settings.auth ?: return null
@@ -163,7 +162,8 @@ class LlmAuthSessionService(
                     )
                 )
             }.trim().takeIf { it.isNotBlank() }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            lastLoginError = "${e.javaClass.simpleName}: ${e.message}"
             null
         }
     }

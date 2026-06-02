@@ -14,6 +14,15 @@ class OpenAiCompatibleProvider(
 ) : LlmProvider {
 
     override suspend fun generateCode(prompt: String): String {
+        return generateCode(
+            listOf(
+                Message("system", "You are a helpful coding assistant. Respond concisely."),
+                Message("user", prompt)
+            )
+        )
+    }
+
+    override suspend fun generateCode(messages: List<Message>): String {
         try {
             val endpoint = settings.endpoint
                 ?: error("llm.endpoint is required for provider='${settings.provider}'")
@@ -21,12 +30,14 @@ class OpenAiCompatibleProvider(
                 ?: error("llm.apiKey or llm.apiKeyEnv is required for provider='${settings.provider}'")
             LlmRuntimeLogger.info("Request start | provider=${settings.provider} | endpoint=$endpoint")
 
+            // Auto-prepend system message if caller didn't include one
+            val hasSystem = messages.any { it.role == "system" }
+            val finalMessages = if (hasSystem) messages
+                else listOf(Message("system", "You are a helpful coding assistant. Respond concisely.")) + messages
+
             val req = ChatCompletionsRequest(
                 model = settings.model,
-                messages = listOf(
-                    Message("system", "You generate code only."),
-                    Message("user", prompt)
-                ),
+                messages = finalMessages,
                 temperature = 0.1,
                 max_tokens = settings.maxTokens.takeIf { it > 0 }
             )
@@ -47,10 +58,15 @@ class OpenAiCompatibleProvider(
             }
 
             val resp: ChatCompletionsResponse = response.body()
-            val result = resp.choices.firstOrNull()?.message?.content
-                ?: error("Empty LLM response")
+            val choice = resp.choices.firstOrNull() ?: error("Empty LLM response")
+            val result = choice.message.content
+            if (choice.finish_reason == "length") {
+                LlmRuntimeLogger.warn(
+                    "Response truncated by token limit (finish_reason=length) | contentLength=${result.length}"
+                )
+            }
             LlmRuntimeLogger.info(
-                "Response parsed | choices=${resp.choices.size} | contentLength=${result.length} | preview=${result.take(200)}"
+                "Response parsed | choices=${resp.choices.size} | contentLength=${result.length} | finish_reason=${choice.finish_reason} | preview=${result.take(200)}"
             )
 
             return result
@@ -76,7 +92,7 @@ class OpenAiCompatibleProvider(
         val choices: List<Choice>
     ) {
         @Serializable
-        data class Choice(val message: Message)
+        data class Choice(val message: Message, val finish_reason: String? = null)
     }
 
     companion object {

@@ -37,9 +37,14 @@ object PromptBuilder {
         - Focus only on methods present in the provided source; do not invent methods.
         - Prioritize the method referenced by user notes when provided.
         - For each tested method, include meaningful assertions for behavior and edge cases.
-        - Mock external collaborators (HTTP/DB/remote dependencies) with Mockito or test doubles; do not call real external systems.
+        - Mock external collaborators with Mockito or test doubles; do not call real external systems.
+        - Use the provided dependent method signatures to correctly mock/stub return values and verify interactions.
         - Keep tests deterministic and runnable.
         - Output ONLY Java code, no markdown.
+    """
+
+    const val DEFAULT_DEPENDENT_METHODS_SECTION = """
+        {{dependentMethodSignatures}}
     """
 
     const val DEFAULT_WRAPPER_TEMPLATE = """
@@ -83,6 +88,12 @@ object PromptBuilder {
             }
         }
 
+        val dependentMethodsBlock = if (req.dependentMethodSignatures.isNotBlank()) {
+            "\n" + render(DEFAULT_DEPENDENT_METHODS_SECTION, mapOf(
+                "dependentMethodSignatures" to req.dependentMethodSignatures
+            ))
+        } else ""
+
         return render(template.wrapper, mapOf(
             "contractType" to when (req.contractType) {
                 ContractType.OPENAPI -> "OpenAPI/REST API"
@@ -90,7 +101,7 @@ object PromptBuilder {
             },
             "baseUrlHint" to (req.baseUrl ?: "not provided"),
             "outputNotes" to (req.outputNotes ?: "(none)"),
-            "frameworkRules" to frameworkRules,
+            "frameworkRules" to frameworkRules + dependentMethodsBlock,
             "contractText" to req.contractText
         ))
     }

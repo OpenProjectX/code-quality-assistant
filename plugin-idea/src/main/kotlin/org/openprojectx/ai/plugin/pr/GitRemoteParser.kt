@@ -70,21 +70,23 @@ object GitRemoteParser {
         if (!uri.scheme.equals("ssh", ignoreCase = true)) return null
         val host = uri.host ?: return null
         val segments = uri.path.trim('/').split('/').filter { it.isNotBlank() }
-        val hasScmSegment = segments.firstOrNull().equals("scm", ignoreCase = true)
-        if (!looksLikeBitbucketHost(host) && !hasScmSegment && uri.port != 7999) return null
-        val normalizedSegments = if (segments.firstOrNull().equals("scm", ignoreCase = true)) {
-            segments.drop(1)
+        val scmIndex = segments.indexOfFirst { it.equals("scm", ignoreCase = true) }
+        if (!looksLikeBitbucketHost(host) && scmIndex < 0 && uri.port != 7999) return null
+        val normalizedSegments = if (scmIndex >= 0) {
+            segments.drop(scmIndex + 1)
         } else {
             segments
         }
         if (normalizedSegments.size < 2) return null
 
+        val contextPath = if (scmIndex > 0) segments.take(scmIndex).joinToString("/") else ""
+
         return RepositoryRef(
             provider = GitHostingProviderType.BITBUCKET,
-            host = host,
+            host = hostWithPort(uri),
             projectKey = normalizedSegments[0],
             repoSlug = trimGitSuffix(normalizedSegments[1]),
-            apiBaseUrl = "https://$host"
+            apiBaseUrl = buildApiBaseUrl(uri, contextPath)
         )
     }
 
