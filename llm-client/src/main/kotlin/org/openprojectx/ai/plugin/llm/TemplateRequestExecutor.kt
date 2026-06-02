@@ -32,9 +32,10 @@ class TemplateRequestExecutor(
             }
             val safeRequestHeaders = redactHeaders(effectiveRequestHeaders)
             val safeRequestBody = redactSensitivePayload(renderedBody)
+            val safeRequestUrl = redactSensitiveUrl(renderedUrl)
             val curlCommand = toCurlCommand(config.method.uppercase(), renderedUrl, effectiveRequestHeaders, renderedBody)
             LlmRuntimeLogger.info(
-                "Template request start | method=${config.method.uppercase()} | url=$renderedUrl | headers=$safeRequestHeaders | body=$safeRequestBody | curl=$curlCommand"
+                "Template request start | method=${config.method.uppercase()} | url=$safeRequestUrl | headers=$safeRequestHeaders | body=$safeRequestBody | curl=$curlCommand"
             )
 
             val response = http.request {
@@ -144,9 +145,17 @@ class TemplateRequestExecutor(
         }
         val redactedBody = redactSensitivePayload(body)
         val bodyArg = if (redactedBody.isNotBlank()) " --data " + shellQuote(redactedBody) else ""
-        return "curl -X $method " + shellQuote(url) +
+        return "curl -X $method " + shellQuote(redactSensitiveUrl(url)) +
             (if (headerArgs.isNotBlank()) " $headerArgs" else "") +
             bodyArg
+    }
+
+    private fun redactSensitiveUrl(url: String): String {
+        var result = url
+        listOf("token", "access_token", "apiKey", "api_key", "key", "secret", "password").forEach { key ->
+            result = result.replace(Regex("(?i)([?&]${Regex.escape(key)}=)[^&#]*")) { "${it.groupValues[1]}***" }
+        }
+        return result
     }
 
     private fun redactHeaderValue(name: String, value: String): String {

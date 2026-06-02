@@ -11,6 +11,7 @@ import io.ktor.http.contentType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.openprojectx.ai.plugin.HttpClients
 import java.util.Base64
 
 class BitbucketPullRequestProvider(
@@ -42,6 +43,12 @@ class BitbucketPullRequestProvider(
             )
         )
 
+        HttpClients.logCurl(
+            method = "POST",
+            url = apiUrl,
+            headers = curlHeaders(),
+            body = json.encodeToString(CreateBitbucketPrRequest.serializer(), payload)
+        )
         val response = http.post(apiUrl) {
             applyAuthorizationHeader()
             contentType(ContentType.Application.Json)
@@ -63,16 +70,32 @@ class BitbucketPullRequestProvider(
         val apiUrl =
             "${repository.apiBaseUrl.trimEnd('/')}/rest/api/1.0/projects/${repository.projectKey}/repos/${repository.repoSlug}/pull-requests/$pullRequestId/comments"
 
+        val payload = CreateBitbucketCommentRequest(text = text)
+        HttpClients.logCurl(
+            method = "POST",
+            url = apiUrl,
+            headers = curlHeaders(),
+            body = json.encodeToString(CreateBitbucketCommentRequest.serializer(), payload)
+        )
         val response = http.post(apiUrl) {
             applyAuthorizationHeader()
             contentType(ContentType.Application.Json)
-            setBody(CreateBitbucketCommentRequest(text = text))
+            setBody(payload)
         }
         val responseText = response.bodyAsText()
         if (response.status.value !in 200..299) {
             throw BitbucketApiException(bitbucketErrorMessage(responseText, response.status.value))
         }
     }
+
+    private fun curlHeaders(): Map<String, String> = mapOf(
+        HttpHeaders.Authorization to when {
+            !auth.token.isNullOrBlank() -> "Bearer ${auth.token}"
+            !auth.username.isNullOrBlank() && !auth.password.isNullOrBlank() -> "Basic ${auth.username}:${auth.password}"
+            else -> "<missing>"
+        },
+        HttpHeaders.ContentType to ContentType.Application.Json.toString()
+    )
 
     private fun io.ktor.client.request.HttpRequestBuilder.applyAuthorizationHeader() {
         when {

@@ -42,7 +42,7 @@ class OpenAiCompatibleProvider(
                 max_tokens = settings.maxTokens.takeIf { it > 0 }
             )
 
-            val curlCmd = buildCurlCommand(endpoint, apiKey, req)
+            val curlCmd = buildCurlCommand(endpoint, req)
             LlmRuntimeLogger.info("curl | $curlCmd")
 
             val response = http.post(endpoint) {
@@ -98,10 +98,33 @@ class OpenAiCompatibleProvider(
     companion object {
         private val curlJson = Json { prettyPrint = false }
 
-        private fun buildCurlCommand(endpoint: String, apiKey: String, req: ChatCompletionsRequest): String {
-            val body = curlJson.encodeToString(ChatCompletionsRequest.serializer(), req)
-                .replace("'", "'\"'\"'")
-            return "curl -X POST '$endpoint' -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' --data '$body'"
+        private fun buildCurlCommand(endpoint: String, req: ChatCompletionsRequest): String {
+            val rawBody = curlJson.encodeToString(ChatCompletionsRequest.serializer(), req)
+            val safeBody = redactSensitivePayload(rawBody)
+            val body = if (safeBody.length <= MAX_LOG_BODY_CHARS) safeBody
+                else safeBody.take(MAX_LOG_BODY_CHARS) + "...<truncated ${safeBody.length - MAX_LOG_BODY_CHARS} chars>"
+            return "curl -X POST ${shellQuote(redactSensitiveUrl(endpoint))} -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' --data ${shellQuote(body)}"
         }
+
+        private fun redactSensitivePayload(text: String): String {
+            var result = text
+            listOf("password", "token", "access_token", "id_token", "refresh_token", "apiKey", "api_key", "secret").forEach { key ->
+                val pattern = Regex("""("${Regex.escape(key)}"\s*:\s*")[^"]*(")""", RegexOption.IGNORE_CASE)
+                result = result.replace(pattern) { "${it.groupValues[1]}***${it.groupValues[2]}" }
+            }
+            return result
+        }
+
+        private fun redactSensitiveUrl(url: String): String {
+            var result = url
+            listOf("token", "access_token", "apiKey", "api_key", "key", "secret").forEach { key ->
+                result = result.replace(Regex("(?i)([?&]${Regex.escape(key)}=)[^&#]*")) { "${it.groupValues[1]}***" }
+            }
+            return result
+        }
+
+        private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+
+        private const val MAX_LOG_BODY_CHARS = 4_000
     }
 }

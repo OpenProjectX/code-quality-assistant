@@ -1632,6 +1632,14 @@ object LlmSettingsLoader {
             conn.setRequestProperty("Authorization", "Bearer $normalized")
         }
         conn.setRequestProperty("Accept", "application/vnd.github.raw+json")
+        HttpClients.logCurl(
+            method = "GET",
+            url = url,
+            headers = buildMap {
+                if (normalized.isNotBlank()) put("Authorization", "Bearer $normalized")
+                put("Accept", "application/vnd.github.raw+json")
+            }
+        )
         val code = conn.responseCode
         val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader(Charsets.UTF_8)
@@ -1680,9 +1688,13 @@ object LlmSettingsLoader {
         } else {
             "Authorization=<absent>"
         }
-        val curlCommand = buildBitbucketCurlCommand(url, normalized, credentials)
+        HttpClients.logCurl(
+            method = "GET",
+            url = url,
+            headers = conn.getRequestProperty("Authorization")?.let { mapOf("Authorization" to it) }.orEmpty()
+        )
         RuntimeLogStore.append(
-            "INFO | Bitbucket API | Request method=GET url=$url headers[$authHeaderLog] credentialSources=${credentials.joinToString(",") { it.source }.ifBlank { "<none>" }} | curl=$curlCommand"
+            "INFO | Bitbucket API | Request method=GET url=$url headers[$authHeaderLog] credentialSources=${credentials.joinToString(",") { it.source }.ifBlank { "<none>" }}"
         )
         val code = conn.responseCode
         val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
@@ -1702,24 +1714,6 @@ object LlmSettingsLoader {
     }
 
 
-    private fun buildBitbucketCurlCommand(url: String, token: String, credentials: List<BitbucketCredential>): String {
-        val authorizationHeader = when {
-            token.isNotBlank() && token.contains(":") -> {
-                val username = token.substringBefore(':')
-                "Authorization: Basic ${displayHeaderValue(username)}:***"
-            }
-            token.isNotBlank() -> "Authorization: Bearer ***"
-            credentials.isNotEmpty() -> {
-                val credential = credentials.first()
-                "Authorization: Basic ${displayHeaderValue(credential.username)}:***"
-            }
-            else -> null
-        }
-        val authPart = authorizationHeader?.let { " -H " + shellQuote(it) }.orEmpty()
-        return "curl -X GET " + shellQuote(url) + authPart
-    }
-
-    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
     private fun describeBasicTokenHeader(token: String): String {
         val separatorIndex = token.indexOf(':')
         val username = token.substring(0, separatorIndex)

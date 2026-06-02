@@ -69,30 +69,33 @@ object HttpClients {
     }
 
     fun logCurl(method: String, url: String, headers: Map<String, String>, body: String = "") {
-        val safeHeaders = headers.mapValues { (name, value) ->
-            if (name.contains("authorization", true) ||
-                name.contains("token", true) ||
-                name.contains("key", true) ||
-                name.contains("secret", true) ||
-                name.contains("password", true) ||
-                name.contains("cookie", true)
-            ) "***" else value
-        }
-        val safeBody = redactSensitivePayload(body)
+        val safeHeaders = headers.mapValues { (name, value) -> redactHeaderValue(name, value) }
+        val safeBody = truncate(redactSensitivePayload(body))
         val headerArgs = safeHeaders.entries.joinToString(" ") { (name, value) ->
-            "-H \"$name: $value\""
+            "-H ${shellQuote("$name: $value")}"
         }
-        val bodyArg = if (safeBody.isNotBlank()) " --data '${safeBody.replace("'", "'\"'\"'")}'" else ""
-        org.openprojectx.ai.plugin.llm.LlmRuntimeLogger.info(
-            "curl -X $method '$url'$headerArgs$bodyArg"
-        )
+        val bodyArg = if (safeBody.isNotBlank()) " --data ${shellQuote(safeBody)}" else ""
+        val command = "curl -X ${method.uppercase()} ${shellQuote(redactSensitiveUrl(url))}" +
+            (if (headerArgs.isNotBlank()) " $headerArgs" else "") + bodyArg
+        RuntimeLogStore.append("INFO | API curl | $command")
+    }
+
+    private fun redactHeaderValue(name: String, value: String): String =
+        if (isSensitiveName(name)) "***" else value
+
+    private fun redactSensitiveUrl(url: String): String {
+        var result = url
+        SENSITIVE_KEYS.forEach { key ->
+            val queryPattern = Regex("(?i)([?&]${Regex.escape(key)}=)[^&#]*")
+            result = result.replace(queryPattern) { "${it.groupValues[1]}***" }
+        }
+        return result
     }
 
     private fun redactSensitivePayload(text: String): String {
         if (text.isBlank()) return text
-        val sensitiveKeys = listOf("password", "token", "access_token", "id_token", "refresh_token", "apiKey", "api_key", "secret")
         var result = text
-        sensitiveKeys.forEach { key ->
+        SENSITIVE_KEYS.forEach { key ->
             val quotedJsonPattern = Regex("""("${Regex.escape(key)}"\s*:\s*")[^"]*(")""", RegexOption.IGNORE_CASE)
             result = result.replace(quotedJsonPattern) { "${it.groupValues[1]}***${it.groupValues[2]}" }
             val formPattern = Regex("""(?i)(^|[&\s])(${Regex.escape(key)}=)[^&\s]+""")
@@ -100,4 +103,19 @@ object HttpClients {
         }
         return result
     }
+
+    private fun truncate(value: String): String =
+        if (value.length <= MAX_LOG_BODY_CHARS) value
+        else value.take(MAX_LOG_BODY_CHARS) + "...<truncated ${value.length - MAX_LOG_BODY_CHARS} chars>"
+
+    private fun isSensitiveName(name: String): Boolean = SENSITIVE_KEYS.any { name.contains(it, true) }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+
+    private val SENSITIVE_KEYS = listOf(
+        "authorization", "password", "token", "access_token", "id_token", "refresh_token",
+        "apiKey", "api_key", "secret", "cookie"
+    )
+    private const val MAX_LOG_BODY_CHARS = 4_000
+
 }
