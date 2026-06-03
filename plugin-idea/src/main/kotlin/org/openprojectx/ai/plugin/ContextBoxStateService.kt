@@ -115,6 +115,17 @@ class ContextBoxStateService(private val project: Project) {
         append(ChatMessage(role = ChatMessage.Role.USER, content = content))
     }
 
+    fun addAssistantMessage(content: String, typeLabel: String = "") {
+        append(ChatMessage(role = ChatMessage.Role.ASSISTANT, content = content, typeLabel = typeLabel))
+    }
+
+    fun removeMessage(index: Int) {
+        if (index in history.indices) {
+            history.removeAt(index)
+            project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())
+        }
+    }
+
     fun clearHistory() {
         history.clear()
         project.messageBus.syncPublisher(TOPIC).stateUpdated(snapshot())

@@ -155,11 +155,19 @@ object GitRemoteParser {
     }
 
     private fun buildApiBaseUrl(uri: URI, contextPath: String): String {
-        val base = "${uri.scheme}://${hostWithPort(uri)}"
+        val base = "https://${hostWithoutPort(uri)}"
         return if (contextPath.isBlank()) base else "$base/$contextPath"
     }
 
     private fun hostWithPort(uri: URI): String {
-        return if (uri.port > 0) "${uri.host}:${uri.port}" else uri.host
+        return hostWithoutPort(uri)
+    }
+
+    private fun hostWithoutPort(uri: URI): String {
+        val host = uri.host
+        val port = uri.port
+        if (port <= 0) return host
+        if (port == 22 || port == 7999 || port == 80 || port == 443) return host
+        return "$host:$port"
     }
 }

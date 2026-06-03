@@ -5,6 +5,7 @@ import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vcs.changes.Change
 import git4idea.repo.GitRepositoryManager
 import java.io.File
+import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
 
 object GitDiffProvider {
@@ -16,9 +17,11 @@ object GitDiffProvider {
 
         fun toRelativePath(absolutePath: String): String? {
             val f = File(absolutePath)
-            val canonical = if (f.isAbsolute) f.canonicalPath else File(repoRoot, absolutePath).canonicalPath
-            return if (canonical != null && canonical.startsWith(repoRoot)) {
-                canonical.removePrefix(repoRoot).removePrefix("/").removePrefix("\\")
+            val canonical = (if (f.isAbsolute) f.canonicalPath else File(repoRoot, absolutePath).canonicalPath)
+                ?.replace('\\', '/')
+            val normalizedRoot = repoRoot.replace('\\', '/')
+            return if (canonical != null && canonical.startsWith(normalizedRoot)) {
+                canonical.removePrefix(normalizedRoot).removePrefix("/")
             } else null
         }
 
@@ -37,8 +40,8 @@ object GitDiffProvider {
             .redirectErrorStream(true)
             .start()
 
-        val staged = stagedProcess.inputStream.bufferedReader().use { it.readText() }
-        stagedProcess.waitFor()
+        val staged = stagedProcess.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val stagedExit = stagedProcess.waitFor()
 
         val unstagedProcess = ProcessBuilder(
             mutableListOf("git", "diff", "--") + uniquePaths
@@ -47,14 +50,18 @@ object GitDiffProvider {
             .redirectErrorStream(true)
             .start()
 
-        val unstaged = unstagedProcess.inputStream.bufferedReader().use { it.readText() }
-        unstagedProcess.waitFor()
+        val unstaged = unstagedProcess.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val unstagedExit = unstagedProcess.waitFor()
+
+        // Exit code 1 = differences found (normal), > 1 = error (bad ref, etc.)
+        val stagedOk = stagedExit <= 1
+        val unstagedOk = unstagedExit <= 1
 
         return buildString {
-            if (staged.isNotBlank()) {
+            if (stagedOk && staged.isNotBlank()) {
                 appendLine(staged.trimEnd())
             }
-            if (unstaged.isNotBlank()) {
+            if (unstagedOk && unstaged.isNotBlank()) {
                 if (isNotEmpty()) appendLine()
                 append(unstaged.trimEnd())
             }
@@ -71,21 +78,24 @@ object GitDiffProvider {
             .directory(repoDir)
             .redirectErrorStream(true)
             .start()
-        val staged = stagedProcess.inputStream.bufferedReader().use { it.readText() }
-        stagedProcess.waitFor()
+        val staged = stagedProcess.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val stagedExit = stagedProcess.waitFor()
 
         val unstagedProcess = ProcessBuilder("git", "diff")
             .directory(repoDir)
             .redirectErrorStream(true)
             .start()
-        val unstaged = unstagedProcess.inputStream.bufferedReader().use { it.readText() }
-        unstagedProcess.waitFor()
+        val unstaged = unstagedProcess.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val unstagedExit = unstagedProcess.waitFor()
+
+        val stagedOk = stagedExit <= 1
+        val unstagedOk = unstagedExit <= 1
 
         return buildString {
-            if (staged.isNotBlank()) {
+            if (stagedOk && staged.isNotBlank()) {
                 appendLine(staged.trimEnd())
             }
-            if (unstaged.isNotBlank()) {
+            if (unstagedOk && unstaged.isNotBlank()) {
                 if (isNotEmpty()) appendLine()
                 append(unstaged.trimEnd())
             }
@@ -105,7 +115,7 @@ object GitDiffProvider {
             .redirectErrorStream(true)
             .start()
 
-        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         val finished = process.waitFor(30, TimeUnit.SECONDS)
         if (!finished) {
             process.destroyForcibly()
@@ -132,7 +142,7 @@ object GitDiffProvider {
             .redirectErrorStream(true)
             .start()
 
-        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         val finished = process.waitFor(30, TimeUnit.SECONDS)
         if (!finished) {
             process.destroyForcibly()

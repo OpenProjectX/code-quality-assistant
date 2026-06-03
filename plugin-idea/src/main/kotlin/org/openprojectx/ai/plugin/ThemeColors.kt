@@ -48,6 +48,8 @@ object ThemeColors {
     val categoryCodeGen = Color(0x22, 0xC5, 0x5E)
     val categoryCodeReview = Color(0xFB, 0x71, 0x85)
 
+    val deleteRed = JBColor(Color(0xE5, 0x3E, 0x3E), Color(0xFC, 0x81, 0x81))
+
     // --- List / selection ---
     val listSelectionFg = JBColor(Color.BLACK, Color.WHITE)
     val designBorderColor = JBColor(Color(0xD0, 0xD0, 0xD0), Color(0x2A, 0x37, 0x42))

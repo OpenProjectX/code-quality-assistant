@@ -3,6 +3,8 @@ package org.openprojectx.ai.plugin.pr
 import com.intellij.openapi.project.Project
 import git4idea.repo.GitRepositoryManager
 import java.io.File
+import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
 
 data class GitRepositoryContext(
     val remoteUrl: String,
@@ -44,8 +46,16 @@ object GitRepositoryContextService {
             .redirectErrorStream(true)
             .start()
 
-        val text = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor()
+        val text = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val finished = process.waitFor(30, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            error("Timed out collecting branch diff for origin/$targetBranch...HEAD")
+        }
+        val exitCode = process.exitValue()
+        if (exitCode > 1) {
+            error("Failed to collect diff (exit $exitCode): ${text.take(500)}")
+        }
 
         return text
     }

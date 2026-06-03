@@ -141,6 +141,7 @@ class BitbucketPullRequestProviderTest {
         }
 
         assertEquals("A pull request already exists", error.message)
+        client.close()
     }
 
     private fun repository(): RepositoryRef {
