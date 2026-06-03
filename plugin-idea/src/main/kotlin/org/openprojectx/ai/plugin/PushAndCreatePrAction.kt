@@ -101,7 +101,7 @@ class PushAndCreatePrAction : AnAction("Push and Create PR"), DumbAware {
             .directory(File(repositoryRoot))
             .redirectErrorStream(true)
             .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         val code = process.waitFor()
         if (code != 0) {
             error("git push failed: $output")

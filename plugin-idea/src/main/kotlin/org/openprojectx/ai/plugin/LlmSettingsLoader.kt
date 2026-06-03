@@ -196,7 +196,32 @@ object LlmSettingsLoader {
 
             if (sourceText != null) {
                 val target = findOrCreateConfigFile()
+                val localYaml = Yaml()
+                // Capture existing prompts.remoteRepo before overwriting
+                val savedRemoteRepo: Any? = if (target.exists()) {
+                    try {
+                        (localYaml.load<Map<*, *>>(target.readText(Charsets.UTF_8))["prompts"] as? Map<*, *>)?.get("remoteRepo")
+                    } catch (_: Exception) { null }
+                } else null
+
                 target.writeText(sourceText, Charsets.UTF_8)
+
+                // Merge prompts.remoteRepo back so automatic prompt sync works after import
+                @Suppress("UNCHECKED_CAST")
+                if (savedRemoteRepo != null) {
+                    try {
+                        val mergedMap = (localYaml.load(target.readText(Charsets.UTF_8)) as? MutableMap<String, Any?>)
+                            ?: mutableMapOf()
+                        val prompts = (mergedMap["prompts"] as? MutableMap<String, Any?>)
+                            ?: mutableMapOf<String, Any?>()
+                        if (prompts["remoteRepo"] == null) {
+                            prompts["remoteRepo"] = savedRemoteRepo
+                            mergedMap["prompts"] = prompts
+                            target.writeText(localYaml.dump(mergedMap), Charsets.UTF_8)
+                        }
+                    } catch (_: Exception) { /* best-effort */ }
+                }
+
                 RuntimeLogStore.append("INFO | Prompt Repo Import | Success provider=${repo.provider} path=$configPath target=${target.absolutePath}")
                 return "${remoteRepo.repoUrl}@$configPath"
             }
@@ -1661,7 +1686,16 @@ object LlmSettingsLoader {
             ?.let { listOf(BitbucketCredential("git-credential-helper", it.username, it.password)) }
             ?: emptyList()
         val credentials = configuredCredentials + gitCredentials
-        return bitbucketGetWithCredentials(url, config.token, credentials)
+
+        // If no direct token, try SSO via AuthManager
+        val effectiveToken = config.token.ifBlank {
+            try {
+                AuthManager.getInstance(project).getToken("Bitbucket",
+                    independentUsername = config.username.takeIf { it.isNotBlank() },
+                    independentPassword = config.password.takeIf { it.isNotBlank() })
+            } catch (_: Exception) { "" }
+        }
+        return bitbucketGetWithCredentials(url, effectiveToken, credentials)
     }
 
     private fun bitbucketGetWithCredentials(url: String, token: String, credentials: List<BitbucketCredential>): String {

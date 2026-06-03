@@ -115,6 +115,15 @@ dependencies {
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.ktor.client.mock)
+    testImplementation("junit:junit:4.13.2") // Required by IntelliJ Platform test framework internals
+
+    tasks.compileTestJava {
+        exclude("**/samples/**")
+    }
+    tasks.compileTestKotlin {
+        exclude("**/samples/**")
+    }
+
 }
 
 publishing {

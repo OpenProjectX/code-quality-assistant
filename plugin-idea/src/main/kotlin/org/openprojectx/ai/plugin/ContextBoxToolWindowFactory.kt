@@ -27,9 +27,12 @@ import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.RenderingHints
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -162,7 +165,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             testFile.writeText(code, Charsets.UTF_8)
         }
 
-        fun createBubble(msg: ContextBoxStateService.ChatMessage): JPanel {
+        fun createBubble(msg: ContextBoxStateService.ChatMessage, index: Int): JPanel {
             val isUser = msg.role == ContextBoxStateService.ChatMessage.Role.USER
             val isAssistant = msg.role == ContextBoxStateService.ChatMessage.Role.ASSISTANT
             val bubbleBg = when (msg.role) {
@@ -191,6 +194,13 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 ContextBoxStateService.ChatMessage.Role.SYSTEM -> ThemeColors.systemTimestamp
             }
 
+            val originalContent = msg.content
+            val editBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ThemeColors.systemAccent, 1),
+                BorderFactory.createEmptyBorder(3, 5, 3, 5)
+            )
+            val readOnlyBorder = BorderFactory.createEmptyBorder(4, 6, 4, 6)
+
             val contentArea = JTextArea().apply {
                 text = msg.content
                 isEditable = false
@@ -202,12 +212,20 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 background = bubbleBg
                 foreground = bubbleFg
                 caretColor = bubbleFg
-                border = BorderFactory.createEmptyBorder(6, 8, 6, 8)
+                border = readOnlyBorder
             }
 
-            val inner = JPanel(BorderLayout(0, 3)).apply {
+            val inner = object : JPanel(BorderLayout(0, 3)) {
+                override fun paintComponent(g: Graphics) {
+                    val g2 = g.create() as Graphics2D
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = background
+                    g2.fillRoundRect(0, 0, width - 1, height - 1, 16, 16)
+                    g2.dispose()
+                }
+            }.apply {
                 background = bubbleBg
-                isOpaque = true
+                isOpaque = false
                 val header = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
                     isOpaque = false
                     add(JLabel(roleLabel).apply {
@@ -222,14 +240,101 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 add(header, BorderLayout.NORTH)
                 add(contentArea, BorderLayout.CENTER)
 
-                // Show "Create PR" button for branch analysis results
+                // Action bar: delete / resend / edit
+                val actionBar = JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0)).apply {
+                    isOpaque = false
+                    border = BorderFactory.createEmptyBorder(2, 0, 0, 0)
+
+                    fun makeIcon(text: String, tooltip: String, hoverColor: Color, onClick: () -> Unit): JLabel {
+                        return JLabel(text).apply {
+                            this.toolTipText = tooltip
+                            foreground = ThemeColors.systemTimestamp
+                            font = chatFont.deriveFont(Font.PLAIN, 11f)
+                            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
+                            addMouseListener(object : MouseAdapter() {
+                                override fun mouseEntered(e: MouseEvent) { foreground = hoverColor }
+                                override fun mouseExited(e: MouseEvent) { foreground = ThemeColors.systemTimestamp }
+                                override fun mouseClicked(e: MouseEvent) { onClick() }
+                            })
+                        }
+                    }
+
+                    var editIcon: JLabel? = null
+                    fun cancelEditing() {
+                        contentArea.isEditable = false
+                        contentArea.text = originalContent
+                        contentArea.background = bubbleBg
+                        contentArea.foreground = bubbleFg
+                        contentArea.border = readOnlyBorder
+                        editIcon?.text = "✎"
+                        editIcon?.toolTipText = "Edit in place"
+                    }
+                    fun confirmEditing() {
+                        val edited = contentArea.text.trim()
+                        if (edited.isBlank()) return
+                        contentArea.isEditable = false
+                        val snapshot = stateService.snapshot()
+                        if (index + 1 < snapshot.history.size &&
+                            snapshot.history[index + 1].role == ContextBoxStateService.ChatMessage.Role.ASSISTANT
+                        ) {
+                            stateService.removeMessage(index + 1)
+                            stateService.removeMessage(index)
+                        } else {
+                            stateService.removeMessage(index)
+                        }
+                        chatInputField.text = edited
+                        sendButton.doClick()
+                    }
+                    if (isUser) {
+                        editIcon = makeIcon("✎", "Edit in place", ThemeColors.systemAccent) {
+                            if (contentArea.isEditable) {
+                                confirmEditing()
+                            } else {
+                                contentArea.isEditable = true
+                                contentArea.background = bubbleBg.brighter()
+                                contentArea.border = editBorder
+                                contentArea.requestFocusInWindow()
+                                editIcon?.text = "✓"
+                                editIcon?.toolTipText = "Confirm (Esc to cancel)"
+                                // Escape key to cancel
+                                contentArea.addKeyListener(object : java.awt.event.KeyAdapter() {
+                                    override fun keyPressed(e: java.awt.event.KeyEvent) {
+                                        if (e.keyCode == java.awt.event.KeyEvent.VK_ESCAPE) {
+                                            cancelEditing()
+                                            contentArea.removeKeyListener(this)
+                                        }
+                                    }
+                                })
+                            }
+                        }
+                        add(editIcon!!)
+                    }
+                    if (isAssistant) {
+                        add(makeIcon("↻", "Regenerate", ThemeColors.systemAccent) {
+                            val prevUser = stateService.snapshot().history.getOrNull(index - 1)
+                            if (prevUser?.role == ContextBoxStateService.ChatMessage.Role.USER) {
+                                stateService.removeMessage(index)
+                                chatInputField.text = prevUser.content
+                                sendButton.doClick()
+                            }
+                        })
+                    }
+                    add(makeIcon("✕", "Delete", ThemeColors.deleteRed) {
+                        stateService.removeMessage(index)
+                    })
+                }
+
+                // Collect any action buttons below the action bar
+                val extraButtons = mutableListOf<JButton>()
+
                 if (msg.typeLabel == "Branch Analysis" && msg.sourceBranch != null && msg.targetBranch != null) {
-                    val prButton = JButton("Create PR →").apply {
+                    extraButtons.add(JButton("Create PR →").apply {
                         font = chatFont.deriveFont(Font.BOLD, 12f)
                         foreground = ThemeColors.systemAccent
                         background = bubbleBg
-                        isOpaque = true
-                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isOpaque = false
+                        border = BorderFactory.createEmptyBorder(2, 0, 0, 0)
                         isContentAreaFilled = false
                         isFocusPainted = false
                         addActionListener {
@@ -266,23 +371,21 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                                 }
                             })
                         }
-                    }
-                    add(prButton, BorderLayout.SOUTH)
+                    })
                 }
 
-                // Show "Generate Tests →" button for ASSISTANT messages with test code
                 val hasTestCode = msg.role == ContextBoxStateService.ChatMessage.Role.ASSISTANT && (
                     msg.typeLabel == "Generated Code" ||
                     msg.testClassName != null ||
                     (msg.content.contains("@Test") && msg.content.contains("class "))
                 )
                 if (hasTestCode) {
-                    val testBtn = JButton("Generate Tests →").apply {
+                    extraButtons.add(JButton("Generate Tests →").apply {
                         font = chatFont.deriveFont(Font.BOLD, 12f)
                         foreground = ThemeColors.systemAccent
                         background = bubbleBg
-                        isOpaque = true
-                        border = BorderFactory.createEmptyBorder(4, 0, 0, 0)
+                        isOpaque = false
+                        border = BorderFactory.createEmptyBorder(2, 0, 0, 0)
                         isContentAreaFilled = false
                         isFocusPainted = false
                         addActionListener {
@@ -314,35 +417,34 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                                 }
                             })
                         }
-                    }
-                    add(testBtn, BorderLayout.SOUTH)
+                    })
                 }
 
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createEmptyBorder(6, 10, 6, 10),
-                    BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(
-                            when {
-                                isAssistant -> ThemeColors.assistantBubbleBorder
-                                isUser -> ThemeColors.userBubbleBorder
-                                else -> bubbleBg.brighter()
-                            },
-                            1
-                        ),
-                        BorderFactory.createEmptyBorder(0, 0, 0, 0)
-                    )
-                )
+                if (extraButtons.isNotEmpty()) {
+                    val southPanel = JPanel().apply {
+                        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                        isOpaque = false
+                        add(actionBar)
+                        extraButtons.forEach { add(it) }
+                    }
+                    add(southPanel, BorderLayout.SOUTH)
+                } else {
+                    add(actionBar, BorderLayout.SOUTH)
+                }
+
+                border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
             }
 
             val maxBubbleWidth = bubbleColumns * chatFont.size + 40
+            inner.maximumSize = Dimension(maxBubbleWidth, inner.preferredSize.height.coerceAtLeast(1))
+
             val outer = JPanel(BorderLayout()).apply {
-                background = bgColor
-                isOpaque = true
+                isOpaque = false
                 val spacerWest = if (isUser) JPanel().apply {
-                    isOpaque = false; minimumSize = Dimension(40, 0)
+                    isOpaque = false; preferredSize = Dimension(40, 0)
                 } else null
                 val spacerEast = if (isUser) null else JPanel().apply {
-                    isOpaque = false; minimumSize = Dimension(40, 0)
+                    isOpaque = false; preferredSize = Dimension(40, 0)
                 }
                 if (spacerWest != null) add(spacerWest, BorderLayout.WEST)
                 if (spacerEast != null) add(spacerEast, BorderLayout.EAST)
@@ -351,6 +453,7 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     add(inner)
                 }
                 add(aligned, BorderLayout.CENTER)
+                maximumSize = Dimension(Short.MAX_VALUE.toInt(), preferredSize.height.coerceAtLeast(1))
             }
             return outer
         }
@@ -365,10 +468,11 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                     horizontalAlignment = SwingConstants.CENTER
                 })
             } else {
-                snapshot.history.forEach { msg ->
-                    messageListPanel.add(createBubble(msg))
+                snapshot.history.forEachIndexed { index, msg ->
+                    messageListPanel.add(createBubble(msg, index))
                     messageListPanel.add(Box.createVerticalStrut(6))
                 }
+                messageListPanel.add(Box.createVerticalGlue())
             }
             messageListPanel.revalidate()
             messageListPanel.repaint()
@@ -386,6 +490,10 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
             if (userInput.isBlank()) return@addActionListener
             val snapshot = stateService.snapshot()
             val messages = buildFollowUpMessages(snapshot, userInput)
+
+            // Show user bubble immediately
+            stateService.addUserMessage(userInput)
+            chatInputField.text = ""
             sendButton.isEnabled = false
             chatInputField.isEnabled = false
 
@@ -397,15 +505,16 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                             val provider = LlmProviderFactory.create(settings)
                             runBlocking { provider.generateCode(messages) }
                         }
+                        // Show AI response bubble after LLM returns
                         ApplicationManager.getApplication().invokeLater {
-                            stateService.recordChat(userInput, response)
-                            chatInputField.text = ""
+                            stateService.addAssistantMessage(response)
                             sendButton.isEnabled = true
                             chatInputField.isEnabled = true
                             chatInputField.requestFocusInWindow()
                         }
                     } catch (ex: Exception) {
                         ApplicationManager.getApplication().invokeLater {
+                            stateService.addAssistantMessage("Chat failed: ${ex.message ?: ex.toString()}")
                             sendButton.isEnabled = true
                             chatInputField.isEnabled = true
                             Notifications.error(project, "Chat failed", ex.message ?: ex.toString())

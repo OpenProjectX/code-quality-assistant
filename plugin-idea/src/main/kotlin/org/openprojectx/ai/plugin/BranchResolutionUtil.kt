@@ -75,7 +75,7 @@ object BranchResolutionUtil {
             .directory(File(repo.root.path))
             .redirectErrorStream(true)
             .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         if (process.waitFor() != 0) return null
 
         val normalizedCurrent = normalizeRefName(currentBranch)

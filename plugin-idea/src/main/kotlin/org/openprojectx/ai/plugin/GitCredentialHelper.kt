@@ -19,7 +19,8 @@ object GitCredentialHelper {
             }
 
             val lines = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readLines() }
-            process.waitFor()
+            val exitCode = process.waitFor()
+            if (exitCode != 0) return@runCatching null
             val values = lines.mapNotNull { line ->
                 val idx = line.indexOf('=')
                 if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
