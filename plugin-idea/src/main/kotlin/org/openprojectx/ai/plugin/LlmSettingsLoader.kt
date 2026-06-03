@@ -30,6 +30,10 @@ import java.util.Base64
 object LlmSettingsLoader {
 
     private val configNames = listOf(".ai-test.yml", ".ai-test.yaml")
+    private val classpathConfigResources = listOf(
+        "openprojectx/ai-test/config.yaml",
+        "openprojectx/ai-test/config.yml"
+    )
     private val userHome: String = System.getProperty("user.home")
     private val appHomeDirName = ".codeimprover"
     private const val GLOBAL_JUNIT_PROFILE = "[ADA] junit"
@@ -87,8 +91,9 @@ object LlmSettingsLoader {
     }
 
     fun readConfigText(project: Project): String {
-        val configFile = findOrCreateConfigFile()
-        return configFile.readText(Charsets.UTF_8)
+        return findConfigFile()?.readText(Charsets.UTF_8)
+            ?: readClasspathConfigText()
+            ?: defaultConfigTemplate()
     }
 
     fun writeConfigText(project: Project, text: String) {
@@ -627,14 +632,7 @@ object LlmSettingsLoader {
     fun loadSonarQubeConfig(project: Project): SonarQubeConfig = parseSonarQubeConfig(readRootMap(project))
 
     fun loadConfig(project: Project): AiTestConfig {
-        val configFile = findConfigFile()
-            ?: error("AI TestGen config not found. Expected one of: ${configNames.joinToString()} under ${configHomeDir().absolutePath}.")
-
-        val text = configFile.readText(Charsets.UTF_8)
-        val yaml = Yaml()
-        val root = yaml.load<Any?>(text) as? Map<*, *>
-            ?: error("Invalid YAML: root is not a map")
-
+        val root = readRootMap(project)
         val llm = parseLlmSettings(root)
         val generation = parseGenerationConfig(root)
         val prompts = parsePromptOverrides(project, root)
@@ -846,7 +844,7 @@ object LlmSettingsLoader {
 
         val file = File(targetDir, ".ai-test.yaml")
         if (!file.exists()) {
-            file.writeText(defaultConfigTemplate(), Charsets.UTF_8)
+            file.writeText(readClasspathConfigText() ?: defaultConfigTemplate(), Charsets.UTF_8)
         }
         return file
     }
@@ -1338,10 +1336,65 @@ object LlmSettingsLoader {
         put("responsePath", responsePath)
     }
 
-    private fun readRootMap(project: Project): Map<String, Any?> {
-        val text = readConfigText(project)
+    private fun readRootMap(project: Project): Map<String, Any> {
+        val builtInRoot = parseRootYaml(defaultConfigTemplate(), "built-in default config")
+        val classpathRoot = readClasspathConfigText()?.let { parseRootYaml(it, "classpath config") }
+            ?: linkedMapOf()
+        val fileRoot = findConfigFile()?.readText(Charsets.UTF_8)
+            ?.let { parseRootYaml(it, "user config") }
+            ?: linkedMapOf()
+        return mergeMaps(mergeMaps(builtInRoot, classpathRoot), fileRoot)
+    }
+
+    private fun parseRootYaml(text: String, source: String): MutableMap<String, Any> {
         val root = Yaml().load<Any?>(text) as? Map<*, *>
+            ?: error("Invalid YAML in $source: root is not a map")
         return root.toMutableLinkedMap()
+    }
+
+    private fun readClasspathConfigText(): String? {
+        val loaders = listOfNotNull(
+            Thread.currentThread().contextClassLoader,
+            LlmSettingsLoader::class.java.classLoader
+        ).distinct()
+
+        for (resource in classpathConfigResources) {
+            for (loader in loaders) {
+                val text = loader.getResourceAsStream(resource)?.use { stream ->
+                    stream.reader(Charsets.UTF_8).readText()
+                }
+                if (!text.isNullOrBlank()) {
+                    return text
+                }
+            }
+        }
+        return null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mergeMaps(
+        base: Map<String, Any>,
+        override: Map<String, Any>
+    ): MutableMap<String, Any> {
+        val result = linkedMapOf<String, Any>()
+        base.forEach { (key, value) ->
+            result[key] = when (value) {
+                is Map<*, *> -> value.toMutableLinkedMap()
+                else -> value
+            }
+        }
+        override.forEach { (key, value) ->
+            val existing = result[key]
+            result[key] = if (existing is Map<*, *> && value is Map<*, *>) {
+                mergeMaps(
+                    existing as Map<String, Any>,
+                    value.toMutableLinkedMap()
+                )
+            } else {
+                value
+            }
+        }
+        return result
     }
 
     private fun writeRootMap(project: Project, root: Map<String, Any>) {
