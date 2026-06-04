@@ -1,33 +1,38 @@
 package org.openprojectx.ai.plugin
 
-import com.intellij.openapi.project.Project
+import com.intellij.credentialStore.CredentialAttributes
+import com.intellij.credentialStore.Credentials
+import com.intellij.ide.passwordSafe.PasswordSafe
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 object SonarQubeAuth {
-    fun authorizationHeader(config: SonarQubeConfig): String? = authorizationHeader(
-        token = config.resolvedToken,
-        username = config.username,
-        password = config.resolvedPassword
-    )
+    private const val CACHE_KEY_PREFIX = "OpenProjectX.AI.SonarQube"
 
-    fun authorizationHeader(project: Project, config: SonarQubeConfig): String? {
-        val directHeader = authorizationHeader(config)
-        if (directHeader != null) return directHeader
-
-        // Fall back to SSO token via AuthManager
-        val ssoToken = try {
-            AuthManager.getInstance(project).getToken("SonarQube",
-                independentUsername = config.username.takeIf { it.isNotBlank() },
-                independentPassword = config.resolvedPassword.takeIf { it.isNotBlank() })
-        } catch (_: Exception) { "" }
-        if (ssoToken.isNotBlank()) {
-            return basic("$ssoToken:")
+    fun authorizationHeader(config: SonarQubeConfig): String? {
+        // 1. Try config credentials first
+        val token = config.resolvedToken
+        val user = config.username
+        val pass = config.resolvedPassword
+        val header = buildHeader(token, user, pass)
+        if (header != null) {
+            cacheCredentials(config.serverUrl, token, user, pass)
+            return header
         }
+
+        // 2. Fall back to PasswordSafe cache
+        val cached = readCachedCredentials(config.serverUrl)
+        if (cached != null) {
+            return buildHeader(cached.first, cached.second, cached.third)
+        }
+
         return null
     }
 
-    fun authorizationHeader(token: String, username: String, password: String): String? {
+    fun authorizationHeader(token: String, username: String, password: String): String? =
+        buildHeader(token, username, password)
+
+    private fun buildHeader(token: String, username: String, password: String): String? {
         val normalizedToken = token.trim()
         if (normalizedToken.isNotBlank()) {
             return basic("$normalizedToken:")
@@ -44,4 +49,28 @@ object SonarQubeAuth {
 
     private fun basic(raw: String): String =
         "Basic " + Base64.getEncoder().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
+
+    private fun cacheKey(serverUrl: String): String =
+        "$CACHE_KEY_PREFIX.${serverUrl.trimEnd('/').trim()}"
+
+    private fun cacheCredentials(serverUrl: String, token: String, username: String, password: String) {
+        val key = cacheKey(serverUrl)
+        if (token.isNotBlank()) {
+            PasswordSafe.instance.set(CredentialAttributes(key), Credentials(null, token))
+        } else if (username.isNotBlank() && password.isNotBlank()) {
+            PasswordSafe.instance.set(CredentialAttributes(key), Credentials(username, password))
+        }
+    }
+
+    private fun readCachedCredentials(serverUrl: String): Triple<String, String, String>? {
+        val creds = PasswordSafe.instance.get(CredentialAttributes(cacheKey(serverUrl))) ?: return null
+        val user = creds.userName.orEmpty()
+        val pass = creds.getPasswordAsString().orEmpty()
+        if (pass.isBlank()) return null
+        return if (user.isBlank()) {
+            Triple(pass, "", "")
+        } else {
+            Triple("", user, pass)
+        }
+    }
 }
