@@ -19,7 +19,6 @@ class AuthManager(private val project: Project) {
     companion object {
         fun getInstance(project: Project): AuthManager = project.service()
 
-        private const val SSO_TOKEN_KEY = "OpenProjectX.AI.SSO.Token"
         private const val SSO_CREDENTIALS_KEY = "OpenProjectX.AI.SSO.Credentials"
         private fun serviceTokenKey(service: String) = "OpenProjectX.AI.SSO.$service.Token"
     }
@@ -36,12 +35,7 @@ class AuthManager(private val project: Project) {
         // 1. Service-specific token from PasswordSafe
         readToken(serviceTokenKey(service))?.let { return it }
 
-        // 2. Shared SSO token from PasswordSafe
-        if (independentLogin == null) {
-            readToken(SSO_TOKEN_KEY)?.let { return it }
-        }
-
-        // 3. Independent username/password configured → login with independent or shared template
+        // 2. Independent username/password configured → login with independent or shared template
         if (!independentUsername.isNullOrBlank() && !independentPassword.isNullOrBlank()) {
             val loginConfig = independentLogin ?: loadSharedLoginConfig()
                 ?: error("No login template configured. Set llm.auth.login in .ai-test.yaml")
@@ -57,7 +51,7 @@ class AuthManager(private val project: Project) {
                 ?: error("No login template configured. Set llm.auth.login in .ai-test.yaml")
             val token = executeLogin(loginConfig, savedCreds.first, savedCreds.second)
             if (token.isNotBlank()) {
-                saveToken(SSO_TOKEN_KEY, token)
+                saveToken(serviceTokenKey(service), token)
                 return token
             }
         }
@@ -73,12 +67,8 @@ class AuthManager(private val project: Project) {
         independentUsername: String? = null,
         independentPassword: String? = null
     ): String {
-        // Clear service token
+        // Clear service-specific token
         clearToken(serviceTokenKey(service))
-        // Also clear shared SSO token (it's the same source)
-        if (independentLogin == null) {
-            clearToken(SSO_TOKEN_KEY)
-        }
 
         // Independent credentials → retry with those
         if (!independentUsername.isNullOrBlank() && !independentPassword.isNullOrBlank()) {
@@ -96,7 +86,7 @@ class AuthManager(private val project: Project) {
                 ?: error("No login template configured")
             val token = executeLogin(loginConfig, savedCreds.first, savedCreds.second)
             if (token.isNotBlank()) {
-                saveToken(SSO_TOKEN_KEY, token)
+                saveToken(serviceTokenKey(service), token)
                 return token
             }
         }
@@ -120,8 +110,7 @@ class AuthManager(private val project: Project) {
             error("SSO login returned empty token for $service$hint. Check logs for details.")
         }
 
-        val targetKey = if (independentLogin != null) serviceTokenKey(service) else SSO_TOKEN_KEY
-        saveToken(targetKey, token)
+        saveToken(serviceTokenKey(service), token)
         if (credentials.remember) {
             saveCredentials(SSO_CREDENTIALS_KEY, credentials.username, credentials.password)
         }
@@ -156,10 +145,11 @@ class AuthManager(private val project: Project) {
     }
 
     private fun executeLogin(config: TemplateRequestConfig, username: String, password: String): String {
+        val disableTls = LlmSettingsLoader.load(project).httpDisableTlsVerification
         return try {
             runBlocking {
                 TemplateRequestExecutor(
-                    HttpClients.shared(disableTlsVerification = false, timeoutSeconds = 60)
+                    HttpClients.shared(disableTlsVerification = disableTls, timeoutSeconds = 60)
                 ).execute(
                     config = config,
                     variables = mapOf(
