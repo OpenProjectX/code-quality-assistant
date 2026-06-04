@@ -505,7 +505,7 @@ object LlmSettingsLoader {
             llmTimeoutSeconds = llm.string("timeoutSeconds").ifBlank { "60" },
             llmApiKey = llm.string("apiKey"),
             llmApiKeyEnv = llm.string("apiKeyEnv"),
-            httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: true,
+            httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: false,
             showLogTab = ui["showLogTab"] as? Boolean ?: true,
             llmTemplateEnabled = template != null,
             llmTemplateMethod = template.string("method").ifBlank { "POST" },
@@ -762,7 +762,7 @@ object LlmSettingsLoader {
         }
 
         val httpMap = llm["http"] as? Map<*, *>
-        val disableTlsVerification = httpMap?.get("disableTlsVerification") as? Boolean ?: true
+        val disableTlsVerification = httpMap?.get("disableTlsVerification") as? Boolean ?: false
 
         val maxTokens = when (val v = llm["maxTokens"]) {
             is Number -> v.toInt()
@@ -1070,17 +1070,6 @@ object LlmSettingsLoader {
             val file = File(dir, "$safeFileName.md")
             buildSkillMarkdown(name, body).let { file.writeText(it, Charsets.UTF_8) }
         }
-    }
-
-    fun stripPromptMetadata(content: String): String {
-        val lines = content.trim().lines()
-        val metadataKeys = setOf("name", "type", "time", "updatedAt", "pulledAt")
-        val bodyStart = lines.indexOfFirst { line ->
-            val key = line.substringBefore(":").trim().lowercase()
-            key !in metadataKeys && line.isNotBlank()
-        }
-        if (bodyStart < 0) return content
-        return lines.drop(bodyStart).joinToString("\n").trim()
     }
 
     private fun extractSkillBody(content: String): String {

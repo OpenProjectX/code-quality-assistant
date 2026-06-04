@@ -1060,10 +1060,12 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 Notifications.error(project, "Prompt Manager", status.message)
                 return
             }
+            val message = promptUpdateMessage(status)
             if (status.hasUpdates) {
-                performPullUpdate()
+                val choice = Messages.showYesNoDialog(project, "$message\n\nUpdate prompts now?", "Prompt Manager", "Update", "Later", null)
+                if (choice == Messages.YES) performPullUpdate() else Notifications.info(project, "Prompt Manager", message)
             } else {
-                Notifications.info(project, "Prompt Manager", promptUpdateMessage(status))
+                Notifications.info(project, "Prompt Manager", message)
             }
         }
 
@@ -1584,7 +1586,9 @@ class ContextBoxToolWindowFactory : ToolWindowFactory, DumbAware {
                 return
             }
             if (status.hasUpdates) {
-                performPullSkillUpdate()
+                val choice = Messages.showYesNoDialog(project,
+                    "${status.message}\n\nUpdate skills now?", "Skill Manager", "Update", "Later", null)
+                if (choice == Messages.YES) performPullSkillUpdate() else Notifications.info(project, "Skill Manager", status.message)
             } else {
                 Notifications.info(project, "Skill Manager", status.message)
             }
