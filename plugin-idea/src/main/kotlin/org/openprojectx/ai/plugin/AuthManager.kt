@@ -156,11 +156,10 @@ class AuthManager(private val project: Project) {
     }
 
     private fun executeLogin(config: TemplateRequestConfig, username: String, password: String): String {
-        val disableTls = LlmSettingsLoader.load(project).httpDisableTlsVerification
         return try {
             runBlocking {
                 TemplateRequestExecutor(
-                    HttpClients.shared(disableTlsVerification = disableTls, timeoutSeconds = 60)
+                    HttpClients.shared(disableTlsVerification = false, timeoutSeconds = 60)
                 ).execute(
                     config = config,
                     variables = mapOf(
