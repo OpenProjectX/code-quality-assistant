@@ -1,6 +1,9 @@
 package org.openprojectx.ai.plugin
 
 
+import com.intellij.credentialStore.CredentialAttributes
+import com.intellij.credentialStore.Credentials
+import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.Json
@@ -1749,17 +1752,51 @@ object LlmSettingsLoader {
         val gitCredentials = GitCredentialHelper.resolve(config.repoUrl)
             ?.let { listOf(BitbucketCredential("git-credential-helper", it.username, it.password)) }
             ?: emptyList()
-        val credentials = configuredCredentials + gitCredentials
 
-        // If no direct token, try SSO via AuthManager
-        val effectiveToken = config.token.ifBlank {
-            try {
-                AuthManager.getInstance(project).getToken("Bitbucket",
-                    independentUsername = config.username.takeIf { it.isNotBlank() },
-                    independentPassword = config.password.takeIf { it.isNotBlank() })
-            } catch (_: Exception) { "" }
+        // Cache config credentials on first use
+        if (config.token.isNotBlank()) {
+            cacheBitbucketCredentials(config.repoUrl, config.token, "", "")
+        } else if (config.username.isNotBlank() && config.password.isNotBlank()) {
+            cacheBitbucketCredentials(config.repoUrl, "", config.username, config.password)
         }
-        return bitbucketGetWithCredentials(url, effectiveToken, credentials)
+
+        val credentials = configuredCredentials + gitCredentials
+        val effectiveToken = config.token.ifBlank {
+            readCachedBitbucketToken(config.repoUrl) ?: ""
+        }
+        val effectiveCredentials = if (credentials.isNotEmpty()) {
+            credentials
+        } else {
+            readCachedBitbucketUserPass(config.repoUrl)
+                ?.let { listOf(BitbucketCredential("password-safe", it.first, it.second)) }
+                ?: emptyList()
+        }
+
+        return bitbucketGetWithCredentials(url, effectiveToken, effectiveCredentials)
+    }
+
+    private fun bitbucketCacheKey(repoUrl: String): String =
+        "OpenProjectX.AI.Bitbucket.${repoUrl.trimEnd('/').trim()}"
+
+    private fun cacheBitbucketCredentials(repoUrl: String, token: String, username: String, password: String) {
+        val key = bitbucketCacheKey(repoUrl)
+        if (token.isNotBlank()) {
+            PasswordSafe.instance.set(CredentialAttributes(key), Credentials(null, token))
+        } else if (username.isNotBlank() && password.isNotBlank()) {
+            PasswordSafe.instance.set(CredentialAttributes(key), Credentials(username, password))
+        }
+    }
+
+    private fun readCachedBitbucketToken(repoUrl: String): String? {
+        val creds = PasswordSafe.instance.get(CredentialAttributes(bitbucketCacheKey(repoUrl))) ?: return null
+        return creds.getPasswordAsString()?.takeIf { it.isNotBlank() && creds.userName.isNullOrBlank() }
+    }
+
+    private fun readCachedBitbucketUserPass(repoUrl: String): Pair<String, String>? {
+        val creds = PasswordSafe.instance.get(CredentialAttributes(bitbucketCacheKey(repoUrl))) ?: return null
+        val user = creds.userName.orEmpty()
+        val pass = creds.getPasswordAsString().orEmpty()
+        return if (user.isNotBlank() && pass.isNotBlank()) Pair(user, pass) else null
     }
 
     private fun bitbucketGetWithCredentials(url: String, token: String, credentials: List<BitbucketCredential>): String {

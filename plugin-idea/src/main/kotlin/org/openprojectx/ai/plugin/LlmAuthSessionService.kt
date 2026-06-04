@@ -9,31 +9,85 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import kotlinx.coroutines.runBlocking
 import org.openprojectx.ai.plugin.llm.LlmRuntimeLogger
 import org.openprojectx.ai.plugin.llm.LlmSettings
 import org.openprojectx.ai.plugin.llm.LlmUnauthorizedException
+import org.openprojectx.ai.plugin.llm.TemplateRequestExecutor
 
 @Service(Service.Level.PROJECT)
 class LlmAuthSessionService(
     private val project: Project
 ) {
-    private val authManager: AuthManager get() = AuthManager.getInstance(project)
+    private var sessionApiKey: String? = null
 
-    private fun resolve(settings: LlmSettings): LlmSettings {
+    fun resolve(settings: LlmSettings): LlmSettings {
         installRuntimeLogSink()
         if (!settings.apiKey.isNullOrBlank()) {
+            sessionApiKey = settings.apiKey
             return settings
         }
-        if (settings.auth == null) return settings
-        val token = authManager.getToken("LLM")
-        return settings.copy(apiKey = token)
+
+        val auth = settings.auth ?: return settings
+        sessionApiKey?.let { return settings.copy(apiKey = it) }
+
+        // Try saved credentials silently first
+        val saved = loadSavedCredentials(settings)
+        if (saved != null) {
+            val apiKey = runLoginTemplate(
+                settings, saved.userName.orEmpty(), saved.getPasswordAsString().orEmpty()
+            )
+            if (!apiKey.isNullOrBlank()) {
+                sessionApiKey = apiKey
+                return settings.copy(apiKey = apiKey)
+            }
+            // Saved credentials failed — fall through to prompt
+        }
+
+        // Prompt user for credentials
+        val credentials = promptCredentials(settings, prefill = saved)
+        val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
+        if (apiKey.isNullOrBlank()) {
+            val hint = lastLoginError?.let { " | last error: $it" }.orEmpty()
+            error("LLM login returned an empty API key for ${auth.login.url}$hint. Check logs in Context Box for details.")
+        }
+        sessionApiKey = apiKey
+        return settings.copy(apiKey = apiKey)
+    }
+
+    fun relogin(settings: LlmSettings): LlmSettings {
+        installRuntimeLogSink()
+        val auth = settings.auth ?: return settings
+        sessionApiKey = null
+
+        // Try saved credentials silently
+        val saved = loadSavedCredentials(settings)
+        if (saved != null) {
+            val apiKey = runLoginTemplate(
+                settings, saved.userName.orEmpty(), saved.getPasswordAsString().orEmpty()
+            )
+            if (!apiKey.isNullOrBlank()) {
+                sessionApiKey = apiKey
+                return settings.copy(apiKey = apiKey)
+            }
+        }
+
+        // Prompt for new credentials
+        val credentials = promptCredentials(settings, prefill = saved)
+        val apiKey = runLoginTemplate(settings, credentials.username, credentials.password)
+        if (apiKey.isNullOrBlank()) {
+            val hint = lastLoginError?.let { " | last error: $it" }.orEmpty()
+            error("LLM relogin returned an empty API key for ${auth.login.url}$hint. Check logs in Context Box for details.")
+        }
+        sessionApiKey = apiKey
+        return settings.copy(apiKey = apiKey)
     }
 
     fun loginNow(): String {
         installRuntimeLogSink()
         val settings = LlmSettingsLoader.load(project)
-        val token = authManager.getToken("LLM")
-        return token.ifBlank { error("SSO login did not produce a token") }
+        val resolved = if (settings.auth != null) relogin(settings) else resolve(settings)
+        return resolved.apiKey ?: error("LLM login did not produce an API key")
     }
 
     fun loginNowWithFeedback() {
@@ -41,19 +95,19 @@ class LlmAuthSessionService(
             try {
                 loginNow()
                 ApplicationManager.getApplication().invokeLater({
-                    Messages.showInfoMessage(project, "SSO login succeeded.", "Code Quality Assistant")
+                    Messages.showInfoMessage(project, "LLM login succeeded.", "Code Quality Improver")
                 }, ModalityState.any())
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater({
-                    Messages.showErrorDialog(project, detailedErrorMessage("SSO login failed", e), "Code Quality Assistant")
+                    Messages.showErrorDialog(project, detailedErrorMessage("LLM login failed", e), "Code Quality Improver")
                 }, ModalityState.any())
             }
         }
     }
 
     fun loadSavedLoginCredentialsForCurrentSettings(): LoginCredentials? {
-        val creds = PasswordSafe.instance.get(CredentialAttributes("OpenProjectX.AI.SSO.Credentials"))
-        return creds?.let {
+        val settings = LlmSettingsLoader.load(project)
+        return loadSavedCredentials(settings)?.let {
             LoginCredentials(
                 username = it.userName.orEmpty(),
                 password = it.getPasswordAsString().orEmpty(),
@@ -63,15 +117,8 @@ class LlmAuthSessionService(
     }
 
     fun promptLoginCredentialsForCurrentSettings(): LoginCredentials {
-        // This is only used by settings UI; trigger a full login and return what the user entered
-        val token = authManager.getToken("LLM")  // triggers login dialog if needed
-        val creds = PasswordSafe.instance.get(CredentialAttributes("OpenProjectX.AI.SSO.Credentials"))
-        return LoginCredentials(
-            username = creds?.userName.orEmpty(),
-            password = creds?.getPasswordAsString().orEmpty(),
-            remember = true
-        ).takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
-            ?: LoginCredentials(token.take(20), "", remember = false) // fallback
+        val settings = LlmSettingsLoader.load(project)
+        return promptCredentials(settings, prefill = loadSavedCredentials(settings))
     }
 
     fun withReloginOnUnauthorized(block: (LlmSettings) -> String): String {
@@ -83,17 +130,110 @@ class LlmAuthSessionService(
         } catch (_: LlmUnauthorizedException) {
             if (baseSettings.auth == null) {
                 if (baseSettings.apiKey.isNullOrBlank()) {
-                    throw LlmUnauthorizedException("Unauthorized LLM request and no SSO login template is configured")
+                    throw LlmUnauthorizedException("Unauthorized LLM request and no API key or login template is configured")
                 }
                 throw LlmUnauthorizedException("Unauthorized LLM request — your API key may be invalid or expired. Update the key in .ai-test.yaml or configure a login template for automatic renewal.")
             }
-            val newToken = authManager.onUnauthorized("LLM")
-            block(resolve(baseSettings).copy(apiKey = newToken))
+            val refreshed = relogin(baseSettings)
+            block(refreshed)
+        }
+    }
+
+    private var lastLoginError: String? = null
+
+    private fun runLoginTemplate(settings: LlmSettings, username: String, password: String): String? {
+        val auth = settings.auth ?: return null
+        return try {
+            runBlocking {
+                TemplateRequestExecutor(
+                    HttpClients.shared(
+                        disableTlsVerification = settings.httpDisableTlsVerification,
+                        timeoutSeconds = settings.timeoutSeconds
+                    )
+                ).execute(
+                    config = auth.login,
+                    variables = mapOf(
+                        "username" to username,
+                        "password" to password,
+                        "model" to settings.model,
+                        "apiKey" to "",
+                        "prompt" to "",
+                        "promptJson" to "\"\""
+                    )
+                )
+            }.trim().takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            lastLoginError = "${e.javaClass.simpleName}: ${e.message}"
+            null
         }
     }
 
     private fun installRuntimeLogSink() {
         LlmRuntimeLogger.sink = { message -> RuntimeLogStore.append(message) }
+    }
+
+    private fun promptCredentials(
+        settings: LlmSettings,
+        prefill: Credentials?
+    ): LoginCredentials {
+        lateinit var credentials: LoginCredentials
+        val showDialog = {
+            val dialog = LlmLoginDialog(
+                project = project,
+                initialUsername = prefill?.userName.orEmpty(),
+                initialPassword = prefill?.getPasswordAsString().orEmpty(),
+                rememberByDefault = prefill != null
+            )
+            if (!dialog.showAndGet()) {
+                error("LLM login cancelled")
+            }
+
+            credentials = dialog.credentials()
+            if (credentials.username.isBlank()) {
+                error("LLM login requires a username")
+            }
+            if (credentials.password.isBlank()) {
+                error("LLM login requires a password")
+            }
+            if (credentials.remember) {
+                saveCredentials(settings, credentials)
+            } else {
+                clearSavedCredentials(settings)
+            }
+        }
+
+        val app = ApplicationManager.getApplication()
+        if (app.isDispatchThread) {
+            showDialog()
+        } else {
+            app.invokeAndWait(showDialog, ModalityState.any())
+        }
+        return credentials
+    }
+
+    private fun loadSavedCredentials(settings: LlmSettings): Credentials? {
+        return PasswordSafe.instance.get(getCredentialAttributes(settings))
+    }
+
+    private fun saveCredentials(settings: LlmSettings, credentials: LoginCredentials) {
+        PasswordSafe.instance.set(
+            getCredentialAttributes(settings),
+            Credentials(credentials.username, credentials.password)
+        )
+    }
+
+    private fun clearSavedCredentials(settings: LlmSettings) {
+        PasswordSafe.instance.set(getCredentialAttributes(settings), null)
+    }
+
+    private fun getCredentialAttributes(settings: LlmSettings): CredentialAttributes {
+        val endpointKey = settings.endpoint ?: settings.auth?.login?.url ?: "default"
+        val serviceName = "OpenProjectX.AI.Login.$endpointKey"
+        return CredentialAttributes(serviceName)
+    }
+
+    companion object {
+        fun getInstance(project: Project): LlmAuthSessionService = project.service()
     }
 
     private fun detailedErrorMessage(prefix: String, throwable: Throwable): String {
@@ -102,9 +242,5 @@ class LlmAuthSessionService(
             .distinct()
             .joinToString(" | caused by: ")
         return if (details.isBlank()) prefix else "$prefix: $details"
-    }
-
-    companion object {
-        fun getInstance(project: Project): LlmAuthSessionService = project.service()
     }
 }
