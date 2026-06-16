@@ -32,6 +32,18 @@ object SonarQubeAuth {
     fun authorizationHeader(token: String, username: String, password: String): String? =
         buildHeader(token, username, password)
 
+    /**
+     * Like [authorizationHeader] but fails fast when no credentials are configured, so callers
+     * can surface an actionable message instead of silently sending an unauthenticated request.
+     * Uses only the config-supplied credentials (no PasswordSafe lookup) so it is side-effect free.
+     */
+    fun requireAuthorizationHeader(config: SonarQubeConfig): String =
+        buildHeader(config.resolvedToken, config.username, config.resolvedPassword)
+            ?: throw IllegalStateException(
+                "Configure SonarQube Token/PAT (or username + password) in Settings > AI Test Assistant " +
+                    "before contacting ${config.serverUrl.ifBlank { "SonarQube" }}."
+            )
+
     private fun buildHeader(token: String, username: String, password: String): String? {
         val normalizedToken = token.trim()
         if (normalizedToken.isNotBlank()) {

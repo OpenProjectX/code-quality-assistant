@@ -2,7 +2,9 @@ package org.openprojectx.ai.plugin
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.ValidationInfo
 import org.openprojectx.ai.plugin.core.Framework
+import org.openprojectx.ai.plugin.testgen.EnvironmentContextCollector
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import javax.swing.*
@@ -15,6 +17,10 @@ class GenerateTestsDialog(
 ) : DialogWrapper(project) {
 
     private val config = LlmSettingsLoader.loadConfig(project)
+
+    // Detected once at construction so createCenterPanel() can show a (non-blocking) heads-up.
+    private val missingTestLibraries: Boolean =
+        EnvironmentContextCollector.hasNoTestLibrariesOnClasspath(project, sourceFile)
 
     private val frameworkCombo = JComboBox(Framework.entries.toTypedArray())
     private val generationPromptProfiles = config.prompts.profiles.generation.items
@@ -65,8 +71,21 @@ class GenerateTestsDialog(
         updateFrameworkSpecificFields(selectedFramework())
 
         panel.add(form, BorderLayout.CENTER)
+        if (missingTestLibraries) {
+            panel.add(testLibraryWarningLabel(), BorderLayout.NORTH)
+        }
         return panel
     }
+
+    /** Non-blocking heads-up shown when the module has no test library on its classpath. */
+    private fun testLibraryWarningLabel(): JComponent =
+        JLabel(
+            "<html><body style='width:360px'>No test libraries (JUnit, REST Assured, etc.) " +
+            "were detected on this module's classpath. The generated test may not compile " +
+            "until you add a test dependency — you can still generate it.</body></html>",
+            com.intellij.icons.AllIcons.General.Warning,
+            SwingConstants.LEFT
+        )
 
     private fun applyDefaults(framework: Framework) {
         val derivedJavaMainTestLocation = JavaHeuristics.deriveTestLocationForMainJava(sourceFile, project.basePath)
@@ -124,6 +143,26 @@ class GenerateTestsDialog(
         val trimmed = sourceClassName.trim()
         if (trimmed.isEmpty()) return AiTestDefaults.DEFAULT_CLASS_NAME
         return if (trimmed.endsWith("Test")) trimmed else "${trimmed}Test"
+    }
+
+    override fun doValidate(): ValidationInfo? {
+        val cls = clsField.text.trim()
+        if (cls.isBlank()) return ValidationInfo("Class Name is required", clsField)
+        if (!cls.matches(Regex("[A-Za-z][A-Za-z0-9_]*")))
+            return ValidationInfo("Class Name must be a valid Java identifier (e.g. OrderServiceTest)", clsField)
+
+        val loc = location.text.trim()
+        if (loc.isBlank()) return ValidationInfo("Location is required", location)
+
+        val framework = selectedFramework()
+        if (framework == Framework.REST_ASSURED) {
+            val pkg = packageNameField.text.trim()
+            if (pkg.isBlank()) return ValidationInfo("Package Name is required for REST Assured tests", packageNameField)
+            if (!pkg.matches(Regex("[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)*")))
+                return ValidationInfo("Package Name must be a valid Java package (e.g. com.example.tests)", packageNameField)
+        }
+
+        return null
     }
 
     fun result(): UiResult {

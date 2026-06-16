@@ -33,7 +33,9 @@ object PromptBuilder {
         Target: Java unit/integration tests for the provided Java source.
         Requirements:
         - Generate a single JUnit 5 test class: {{qualifiedClassName}}.
-        - Include one executable helper method (for local run) that can run this class's tests.
+        - Do NOT add a main() method or any manual JUnit Platform launcher/runner; the IDE and Maven/Gradle run the tests.
+        - Only import packages that are available on a standard JUnit 5 test classpath (org.junit.jupiter.*) plus the project's own classes; do not import org.junit.platform.launcher.* or invent dependencies.
+        - Use only the test libraries listed under "Test Environment" below; do not import assertion/mock libraries that are not listed (e.g. do not assume AssertJ or Mockito unless they appear there).
         - Focus only on methods present in the provided source; do not invent methods.
         - Prioritize the method referenced by user notes when provided.
         - For each tested method, include meaningful assertions for behavior and edge cases.
@@ -94,6 +96,10 @@ object PromptBuilder {
             ))
         } else ""
 
+        val environmentBlock = if (req.environmentContext.isNotBlank()) {
+            "\n" + req.environmentContext.trim()
+        } else ""
+
         return render(template.wrapper, mapOf(
             "contractType" to when (req.contractType) {
                 ContractType.OPENAPI -> "OpenAPI/REST API"
@@ -101,7 +107,7 @@ object PromptBuilder {
             },
             "baseUrlHint" to (req.baseUrl ?: "not provided"),
             "outputNotes" to (req.outputNotes ?: "(none)"),
-            "frameworkRules" to frameworkRules + dependentMethodsBlock,
+            "frameworkRules" to frameworkRules + environmentBlock + dependentMethodsBlock,
             "contractText" to req.contractText
         ))
     }
