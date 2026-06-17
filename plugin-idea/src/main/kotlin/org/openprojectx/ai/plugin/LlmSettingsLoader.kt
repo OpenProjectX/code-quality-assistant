@@ -510,6 +510,7 @@ object LlmSettingsLoader {
             llmApiKeyEnv = llm.string("apiKeyEnv"),
             httpDisableTlsVerification = http?.get("disableTlsVerification") as? Boolean ?: true,
             showLogTab = ui["showLogTab"] as? Boolean ?: true,
+            advancedMode = ui["advancedMode"] as? Boolean ?: false,
             llmTemplateEnabled = template != null,
             llmTemplateMethod = template.string("method").ifBlank { "POST" },
             llmTemplateUrl = template.string("url"),
@@ -532,35 +533,47 @@ object LlmSettingsLoader {
             generationPromptProfilesYaml = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("test", globalPromptsByCategory,
                     parsePromptProfileItems(
-                        prompts.map("generationProfiles").map("items"),
+                        seedLegacyIntoProfiles(
+                            prompts.map("generationProfiles").map("items"),
+                            promptGeneration.string("wrapper"),
+                            AiPromptDefaults.GENERATION_WRAPPER
+                        ),
                         AiPromptDefaults.GENERATION_WRAPPER,
                         includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
-            ),
-            commitPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
+            ).ifBlank { AiTestSettingsModel().generationPromptProfilesYaml },
+            commitPromptProfileDefault = prompts.map("commitMessageProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             commitPromptProfilesYaml = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("commit", globalPromptsByCategory,
                     parsePromptProfileItems(
-                    prompts.map("commitMessageProfiles").map("items"),
-                    AiPromptDefaults.COMMIT_MESSAGE,
-                    includeDefault = false
+                        seedLegacyIntoProfiles(
+                            prompts.map("commitMessageProfiles").map("items"),
+                            prompts.string("commitMessage"),
+                            AiPromptDefaults.COMMIT_MESSAGE
+                        ),
+                        AiPromptDefaults.COMMIT_MESSAGE,
+                        includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
-            ),
-            branchDiffPromptProfileDefault = GLOBAL_DIFF_REVIEW_PROFILE,
+            ).ifBlank { AiTestSettingsModel().commitPromptProfilesYaml },
+            branchDiffPromptProfileDefault = prompts.map("branchDiffSummaryProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             branchDiffPromptProfilesYaml = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("branchDiff", globalPromptsByCategory,
                     parsePromptProfileItems(
-                    prompts.map("branchDiffSummaryProfiles").map("items"),
-                    AiPromptDefaults.BRANCH_DIFF_SUMMARY,
-                    includeDefault = false
+                        seedLegacyIntoProfiles(
+                            prompts.map("branchDiffSummaryProfiles").map("items"),
+                            prompts.string("branchDiffSummary"),
+                            AiPromptDefaults.BRANCH_DIFF_SUMMARY
+                        ),
+                        AiPromptDefaults.BRANCH_DIFF_SUMMARY,
+                        includeDefault = false
                     ),
                     suppressedGlobalPrompts
                 )
-            ),
+            ).ifBlank { AiTestSettingsModel().branchDiffPromptProfilesYaml },
             codeGeneratePromptProfileDefault = prompts.map("codeGenerateProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeGeneratePromptProfilesYaml = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("codeGenerate", globalPromptsByCategory,
@@ -571,7 +584,7 @@ object LlmSettingsLoader {
                     ),
                     suppressedGlobalPrompts
                 )
-            ),
+            ).ifBlank { AiTestSettingsModel().codeGeneratePromptProfilesYaml },
             codeReviewPromptProfileDefault = prompts.map("codeReviewProfiles").string("selected").ifBlank { PromptProfileSet.DEFAULT_NAME },
             codeReviewPromptProfilesYaml = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("codeReview", globalPromptsByCategory,
@@ -582,7 +595,7 @@ object LlmSettingsLoader {
                     ),
                     suppressedGlobalPrompts
                 )
-            ),
+            ).ifBlank { AiTestSettingsModel().codeReviewPromptProfilesYaml },
             bitbucketPromptRepoEnabled = remoteRepo["enabled"] as? Boolean ?: false,
             bitbucketPromptRepoUrl = remoteRepo.string("url"),
             bitbucketPromptRepoBranch = remoteRepo.string("branch").ifBlank { "main" },
@@ -933,13 +946,13 @@ object LlmSettingsLoader {
         )
         val globalPrompts = loadGlobalPrompts(project, remoteRepoConfig)
         prompts["generation"] = linkedMapOf<String, Any>(
-            "wrapper" to model.generationPromptWrapper,
+            "wrapper" to extractDefaultFromProfilesYaml(model.generationPromptProfilesYaml, AiPromptDefaults.GENERATION_WRAPPER),
             "restAssuredRules" to model.generationPromptRestAssured,
             "karateRules" to model.generationPromptKarate
         )
-        prompts["commitMessage"] = model.commitPrompt
+        prompts["commitMessage"] = extractDefaultFromProfilesYaml(model.commitPromptProfilesYaml, AiPromptDefaults.COMMIT_MESSAGE)
         prompts["pullRequest"] = model.pullRequestPrompt
-        prompts["branchDiffSummary"] = model.branchDiffPrompt
+        prompts["branchDiffSummary"] = extractDefaultFromProfilesYaml(model.branchDiffPromptProfilesYaml, AiPromptDefaults.BRANCH_DIFF_SUMMARY)
         prompts["generationProfiles"] = buildPromptProfileMap(
             selected = model.generationPromptProfileDefault,
             yamlText = dumpPromptProfilesYaml(
@@ -955,7 +968,7 @@ object LlmSettingsLoader {
             defaultTemplate = model.generationPromptWrapper
         )
         prompts["commitMessageProfiles"] = buildPromptProfileMap(
-            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            selected = model.commitPromptProfileDefault.ifBlank { PromptProfileSet.DEFAULT_NAME },
             yamlText = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("commit", globalPrompts,
                     parsePromptProfileItems(
@@ -969,7 +982,7 @@ object LlmSettingsLoader {
             defaultTemplate = model.commitPrompt
         )
         prompts["branchDiffSummaryProfiles"] = buildPromptProfileMap(
-            selected = GLOBAL_DIFF_REVIEW_PROFILE,
+            selected = model.branchDiffPromptProfileDefault.ifBlank { PromptProfileSet.DEFAULT_NAME },
             yamlText = dumpPromptProfilesYaml(
                 applyGlobalProfilesPreloaded("branchDiff", globalPrompts,
                     parsePromptProfileItems(
@@ -1174,6 +1187,7 @@ object LlmSettingsLoader {
     private fun buildUiMap(existing: Map<*, *>?, model: AiTestSettingsModel): MutableMap<String, Any> {
         val ui = existing.toMutableLinkedMap()
         ui["showLogTab"] = model.showLogTab
+        ui["advancedMode"] = model.advancedMode
         return ui
     }
 
@@ -1322,6 +1336,27 @@ object LlmSettingsLoader {
             "selected" to selected.ifBlank { PromptProfileSet.DEFAULT_NAME },
             "items" to items
         )
+    }
+
+    /**
+     * If [legacyValue] is a user-customised value (different from [defaultFallback]) and the
+     * profile [items] map has no "default" entry, seed it so the legacy standalone prompt is
+     * migrated into the profiles system on the next save.
+     */
+    private fun seedLegacyIntoProfiles(
+        items: Map<*, *>,
+        legacyValue: String,
+        defaultFallback: String
+    ): Map<*, *> {
+        if (legacyValue.isBlank() || legacyValue == defaultFallback) return items
+        if (items.containsKey(PromptProfileSet.DEFAULT_NAME)) return items
+        return items.toMutableMap().also { it[PromptProfileSet.DEFAULT_NAME] = legacyValue }
+    }
+
+    private fun extractDefaultFromProfilesYaml(yamlText: String, fallback: String): String {
+        val items = Yaml().load<Any?>(yamlText) as? Map<*, *> ?: return fallback
+        val defaultEntry = items[PromptProfileSet.DEFAULT_NAME]?.toString()?.trim()
+        return defaultEntry?.takeIf { it.isNotBlank() } ?: fallback
     }
 
     private fun dumpPromptProfilesYaml(items: Map<String, String>): String {
@@ -1747,7 +1782,13 @@ object LlmSettingsLoader {
         val configuredCredentials = if (config.username.isNotBlank() && config.password.isNotBlank()) {
             listOf(BitbucketCredential("settings", config.username, config.password))
         } else {
-            emptyList()
+            // Fall back to the shared username/password (basic auth only — tokens are never shared).
+            val shared = SharedCredentialStore.load()
+            if (shared.username.isNotBlank() && shared.password.isNotBlank()) {
+                listOf(BitbucketCredential("shared-credential", shared.username, shared.password))
+            } else {
+                emptyList()
+            }
         }
         val gitCredentials = GitCredentialHelper.resolve(config.repoUrl)
             ?.let { listOf(BitbucketCredential("git-credential-helper", it.username, it.password)) }

@@ -1,8 +1,6 @@
 package org.openprojectx.ai.plugin
 
-import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
-import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
@@ -211,25 +209,23 @@ class LlmAuthSessionService(
         return credentials
     }
 
-    private fun loadSavedCredentials(settings: LlmSettings): Credentials? {
-        return PasswordSafe.instance.get(getCredentialAttributes(settings))
+    // Login uses the single shared credential (see SharedCredentialStore), so the same username/password
+    // entered in the basic settings view drives LLM login as well as the other services.
+    private fun loadSavedCredentials(@Suppress("UNUSED_PARAMETER") settings: LlmSettings): Credentials? {
+        val shared = SharedCredentialStore.load()
+        return if (shared.username.isNotBlank() && shared.password.isNotBlank()) {
+            Credentials(shared.username, shared.password)
+        } else {
+            null
+        }
     }
 
-    private fun saveCredentials(settings: LlmSettings, credentials: LoginCredentials) {
-        PasswordSafe.instance.set(
-            getCredentialAttributes(settings),
-            Credentials(credentials.username, credentials.password)
-        )
+    private fun saveCredentials(@Suppress("UNUSED_PARAMETER") settings: LlmSettings, credentials: LoginCredentials) {
+        SharedCredentialStore.save(credentials.username, credentials.password)
     }
 
-    private fun clearSavedCredentials(settings: LlmSettings) {
-        PasswordSafe.instance.set(getCredentialAttributes(settings), null)
-    }
-
-    private fun getCredentialAttributes(settings: LlmSettings): CredentialAttributes {
-        val endpointKey = settings.endpoint ?: settings.auth?.login?.url ?: "default"
-        val serviceName = "OpenProjectX.AI.Login.$endpointKey"
-        return CredentialAttributes(serviceName)
+    private fun clearSavedCredentials(@Suppress("UNUSED_PARAMETER") settings: LlmSettings) {
+        SharedCredentialStore.clear()
     }
 
     companion object {

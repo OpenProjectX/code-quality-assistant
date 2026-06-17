@@ -5,11 +5,11 @@ plugins {
     signing
 }
 
-val restrictedNetworkMode = providers.gradleProperty("restrictedNetworkMode")
-    .map(String::toBooleanStrictOrNull)
+val restrictedNetworkMode: Boolean = providers.gradleProperty("restrictedNetworkMode")
+    .map { it.toBooleanStrictOrNull() ?: false }
     .orElse(
         providers.environmentVariable("RESTRICTED_NETWORK_MODE")
-            .map(String::toBooleanStrictOrNull)
+            .map { it.toBooleanStrictOrNull() ?: false }
     )
     .getOrElse(false)
 val localIntellijPlatformPath = providers.gradleProperty("intellijPlatformLocalPath")

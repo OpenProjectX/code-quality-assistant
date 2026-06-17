@@ -53,6 +53,10 @@ class AiTestSettingsConfigurable(
     private lateinit var httpDisableTlsVerification: JCheckBox
     private lateinit var showLogTabCheckbox: JCheckBox
 
+    private lateinit var sharedUsernameField: JTextField
+    private lateinit var sharedPasswordField: JPasswordField
+    private lateinit var advancedModeCheckbox: JCheckBox
+
     private lateinit var llmTemplateEnabled: JCheckBox
     private lateinit var llmTemplateMethod: JComboBox<String>
     private lateinit var llmTemplateUrl: JTextField
@@ -71,12 +75,9 @@ class AiTestSettingsConfigurable(
     private lateinit var loginPanel: JPanel
     private lateinit var loginCardPanel: JPanel
 
-    private lateinit var generationPromptWrapperField: JTextArea
     private lateinit var generationPromptRestAssuredField: JTextArea
     private lateinit var generationPromptKarateField: JTextArea
-    private lateinit var commitPromptField: JTextArea
     private lateinit var pullRequestPromptField: JTextArea
-    private lateinit var branchDiffPromptField: JTextArea
     private lateinit var generationPromptProfileDefaultField: JTextField
     private lateinit var generationPromptProfilesYamlField: JTextArea
     private lateinit var commitPromptProfileDefaultField: JTextField
@@ -112,6 +113,9 @@ class AiTestSettingsConfigurable(
     private var initialState: AiTestSettingsModel = AiTestSettingsModel()
     private var selectedPromptSelection: PromptSelection? = null
     private var suppressedGlobalPrompts: Set<String> = emptySet()
+    private var advancedPanel: JPanel? = null
+    private var initialSharedUsername: String = ""
+    private var initialSharedPassword: String = ""
 
     private enum class PromptCategory(val label: String) {
         TEST("Test"),
@@ -152,6 +156,11 @@ class AiTestSettingsConfigurable(
         apiKeyEnvField = JTextField()
         httpDisableTlsVerification = JCheckBox("Disable TLS certificate verification (insecure, use only on trusted networks)")
         showLogTabCheckbox = JCheckBox("Show Log tab in AI Context Box")
+        sharedUsernameField = JTextField()
+        sharedPasswordField = JPasswordField()
+        advancedModeCheckbox = JCheckBox("Advanced settings").apply {
+            addActionListener { updateAdvancedVisibility() }
+        }
 
         llmTemplateEnabled = JCheckBox("Use template-based LLM request")
         llmTemplateMethod = methodCombo()
@@ -183,12 +192,9 @@ class AiTestSettingsConfigurable(
             title = "Login Request Template"
         )
 
-        generationPromptWrapperField = textArea(10)
         generationPromptRestAssuredField = textArea(12)
         generationPromptKarateField = textArea(10)
-        commitPromptField = textArea(12)
         pullRequestPromptField = textArea(14)
-        branchDiffPromptField = textArea(12)
         generationPromptProfileDefaultField = JTextField()
         generationPromptProfilesYamlField = textArea(12)
         commitPromptProfileDefaultField = JTextField()
@@ -230,7 +236,39 @@ class AiTestSettingsConfigurable(
             addTab("Prompts", promptsTab())
         }
 
-        val toolbar = JPanel(BorderLayout()).apply {
+        val importButton = JButton("Import Repo Config").apply {
+            addActionListener {
+                usage.record("settings.toolbar.import_repo_config")
+                val state = collectState()
+                runOffEdt(
+                    label = "Import repo config",
+                    block = { LlmSettingsLoader.importConfigFromRepo(project, state) },
+                    onSuccess = { sourcePath ->
+                        reset()
+                        Messages.showInfoMessage(
+                            project,
+                            "Imported config from: $sourcePath",
+                            "Code Quality Improver"
+                        )
+                    },
+                    onFailure = { ex ->
+                        Messages.showErrorDialog(
+                            project,
+                            detailedErrorMessage("Import repo config failed", ex),
+                            "Code Quality Improver"
+                        )
+                    }
+                )
+            }
+        }
+
+        val advancedContent = JPanel(BorderLayout(0, 8)).apply {
+            add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply { add(importButton) }, BorderLayout.NORTH)
+            add(tabs, BorderLayout.CENTER)
+        }
+        advancedPanel = advancedContent
+
+        val header = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(12, 12, 8, 12),
                 BorderFactory.createCompoundBorder(
@@ -238,50 +276,10 @@ class AiTestSettingsConfigurable(
                     BorderFactory.createEmptyBorder(10, 12, 10, 12)
                 )
             )
-            add(JLabel("Configure LLM access, login automation, and generation defaults.").apply {
+            add(JLabel("Sign in with your username and password. Turn on Advanced for provider, prompts, and per-service settings.").apply {
                 horizontalAlignment = SwingConstants.LEFT
             }, BorderLayout.CENTER)
-            add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
-                add(JButton("Login Now").apply {
-                    addActionListener {
-                        usage.record("settings.toolbar.login_now")
-                        if (saveLlmStateForLoginNow()) {
-                            LlmAuthSessionService.getInstance(project).loginNowWithFeedback()
-                        }
-                    }
-                })
-                add(JButton("Reload").apply {
-                    addActionListener {
-                        usage.record("settings.toolbar.reload")
-                        reset()
-                    }
-                })
-                add(JButton("Import Repo Config").apply {
-                    addActionListener {
-                        usage.record("settings.toolbar.import_repo_config")
-                        val state = collectState()
-                        runOffEdt(
-                            label = "Import repo config",
-                            block = { LlmSettingsLoader.importConfigFromRepo(project, state) },
-                            onSuccess = { sourcePath ->
-                                reset()
-                                Messages.showInfoMessage(
-                                    project,
-                                    "Imported config from: $sourcePath",
-                                    "Code Quality Improver"
-                                )
-                            },
-                            onFailure = { ex ->
-                                Messages.showErrorDialog(
-                                    project,
-                                    detailedErrorMessage("Import repo config failed", ex),
-                                    "Code Quality Improver"
-                                )
-                            }
-                        )
-                    }
-                })
-            }, BorderLayout.EAST)
+            add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply { add(advancedModeCheckbox) }, BorderLayout.EAST)
         }
 
         pathLabel = JLabel().apply {
@@ -294,9 +292,15 @@ class AiTestSettingsConfigurable(
             })
         }
 
+        val center = JPanel(BorderLayout(0, 8)).apply {
+            border = BorderFactory.createEmptyBorder(0, 12, 0, 12)
+            add(basicPanel(), BorderLayout.NORTH)
+            add(advancedContent, BorderLayout.CENTER)
+        }
+
         rootPanel = JPanel(BorderLayout(0, 8)).apply {
-            add(toolbar, BorderLayout.NORTH)
-            add(tabs, BorderLayout.CENTER)
+            add(header, BorderLayout.NORTH)
+            add(center, BorderLayout.CENTER)
             add(JPanel(BorderLayout()).apply {
                 border = BorderFactory.createEmptyBorder(0, 12, 12, 12)
                 add(pathLabel, BorderLayout.WEST)
@@ -305,15 +309,35 @@ class AiTestSettingsConfigurable(
         }
 
         reset()
+        updateAdvancedVisibility()
         return rootPanel as JPanel
     }
 
-    override fun isModified(): Boolean = collectState() != initialState
+    override fun isModified(): Boolean =
+        collectState() != initialState ||
+            sharedUsernameField.text.trim() != initialSharedUsername ||
+            String(sharedPasswordField.password).trim() != initialSharedPassword
 
     override fun apply() {
         val state = collectState()
-        validate(state)
+        try {
+            validate(state)
+        } catch (ex: IllegalArgumentException) {
+            Messages.showErrorDialog(project, ex.message ?: "Invalid settings", "Settings Error")
+            return
+        }
         LlmSettingsLoader.saveSettingsModel(project, state)
+        val sharedUsername = sharedUsernameField.text.trim()
+        val sharedPassword = String(sharedPasswordField.password).trim()
+        // Only persist when changed, so an Apply before the async prefill completes can't clobber
+        // a stored credential with blanks. PasswordSafe must not be touched on the EDT, so save off it.
+        if (sharedUsername != initialSharedUsername || sharedPassword != initialSharedPassword) {
+            initialSharedUsername = sharedUsername
+            initialSharedPassword = sharedPassword
+            ApplicationManager.getApplication().executeOnPooledThread {
+                SharedCredentialStore.save(sharedUsername, sharedPassword)
+            }
+        }
         initialState = state
         updatePathLabel()
     }
@@ -323,11 +347,73 @@ class AiTestSettingsConfigurable(
         applyState(state)
         initialState = state
         updatePathLabel()
+        loadSharedCredentialAsync()
     }
 
     override fun disposeUIResources() {
         rootPanel = null
         pathLabel = null
+        advancedPanel = null
+    }
+
+    private fun basicPanel(): JComponent {
+        val loginButton = JButton("Login").apply {
+            addActionListener { basicLogin() }
+        }
+        val reloadButton = JButton("Reload").apply {
+            addActionListener {
+                ButtonUsageReportService.getInstance(project).record("settings.toolbar.reload")
+                reset()
+            }
+        }
+        return formSection("Sign In", listOf(
+            "Username" to sharedUsernameField,
+            "Password" to sharedPasswordField,
+            "" to JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(loginButton)
+                add(reloadButton)
+            }
+        ))
+    }
+
+    private fun basicLogin() {
+        ButtonUsageReportService.getInstance(project).record("settings.toolbar.login_now")
+        val username = sharedUsernameField.text.trim()
+        val password = String(sharedPasswordField.password).trim()
+        if (username.isBlank() || password.isBlank()) {
+            Messages.showErrorDialog(project, "Username and password are required to log in.", "Code Quality Improver")
+            return
+        }
+        initialSharedUsername = username
+        initialSharedPassword = password
+        if (!saveLlmStateForLoginNow()) return
+        // PasswordSafe access must not run on the EDT; persist the shared credential off-EDT, then log in.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            SharedCredentialStore.save(username, password)
+            ApplicationManager.getApplication().invokeLater({
+                LlmAuthSessionService.getInstance(project).loginNowWithFeedback()
+            }, ModalityState.any())
+        }
+    }
+
+    private fun updateAdvancedVisibility() {
+        advancedPanel?.isVisible = advancedModeCheckbox.isSelected
+        rootPanel?.revalidate()
+        rootPanel?.repaint()
+    }
+
+    /** Prefill the shared username/password off the EDT — PasswordSafe access is a slow operation. */
+    private fun loadSharedCredentialAsync() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val shared = SharedCredentialStore.load()
+            ApplicationManager.getApplication().invokeLater({
+                if (rootPanel == null) return@invokeLater
+                sharedUsernameField.text = shared.username
+                sharedPasswordField.setText(shared.password)
+                initialSharedUsername = shared.username
+                initialSharedPassword = shared.password
+            }, ModalityState.any())
+        }
     }
 
 
@@ -473,16 +559,11 @@ class AiTestSettingsConfigurable(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(infoBanner("Built-in prompts remain the defaults. Edit any field below to override the default template saved in .ai-test.yaml."))
-        add(formSection("Generation Wrapper", listOf(
-            "Template" to JScrollPane(generationPromptWrapperField)
-        )))
         add(formSection("Generation Rules", listOf(
             "Rest Assured rules" to JScrollPane(generationPromptRestAssuredField),
             "Karate rules" to JScrollPane(generationPromptKarateField)
         )))
         add(formSection("AI Actions", listOf(
-            "Commit message prompt" to JScrollPane(commitPromptField),
-            "Branch diff summary prompt" to JScrollPane(branchDiffPromptField),
             "Pull request prompt" to JScrollPane(pullRequestPromptField)
         )))
         add(unifiedPromptManagerSection())
@@ -716,9 +797,9 @@ class AiTestSettingsConfigurable(
 
     private fun defaultPromptTemplateByCategory(category: PromptCategory): String {
         return when (category) {
-            PromptCategory.TEST -> generationPromptWrapperField.text.ifBlank { AiPromptDefaults.GENERATION_WRAPPER }
-            PromptCategory.COMMIT -> commitPromptField.text.ifBlank { AiPromptDefaults.COMMIT_MESSAGE }
-            PromptCategory.BRANCH_DIFF -> branchDiffPromptField.text.ifBlank { AiPromptDefaults.BRANCH_DIFF_SUMMARY }
+            PromptCategory.TEST -> AiPromptDefaults.GENERATION_WRAPPER
+            PromptCategory.COMMIT -> AiPromptDefaults.COMMIT_MESSAGE
+            PromptCategory.BRANCH_DIFF -> AiPromptDefaults.BRANCH_DIFF_SUMMARY
             PromptCategory.CODE_GENERATE -> AiPromptDefaults.CODE_GENERATE
             PromptCategory.CODE_REVIEW -> AiPromptDefaults.CODE_REVIEW
         }
@@ -836,6 +917,7 @@ class AiTestSettingsConfigurable(
         llmApiKeyEnv = apiKeyEnvField.text.trim(),
         httpDisableTlsVerification = httpDisableTlsVerification.isSelected,
         showLogTab = showLogTabCheckbox.isSelected,
+        advancedMode = advancedModeCheckbox.isSelected,
         llmTemplateEnabled = llmTemplateEnabled.isSelected,
         llmTemplateMethod = llmTemplateMethod.selectedItem?.toString().orEmpty(),
         llmTemplateUrl = llmTemplateUrl.text.trim(),
@@ -848,12 +930,12 @@ class AiTestSettingsConfigurable(
         loginHeaders = loginHeaders.text.trim(),
         loginBody = loginBody.text,
         loginResponsePath = loginResponsePath.text.trim(),
-        generationPromptWrapper = generationPromptWrapperField.text,
+        generationPromptWrapper = AiPromptDefaults.GENERATION_WRAPPER,
         generationPromptRestAssured = generationPromptRestAssuredField.text,
         generationPromptKarate = generationPromptKarateField.text,
-        commitPrompt = commitPromptField.text,
+        commitPrompt = AiPromptDefaults.COMMIT_MESSAGE,
         pullRequestPrompt = pullRequestPromptField.text,
-        branchDiffPrompt = branchDiffPromptField.text,
+        branchDiffPrompt = AiPromptDefaults.BRANCH_DIFF_SUMMARY,
         generationPromptProfileDefault = generationPromptProfileDefaultField.text.trim(),
         generationPromptProfilesYaml = generationPromptProfilesYamlField.text,
         commitPromptProfileDefault = commitPromptProfileDefaultField.text.trim(),
@@ -894,6 +976,7 @@ class AiTestSettingsConfigurable(
         apiKeyEnvField.text = state.llmApiKeyEnv
         httpDisableTlsVerification.isSelected = state.httpDisableTlsVerification
         showLogTabCheckbox.isSelected = state.showLogTab
+        advancedModeCheckbox.isSelected = state.advancedMode
 
         llmTemplateEnabled.isSelected = state.llmTemplateEnabled
         llmTemplateMethod.selectedItem = state.llmTemplateMethod
@@ -908,11 +991,8 @@ class AiTestSettingsConfigurable(
         loginHeaders.text = state.loginHeaders
         loginBody.text = state.loginBody
         loginResponsePath.text = state.loginResponsePath
-        generationPromptWrapperField.text = state.generationPromptWrapper
         generationPromptRestAssuredField.text = state.generationPromptRestAssured
         generationPromptKarateField.text = state.generationPromptKarate
-        commitPromptField.text = state.commitPrompt
-        branchDiffPromptField.text = state.branchDiffPrompt
         pullRequestPromptField.text = state.pullRequestPrompt
         generationPromptProfileDefaultField.text = state.generationPromptProfileDefault
         generationPromptProfilesYamlField.text = state.generationPromptProfilesYaml
@@ -946,6 +1026,7 @@ class AiTestSettingsConfigurable(
         refreshPromptManager()
         toggleTemplateCards()
         updatePathLabel()
+        updateAdvancedVisibility()
     }
 
     private fun validate(state: AiTestSettingsModel) {
@@ -991,11 +1072,9 @@ class AiTestSettingsConfigurable(
     }
 
     private fun requirePromptProfiles(label: String, text: String) {
+        if (text.isBlank()) return
         val parsed = Yaml().load<Any?>(text) as? Map<*, *>
             ?: throw IllegalArgumentException("$label must be a YAML map of profileName: promptTemplate")
-        if (parsed.isEmpty()) {
-            throw IllegalArgumentException("$label cannot be empty")
-        }
     }
 
     private fun parseYamlMap(text: String): Map<String, String> {

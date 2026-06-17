@@ -15,6 +15,7 @@ import org.openprojectx.ai.plugin.core.Framework
 import org.openprojectx.ai.plugin.core.GenerationRequest
 import org.openprojectx.ai.plugin.core.PromptBuilder
 import org.openprojectx.ai.plugin.testgen.DependentMethodCollector
+import org.openprojectx.ai.plugin.testgen.EnvironmentContextCollector
 import org.slf4j.LoggerFactory
 
 
@@ -62,6 +63,10 @@ class GenerateTestsService(private val project: Project) {
             DependentMethodCollector.collect(project, file)
         } else ""
 
+        val environmentContext = if (contractType == ContractType.JAVA) {
+            EnvironmentContextCollector.collect(project, file)
+        } else ""
+
         val req = GenerationRequest(
             contractText = contractText,
             framework = effectiveFramework,
@@ -71,7 +76,8 @@ class GenerateTestsService(private val project: Project) {
             packageName = packageName,
             className = ui.className,
             outputNotes = ui.notes,
-            dependentMethodSignatures = dependentMethodSignatures
+            dependentMethodSignatures = dependentMethodSignatures,
+            environmentContext = environmentContext
         )
 
         val generationTemplate = config.prompts.generation.copy(
@@ -92,26 +98,37 @@ class GenerateTestsService(private val project: Project) {
         }
         ContextBoxStateService.getInstance(project).addUserMessage(userMessage)
 
+        val contextBox = ContextBoxStateService.getInstance(project)
+
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating tests for ${ui.className}", true) {
             override fun run(indicator: ProgressIndicator) {
                 try {
                     indicator.text = "Preparing request for ${ui.className}..."
                     indicator.fraction = 0.1
+                    contextBox.addAssistantMessage("[1/4] Preparing request for ${ui.className}...", "Progress")
+
+                    if (indicator.isCanceled) return
 
                     indicator.text = "Calling LLM..."
                     indicator.isIndeterminate = true
+                    contextBox.addAssistantMessage("[2/4] Calling LLM — this may take a moment...", "Progress")
+
                     val code = authSession.withReloginOnUnauthorized { settings ->
                         val provider = LlmProviderFactory.create(settings)
                         kotlinx.coroutines.runBlocking { provider.generateCode(prompt) }
                     }
                     indicator.isIndeterminate = false
 
+                    if (indicator.isCanceled) return
+
                     indicator.text = "Processing result..."
                     indicator.fraction = 0.8
+                    contextBox.addAssistantMessage("[3/4] Processing and sanitizing generated code...", "Progress")
                     val sanitizedCode = sanitizeGeneratedCode(code)
 
                     indicator.text = "Writing ${ui.className}.java..."
                     indicator.fraction = 0.95
+                    contextBox.addAssistantMessage("[4/4] Writing ${ui.className} to disk...", "Progress")
                     writeGenerated(
                         project = project,
                         framework = effectiveFramework,
@@ -137,7 +154,10 @@ class GenerateTestsService(private val project: Project) {
                     log.error("Test generation failed:", e)
                     notificationState.clearState(file.path)
                     EditorNotifications.getInstance(project).updateNotifications(file)
-                    Notifications.error(project, "Test generation failed:", e.message ?: e.toString())
+
+                    val userMessage = buildActionableErrorMessage(e)
+                    contextBox.addAssistantMessage("Test generation failed: $userMessage", "Error")
+                    Notifications.errorWithLogs(project, "Test generation failed", userMessage)
                 }
             }
         })
@@ -154,10 +174,16 @@ class GenerateTestsService(private val project: Project) {
         val projectRoot = project.guessProjectDir()
             ?: throw IllegalStateException("Cannot resolve project root")
 
+        // Drive the output directory from the package the LLM actually declared in the file,
+        // not the package we asked for. A custom prompt (e.g. "match the source file's package")
+        // can make the model deviate from the requested package; without this, the file would be
+        // written under the requested package path while declaring a different one, which IntelliJ
+        // flags as "Package name does not correspond to the file path".
+        val effectivePackage = JavaHeuristics.extractDeclaredPackage(code) ?: packageName
         val normalizedLocation = resolveOutputLocation(
             framework = framework,
             location = location,
-            packageName = packageName
+            packageName = effectivePackage
         )
 
         val fileName = when (framework) {
@@ -256,6 +282,27 @@ class GenerateTestsService(private val project: Project) {
             .replace('\\', '/')
             .removePrefix("/")
             .removeSuffix("/")
+
+    private fun buildActionableErrorMessage(e: Exception): String {
+        val raw = e.message ?: e.javaClass.simpleName
+        return when {
+            raw.contains("401") || raw.contains("unauthorized", ignoreCase = true) ->
+                "Authentication failed. Check your LLM provider credentials in Settings > AI Test Assistant."
+            raw.contains("timeout", ignoreCase = true) || raw.contains("SocketTimeout") ->
+                "Request timed out. The LLM endpoint may be slow or unreachable. Check network/settings."
+            raw.contains("packageName is required", ignoreCase = true) ->
+                "Package name is missing. Fill in the Package Name field in the dialog, or verify the source file is under src/main/java."
+            raw.contains("Cannot resolve project root") ->
+                "Could not determine project root. Ensure the project is properly opened in IntelliJ."
+            raw.contains("Cannot create target directory") ->
+                "Could not create the output directory. Check that the Location path is valid and writable."
+            raw.contains("403") || raw.contains("forbidden", ignoreCase = true) ->
+                "Access denied by the LLM provider. Verify your API key/token in Settings > AI Test Assistant."
+            raw.contains("Connection refused") || raw.contains("UnknownHost") ->
+                "Cannot reach the LLM endpoint. Check the provider URL and your network connection."
+            else -> raw
+        }
+    }
 
     private fun sanitizeGeneratedCode(raw: String): String {
         val trimmed = raw.trim()

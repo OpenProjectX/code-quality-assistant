@@ -4,7 +4,10 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.vfs.VirtualFile
 
 object Notifications {
@@ -33,6 +36,42 @@ object Notifications {
             .getNotificationGroup(GROUP_ID)
             .createNotification(title, message, NotificationType.ERROR)
             .notify(project)
+    }
+
+    fun errorWithLogs(project: Project, title: String, message: String) {
+        RuntimeLogStore.append("ERROR | $title | $message")
+        val notification = NotificationGroupManager.getInstance()
+            .getNotificationGroup(GROUP_ID)
+            .createNotification(title, message, NotificationType.ERROR)
+        notification.addAction(
+            NotificationAction.createSimple("View Logs") {
+                ToolWindowManager.getInstance(project).getToolWindow("AI Context Box")?.show()
+            }
+        )
+        notification.notify(project)
+    }
+
+    fun errorWithSettings(project: Project, title: String, message: String, settingsClass: Class<out Configurable>? = null) {
+        RuntimeLogStore.append("ERROR | $title | $message")
+        val notification = NotificationGroupManager.getInstance()
+            .getNotificationGroup(GROUP_ID)
+            .createNotification(title, message, NotificationType.ERROR)
+        notification.addAction(
+            NotificationAction.createSimple("Open Settings") {
+                val cls = settingsClass
+                if (cls != null) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, cls)
+                } else {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "AI Test Assistant")
+                }
+            }
+        )
+        notification.addAction(
+            NotificationAction.createSimple("View Logs") {
+                ToolWindowManager.getInstance(project).getToolWindow("AI Context Box")?.show()
+            }
+        )
+        notification.notify(project)
     }
 
     fun notifyFileGenerated(project: Project, title: String, message: String, file: VirtualFile) {
